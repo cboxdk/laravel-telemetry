@@ -46,6 +46,20 @@ Request spans carry `enduser.id` (the authenticated user's id — never
 name or email) so traces are filterable per user in TraceQL:
 `{ span.enduser.id = "42" }`. Disable with `instrument.user`.
 
+## Resource attribution
+
+Request and worker-job spans carry `php.memory.peak_bytes` and
+`php.cpu.time_ms` — the peak memory and CPU time of THAT unit of work
+(the process-global peak counter is reset per request/job, so long-lived
+workers report honestly). Matching histograms
+(`http.server.memory.peak`, `http.server.cpu.time`, `queue.job.*`) give
+p95 memory/CPU per route, per job — and per custom label dimension.
+Disable with `instrument.resources`.
+
+```traceql
+{ kind = server && span.php.memory.peak_bytes > 134217728 }  # requests over 128 MB
+```
+
 ## Custom dimensions (context)
 
 Nightwatch-style facets — set once, applied everywhere:

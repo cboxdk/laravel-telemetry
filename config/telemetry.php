@@ -206,6 +206,11 @@ return [
         // Tag request spans with the authenticated user's id (enduser.id)
         // for per-user trace filtering. Id only — never name/email.
         'user' => env('TELEMETRY_INSTRUMENT_USER', true),
+
+        // Peak memory + CPU time per request and per queue job — span
+        // attributes (php.memory.peak_bytes, php.cpu.time_ms) and
+        // histograms (http.server.memory.peak / cpu.time, queue.job.*).
+        'resources' => env('TELEMETRY_INSTRUMENT_RESOURCES', true),
     ],
 
     /*

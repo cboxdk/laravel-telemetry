@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http\Middleware;
 
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -24,6 +25,11 @@ use Symfony\Component\HttpFoundation\Response;
 final class TraceRequest
 {
     private const SPAN_KEY = 'cbox.telemetry.span';
+
+    private const USAGE_KEY = 'cbox.telemetry.usage';
+
+    /** Memory-peak buckets: 4 MB … 1 GB. */
+    private const MEMORY_BUCKETS = [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824];
 
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
@@ -52,6 +58,10 @@ final class TraceRequest
             );
 
             $request->attributes->set(self::SPAN_KEY, $span);
+
+            if (config('telemetry.instrument.resources', true)) {
+                $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
+            }
         });
 
         return $next($request);
@@ -86,18 +96,42 @@ final class TraceRequest
                 $span->setStatus(SpanStatus::Ok);
             }
 
+            $labels = [
+                // App-defined bounded dimensions (plan, team, …) via
+                // Telemetry::labelRequestsUsing(); core labels win.
+                ...$this->telemetry->resolveRequestLabels($request),
+                'http.request.method' => $request->method(),
+                'http.route' => $route,
+                'http.response.status_code' => (string) $response->getStatusCode(),
+            ];
+
+            // Peak memory and CPU delta for THIS request — Nightwatch-style
+            // resource attribution, per route and per custom dimension.
+            $usage = $request->attributes->get(self::USAGE_KEY);
+            $measured = $usage instanceof ResourceUsage ? $usage->measure() : null;
+
+            if ($measured !== null) {
+                $span->setAttributes([
+                    'php.memory.peak_bytes' => $measured['memoryPeakBytes'],
+                    'php.cpu.time_ms' => $measured['cpuTimeMs'],
+                ]);
+            }
+
             $span->end();
 
             $this->telemetry
                 ->histogram('http.server.request.duration', description: 'HTTP server request duration', unit: 'ms')
-                ->record($span->durationMs(), [
-                    // App-defined bounded dimensions (plan, team, …) via
-                    // Telemetry::labelRequestsUsing(); core labels win.
-                    ...$this->telemetry->resolveRequestLabels($request),
-                    'http.request.method' => $request->method(),
-                    'http.route' => $route,
-                    'http.response.status_code' => (string) $response->getStatusCode(),
-                ]);
+                ->record($span->durationMs(), $labels);
+
+            if ($measured !== null) {
+                $this->telemetry
+                    ->histogram('http.server.memory.peak', buckets: self::MEMORY_BUCKETS, description: 'Peak memory per request', unit: 'By')
+                    ->record((float) $measured['memoryPeakBytes'], $labels);
+
+                $this->telemetry
+                    ->histogram('http.server.cpu.time', description: 'CPU time per request', unit: 'ms')
+                    ->record($measured['cpuTimeMs'], $labels);
+            }
         });
 
         $this->telemetry->flush();

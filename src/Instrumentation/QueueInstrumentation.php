@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -34,6 +35,9 @@ final class QueueInstrumentation
 {
     /** @var list<Span> */
     private array $jobSpans = [];
+
+    /** @var array<int, ResourceUsage> keyed by span object id */
+    private array $jobUsage = [];
 
     public function __construct(private readonly Container $container) {}
 
@@ -115,11 +119,19 @@ final class QueueInstrumentation
                 $attributes['messaging.origin.name'] = $root->name;
             }
 
-            $this->jobSpans[] = $this->telemetry()->tracer()->startSpan(
+            $span = $this->telemetry()->tracer()->startSpan(
                 $event->job->resolveName().' process',
                 SpanKind::Consumer,
                 $attributes,
             );
+
+            $this->jobSpans[] = $span;
+
+            // Resource capture per job — skipped for sync jobs, which run
+            // inside a request that is already being measured.
+            if ($event->connectionName !== 'sync' && config('telemetry.instrument.resources', true)) {
+                $this->jobUsage[spl_object_id($span)] = ResourceUsage::start();
+            }
         });
     }
 
@@ -173,6 +185,26 @@ final class QueueInstrumentation
             if ($span = array_pop($this->jobSpans)) {
                 if ($span->status() === SpanStatus::Unset) {
                     $span->setStatus($outcome === 'processed' ? SpanStatus::Ok : SpanStatus::Error);
+                }
+
+                $usage = $this->jobUsage[spl_object_id($span)] ?? null;
+                unset($this->jobUsage[spl_object_id($span)]);
+
+                if ($usage !== null) {
+                    $measured = $usage->measure();
+
+                    $span->setAttributes([
+                        'php.memory.peak_bytes' => $measured['memoryPeakBytes'],
+                        'php.cpu.time_ms' => $measured['cpuTimeMs'],
+                    ]);
+
+                    $this->telemetry()
+                        ->histogram('queue.job.memory.peak', buckets: [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824], description: 'Peak memory per job', unit: 'By')
+                        ->record((float) $measured['memoryPeakBytes'], $labels);
+
+                    $this->telemetry()
+                        ->histogram('queue.job.cpu.time', description: 'CPU time per job', unit: 'ms')
+                        ->record($measured['cpuTimeMs'], $labels);
                 }
 
                 $span->end();

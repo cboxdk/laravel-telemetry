@@ -15,6 +15,13 @@ Initial release.
 
 ### Observability UX
 
+- Per-request and per-job resource attribution: `php.memory.peak_bytes`
+  and `php.cpu.time_ms` span attributes plus `http.server.memory.peak`,
+  `http.server.cpu.time`, `queue.job.memory.peak` and
+  `queue.job.cpu.time` histograms (getrusage +
+  memory_reset_peak_usage — dependency-free, worker-safe). Opt out via
+  `instrument.resources`.
+
 - `Telemetry::context([...])`: custom dimensions (team, tenant, plan)
   merged into every span, event and log record — inherited by dispatched
   jobs along with `messaging.origin.name` (the dispatch origin).
