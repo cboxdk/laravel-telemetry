@@ -58,3 +58,26 @@ it('exposes runtime and framework versions on the resource', function () {
         ->and($resource['process.runtime.version'])->toBe(PHP_VERSION)
         ->and($resource['laravel.version'])->not->toBeEmpty();
 });
+
+it('counts policy method calls the same as gate closures', function () {
+    $policy = new class
+    {
+        public function update($user, $model): bool
+        {
+            return false;
+        }
+    };
+
+    Gate::policy(stdClass::class, $policy::class);
+    app()->instance($policy::class, $policy);
+
+    Telemetry::span('request-ish', function () {
+        Gate::forUser(new GenericUser(['id' => 1]))->allows('update', new stdClass);
+    });
+
+    Telemetry::flush();
+
+    $samples = collect(Telemetry::collect())->keyBy(fn ($f) => $f->name())['authorization.checks']->samples;
+
+    expect(collect($samples)->firstWhere(fn ($s) => $s->labels['ability'] === 'update' && $s->labels['result'] === 'denied'))->not->toBeNull();
+});

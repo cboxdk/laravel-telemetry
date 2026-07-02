@@ -32,6 +32,13 @@ final class TelemetryLogHandler extends AbstractProcessingHandler
     protected function write(LogRecord $record): void
     {
         FailSafe::guard(function () use ($record) {
+            // Point LOG_DEPRECATIONS_CHANNEL=telemetry (or include the
+            // telemetry channel in its stack) and deprecations become
+            // countable — the pre-upgrade checklist as a metric.
+            if ($record->channel === 'deprecations') {
+                $this->telemetry->counter('php.deprecations', 'Deprecation notices logged')->inc();
+            }
+
             $span = $this->telemetry->currentSpan();
 
             $this->telemetry->recordEvent(new TelemetryEvent(

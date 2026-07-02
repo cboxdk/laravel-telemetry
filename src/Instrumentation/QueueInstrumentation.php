@@ -16,6 +16,8 @@ use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobReleasedAfterException;
+use Illuminate\Queue\Events\JobTimedOut;
+use Illuminate\Queue\Events\QueueBusy;
 use Illuminate\Queue\QueueManager;
 
 /**
@@ -79,6 +81,22 @@ final class QueueInstrumentation
             $events->listen(JobProcessed::class, $this->jobProcessed(...));
             $events->listen(JobReleasedAfterException::class, $this->jobReleased(...));
             $events->listen(JobFailed::class, $this->jobFailed(...));
+
+            // Timeouts kill the attempt without a JobFailed on this path.
+            if (class_exists(JobTimedOut::class)) {
+                $events->listen(JobTimedOut::class, function ($event) {
+                    FailSafe::guard(fn () => $this->telemetry()
+                        ->counter('queue.jobs.timed_out', 'Jobs killed by their timeout')
+                        ->inc(1, ['job.name' => $event->job->resolveName(), 'queue' => $event->job->getQueue() ?? 'default']));
+                });
+            }
+
+            // `artisan queue:monitor` fires this above its size threshold.
+            $events->listen(QueueBusy::class, function ($event) {
+                FailSafe::guard(fn () => $this->telemetry()
+                    ->gauge('queue.size', description: 'Queue depth reported by queue:monitor', unit: '{jobs}')
+                    ->set((float) $event->size, ['connection' => $event->connection, 'queue' => $event->queue]));
+            });
         }
     }
 

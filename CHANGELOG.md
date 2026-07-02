@@ -22,6 +22,17 @@ Initial release.
 
 ### Observability UX
 
+- Broader core-event coverage: authentication lifecycle
+  (`auth.events{event,guard}` — login/logout/failed/lockout/…, the
+  credential-attack signal), DB transaction spans
+  (`db.transaction`, nested via savepoints, + `db.transactions.rolled_back`),
+  Eloquent (`model.hydrations` N+1 tally, `models.events{model,event}`,
+  `models.pruned`), job batches (`bus.batches{event,name}`), Redis
+  command spans (`instrument.redis`, off by default — key only, never
+  values, telemetry's own connections auto-ignored), notification
+  failures (`notifications.failed`), cache flushes, queue timeouts
+  (`queue.jobs.timed_out`) and depth (`queue.size` from queue:monitor),
+  and PHP deprecations (`php.deprecations`, via the log channel).
 - Deploys are first-class: `service.deployment` auto-detects the git
   sha from `.git/HEAD` when unset (no exec), `telemetry:deploy` emits
   an `app.deployment` marker event from the deploy pipeline, and every

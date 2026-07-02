@@ -143,7 +143,13 @@ with the key `log.message`.
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
-| `instrument.gates` | `TELEMETRY_INSTRUMENT_GATES` | `true` — `authorization.checks{ability,result}` counter + `gate.check.count`/`gate.denied.count` root-span tallies |
+| `instrument.gates` | `TELEMETRY_INSTRUMENT_GATES` | `true` — `authorization.checks{ability,result}` counter (gates AND policies) + `gate.check.count`/`gate.denied.count` root-span tallies |
+| `instrument.auth` | `TELEMETRY_INSTRUMENT_AUTH` | `true` — `auth.events{event,guard}` (login/logout/failed/lockout/password_reset/registered/verified) |
+| `instrument.transactions` | `TELEMETRY_INSTRUMENT_TRANSACTIONS` | `true` — DB transaction spans (nested via savepoints) + `db.transactions.rolled_back` |
+| `instrument.models` | `TELEMETRY_INSTRUMENT_MODELS` | `true` — `model.hydrations` root tally (N+1 smell) + `models.events{model,event}` writes + `models.pruned` |
+| `instrument.batches` | `TELEMETRY_INSTRUMENT_BATCHES` | `true` — `bus.batches{event,name}` job-batch lifecycle |
+| `instrument.redis` | `TELEMETRY_INSTRUMENT_REDIS` | `false` — Redis command spans (key only, never values) + `redis.commands` counter; telemetry's own connections auto-ignored |
+| `instrument.redis_ignore_connections` | — | `null` → auto (metric-store + spool connections); set a list to override |
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` + `enduser.type` (model) + `enduser.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |

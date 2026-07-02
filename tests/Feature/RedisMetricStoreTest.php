@@ -2,11 +2,15 @@
 
 declare(strict_types=1);
 
+use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
+use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Contracts\Redis\Factory;
+use Illuminate\Support\Facades\Redis;
 
 uses()->group('redis');
 
@@ -127,3 +131,29 @@ it('aggregates correctly through the write buffer', function () {
         ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([10, 40, 0])
         ->and($families['req.duration']->samples[0]->sum)->toBe(1275.0);
 });
+
+it('records redis command spans but never for the telemetry connections', function () {
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    (new RedisInstrumentation(app()))
+        ->register(app('events'), ignoreConnections: ['telemetry']);
+
+    Telemetry::span('request-ish', function () {
+        Redis::connection('default')->set('telemetry:test:key', '1');
+        Redis::connection('default')->del('telemetry:test:key');
+    });
+
+    Telemetry::flush();
+
+    $spans = collect($collector->batches())->flatMap(fn ($batch) => $batch->spans)
+        ->filter(fn ($span) => str_starts_with($span->name, 'redis '))->values();
+
+    expect($spans->count())->toBeGreaterThanOrEqual(2)
+        ->and($spans->firstWhere('name', 'redis SET')->attributes()['db.redis.key'])->toBe('telemetry:test:key')
+        ->and($spans->firstWhere('name', 'redis SET')->isDetail())->toBeTrue();
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($f) => $f->name());
+
+    expect(collect($families['redis.commands']->samples)->pluck('labels.command'))->toContain('SET');
+})->group('redis');

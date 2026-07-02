@@ -11,6 +11,7 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Notifications\Events\NotificationFailed;
 use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Notifications\Events\NotificationSent;
 
@@ -35,6 +36,11 @@ final class NotificationInstrumentation
     {
         $events->listen(NotificationSending::class, $this->sending(...));
         $events->listen(NotificationSent::class, $this->sent(...));
+        $events->listen(NotificationFailed::class, function (NotificationFailed $event) {
+            FailSafe::guard(fn () => $this->telemetry()
+                ->counter('notifications.failed', 'Notifications that failed to send')
+                ->inc(1, ['channel' => $event->channel, 'notification' => class_basename($event->notification)]));
+        });
     }
 
     private function sending(NotificationSending $event): void

@@ -22,14 +22,19 @@ use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
+use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
+use Cbox\Telemetry\Instrumentation\BusInstrumentation;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
+use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
+use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
 use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
+use Cbox\Telemetry\Instrumentation\TransactionInstrumentation;
 use Cbox\Telemetry\Instrumentation\ViewInstrumentation;
 use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\Metrics\Registry;
@@ -500,6 +505,37 @@ class TelemetryServiceProvider extends ServiceProvider
         if ($config->get('telemetry.instrument.mail', true)) {
             $this->app->singleton(MailInstrumentation::class);
             $this->app->make(MailInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.auth', true)) {
+            (new AuthInstrumentation($this->app))->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.transactions', true)) {
+            $this->app->singleton(TransactionInstrumentation::class);
+            $this->app->make(TransactionInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.models', true)) {
+            (new ModelInstrumentation($this->app))->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.batches', true)) {
+            (new BusInstrumentation($this->app))->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.redis', false)) {
+            $ignored = $config->get('telemetry.instrument.redis_ignore_connections');
+
+            // Default: the package's own connections — self-instrumentation
+            // would loop (telemetry writes generating telemetry).
+            $ignored = is_array($ignored) ? array_values(array_filter($ignored, is_string(...))) : array_values(array_unique([
+                (string) $config->get('telemetry.stores.redis.connection', 'default'),
+                (string) $config->get('telemetry.otlp.spool.connection', 'default'),
+            ]));
+
+            $this->app->singleton(RedisInstrumentation::class);
+            $this->app->make(RedisInstrumentation::class)->register($events, $ignored);
         }
 
         if ($config->get('telemetry.instrument.gates', true)) {

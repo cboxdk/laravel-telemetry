@@ -311,6 +311,29 @@ return [
         // pathological requests.
         'cache_spans' => env('TELEMETRY_INSTRUMENT_CACHE_SPANS', false),
 
+        // Authentication lifecycle: auth.events{event, guard} counters —
+        // login/logout/failed/lockout/password_reset/registered/verified.
+        // A spike in `failed` is a credential attack in progress.
+        'auth' => env('TELEMETRY_INSTRUMENT_AUTH', true),
+
+        // Database transaction spans (BEGIN..COMMIT/ROLLBACK, nested via
+        // savepoints) + db.transactions.rolled_back counter.
+        'transactions' => env('TELEMETRY_INSTRUMENT_TRANSACTIONS', true),
+
+        // Eloquent: model.hydrations root-span tally (the N+1 smell) +
+        // models.events{model,event} write counters + models.pruned.
+        'models' => env('TELEMETRY_INSTRUMENT_MODELS', true),
+
+        // Job batch lifecycle counters: bus.batches{event, name}.
+        'batches' => env('TELEMETRY_INSTRUMENT_BATCHES', true),
+
+        // Redis command spans + redis.commands counter. Off by default —
+        // high volume. The telemetry store/spool connections are always
+        // ignored (self-instrumentation would loop); override the ignore
+        // list with redis_ignore_connections.
+        'redis' => env('TELEMETRY_INSTRUMENT_REDIS', false),
+        'redis_ignore_connections' => null,
+
         // Gate/policy checks: authorization.checks{ability, result}
         // counter + gate.check.count / gate.denied.count root-span
         // tallies. Ability names are code identifiers (bounded).

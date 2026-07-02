@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Instrumentation;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Illuminate\Cache\Events\CacheFlushed;
 use Illuminate\Cache\Events\CacheHit;
 use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Cache\Events\ForgettingKey;
@@ -73,6 +74,11 @@ final class CacheInstrumentation
         $events->listen(KeyForgotten::class, fn (KeyForgotten $event) => $this->complete('forget', $event->storeName, $event->key));
         $events->listen(KeyWriteFailed::class, fn (KeyWriteFailed $event) => $this->complete('write_failed', $event->storeName, $event->key));
         $events->listen(KeyForgetFailed::class, fn (KeyForgetFailed $event) => $this->complete('forget_failed', $event->storeName, $event->key));
+        $events->listen(CacheFlushed::class, function ($event) {
+            FailSafe::guard(fn () => $this->counters ? $this->telemetry()
+                ->counter('cache.operations', 'Cache operations by outcome')
+                ->inc(1, ['operation' => 'flush', 'store' => $event->storeName ?? 'default']) : null);
+        });
 
         if ($spans) {
             $events->listen(RetrievingKey::class, fn (RetrievingKey $event) => $this->begin($event->storeName, $event->key));
