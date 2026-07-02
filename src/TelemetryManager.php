@@ -82,6 +82,8 @@ class TelemetryManager
     /**
      * Without a callback: a push gauge (`->set(42)`).
      * With a callback: an observable gauge evaluated at scrape time.
+     *
+     * @return ($callback is null ? Gauge : ObservableGauge)
      */
     public function gauge(
         string $name,

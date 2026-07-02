@@ -57,6 +57,8 @@ final class Registry
     /**
      * Without a callback: a push gauge you set() at event time.
      * With a callback: an observable gauge evaluated at scrape time.
+     *
+     * @return ($callback is null ? Gauge : ObservableGauge)
      */
     public function gauge(
         string $name,
