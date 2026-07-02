@@ -52,6 +52,20 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
             unit: '1',
         );
 
+        $registry->gauge(
+            'system.filesystem.usage',
+            fn (): array => $this->filesystemUsage(),
+            description: 'Filesystem bytes by state',
+            unit: 'By',
+        );
+
+        $registry->gauge(
+            'system.network.io',
+            fn (): array => $this->networkIo(),
+            description: 'Cumulative network bytes by direction (use rate() in PromQL)',
+            unit: 'By',
+        );
+
         if ($this->cpuInterval > 0) {
             $registry->gauge(
                 'system.cpu.utilization',
@@ -60,6 +74,40 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
                 unit: '1',
             );
         }
+    }
+
+    /**
+     * @return list<array{0: float, 1: array<string, string>}>
+     */
+    private function filesystemUsage(): array
+    {
+        $storage = SystemMetrics::storage()->getValueOr(null);
+
+        if ($storage === null) {
+            return [];
+        }
+
+        return [
+            [(float) $storage->usedBytes(), ['state' => 'used']],
+            [(float) $storage->availableBytes(), ['state' => 'free']],
+        ];
+    }
+
+    /**
+     * @return list<array{0: float, 1: array<string, string>}>
+     */
+    private function networkIo(): array
+    {
+        $network = SystemMetrics::network()->getValueOr(null);
+
+        if ($network === null) {
+            return [];
+        }
+
+        return [
+            [(float) $network->totalBytesReceived(), ['direction' => 'receive']],
+            [(float) $network->totalBytesSent(), ['direction' => 'transmit']],
+        ];
     }
 
     /**

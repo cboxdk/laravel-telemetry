@@ -122,6 +122,18 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.exceptions` | `TELEMETRY_INSTRUMENT_EXCEPTIONS` | `true` — exceptions.reported counter incl. handled report()s |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 
+## Host & process monitor
+
+| Key | Env | Default |
+|---|---|---|
+| `monitor.interval` | `TELEMETRY_MONITOR_INTERVAL` | `15` s (daemon mode) |
+| `monitor.processes` | — | `[]` — name => pgrep pattern (e.g. `'reverb' => 'reverb:start'`) |
+
+`telemetry:monitor --once` from the scheduler (cron mode) or without
+`--once` under supervisor (daemon mode). Queue workers additionally
+self-report `worker.memory.{php,rss}_bytes{queue,pid}` after every job —
+no monitor required for worker leak tracking.
+
 ## Built-in providers
 
 | Key | Env | Default |

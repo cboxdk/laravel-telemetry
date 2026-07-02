@@ -75,6 +75,28 @@ final readonly class ResourceUsage
         ];
     }
 
+    /**
+     * The process' CURRENT resident set size — the number that grows
+     * job after job when a worker leaks. Null without
+     * cboxdk/system-metrics or when the platform source fails.
+     */
+    public static function currentRssBytes(): ?int
+    {
+        if (! class_exists(ProcessMetrics::class)) {
+            return null;
+        }
+
+        $pid = getmypid();
+
+        if ($pid === false) {
+            return null;
+        }
+
+        $snapshot = ProcessMetrics::snapshot($pid)->getValueOr(null);
+
+        return $snapshot?->resources->memoryRssBytes;
+    }
+
     private static function cpuNow(): float
     {
         if (! function_exists('getrusage')) {

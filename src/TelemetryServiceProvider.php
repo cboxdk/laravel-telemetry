@@ -8,6 +8,7 @@ use Cbox\SystemMetrics\SystemMetrics;
 use Cbox\Telemetry\Console\DashboardsCommand;
 use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
+use Cbox\Telemetry\Console\MonitorCommand;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exporters\NullExporter;
@@ -111,7 +112,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 __DIR__.'/../config/telemetry.php' => config_path('telemetry.php'),
             ], 'telemetry-config');
 
-            $this->commands([FlushCommand::class, DoctorCommand::class, DashboardsCommand::class]);
+            $this->commands([FlushCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
         }
 
         if (! $this->app->make('config')->get('telemetry.enabled')) {

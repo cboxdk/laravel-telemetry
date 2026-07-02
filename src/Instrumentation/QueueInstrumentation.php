@@ -240,6 +240,23 @@ final class QueueInstrumentation
         });
 
         if (! $sync) {
+            // Worker self-report: the process' CURRENT memory after each
+            // job. A line that climbs job after job IS the memory leak —
+            // no daemon required, the worker measures itself.
+            FailSafe::guard(function () use ($queue) {
+                $labels = ['queue' => $queue ?? 'default', 'pid' => (string) getmypid()];
+
+                $this->telemetry()
+                    ->gauge('worker.memory.php_bytes', description: 'Worker PHP allocator usage after each job', unit: 'By')
+                    ->set((float) memory_get_usage(true), $labels);
+
+                if (($rss = ResourceUsage::currentRssBytes()) !== null) {
+                    $this->telemetry()
+                        ->gauge('worker.memory.rss_bytes', description: 'Worker resident set size after each job', unit: 'By')
+                        ->set((float) $rss, $labels);
+                }
+            });
+
             $this->telemetry()->flush();
             $this->telemetry()->resetContext();
         }

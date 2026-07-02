@@ -41,6 +41,11 @@ observable-gauge callbacks. Keep callbacks cheap and bounded; the system
 provider's CPU sampling adds `cpu_interval` (default 100 ms) to each
 scrape — set `TELEMETRY_SYSTEM_CPU_INTERVAL=0` to skip it.
 
+Running `telemetry:monitor` (the node_exporter analog) moves host
+sampling off the scrape path entirely: it pushes the same gauges from a
+scheduler tick or a supervisor daemon, with CPU measured as a proper
+between-tick delta. Set `TELEMETRY_SYSTEM_METRICS=false` alongside it.
+
 ## Route caching
 
 Scrape routes are only registered while telemetry and Prometheus are

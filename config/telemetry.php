@@ -266,6 +266,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Host & Process Monitor
+    |--------------------------------------------------------------------------
+    |
+    | The optional node_exporter analog (`telemetry:monitor`). Cron mode:
+    | Schedule::command('telemetry:monitor --once')->everyMinute() — or a
+    | daemon under supervisor. Foreign long-running processes are found
+    | by pgrep pattern and sampled for aggregate RSS + count.
+    |
+    */
+
+    'monitor' => [
+        'interval' => env('TELEMETRY_MONITOR_INTERVAL', 15),
+
+        'processes' => [
+            // 'queue-workers' => 'queue:work',
+            // 'horizon' => 'horizon',
+            // 'reverb' => 'reverb:start',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Built-in Providers
     |--------------------------------------------------------------------------
     */

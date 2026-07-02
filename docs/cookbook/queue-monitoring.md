@@ -55,6 +55,37 @@ consumer span in Tempo hangs under the HTTP request that queued it:
 { name =~ ".*ProcessOrder.*" && duration > 5s }
 ```
 
+## Memory-leak tracking — no daemon required
+
+Workers self-report their memory after every job:
+
+```promql
+# a climbing line per worker process IS the leak
+worker_memory_rss_bytes{queue="default"}
+
+# alert: any worker above 512 MB
+max by (pid) (worker_memory_rss_bytes) > 536870912
+```
+
+For processes that never run app code between units of work (Reverb,
+Horizon master), the optional monitor samples them by pgrep pattern:
+
+```php
+// config/telemetry.php
+'monitor' => ['processes' => [
+    'reverb' => 'reverb:start',
+    'horizon' => 'horizon',
+]],
+```
+
+```php
+Schedule::command('telemetry:monitor --once')->everyMinute();  // cron mode
+// or: php artisan telemetry:monitor --interval=15  (daemon under supervisor)
+```
+
+→ `process_memory_rss{process="reverb"}` and `process_count{process=...}`,
+plus host CPU (proper between-tick delta), memory, load, disk and network.
+
 ## Alerts
 
 ```promql

@@ -15,6 +15,12 @@ Initial release.
 
 ### Observability UX
 
+- Worker memory self-reporting: `worker.memory.{php,rss}_bytes{queue,pid}`
+  gauges set after every job — the memory-leak curve, no daemon needed.
+- `telemetry:monitor` (node_exporter analog, optional): host CPU (between-
+  tick delta), memory, load, disk, network + foreign processes (Reverb,
+  Horizon) by pgrep pattern — `--once` for cron mode or a supervisor
+  daemon. System provider gained filesystem + network observable gauges.
 - Cache timeline spans (`instrument.cache_spans`): every cache
   hit/miss/write/forget as a span with key, store and duration measured
   via Laravel's before/after cache events — the Nightwatch-style

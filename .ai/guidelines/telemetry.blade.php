@@ -48,6 +48,7 @@ Or inline: `Telemetry::contributes('my-domain', fn (\Cbox\Telemetry\Metrics\Regi
 
 ### Operations
 
+- Worker memory leaks: watch `worker_memory_rss_bytes{pid}` (self-reported after every job). For Reverb/Horizon add pgrep patterns to `telemetry.monitor.processes` and schedule `telemetry:monitor --once` every minute.
 - Verify any setup change with `php artisan telemetry:doctor` (store round trip, exporter reachability, config warnings).
 - Prometheus scrape endpoint: `GET /telemetry/metrics` (config `telemetry.prometheus`).
 - OTLP metrics need the scheduler: `Schedule::command('telemetry:flush')->everyMinute()->onOneServer();`

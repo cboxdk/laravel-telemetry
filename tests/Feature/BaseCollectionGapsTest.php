@@ -168,3 +168,42 @@ it('enriches user attribution through the opt-in resolver', function () {
     expect($span->attributes()['enduser.id'])->toBe('9')
         ->and($span->attributes()['enduser.name'])->toBe('Jared');
 });
+
+it('self-reports worker memory after each job for leak tracking', function () {
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\LeakyJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    app('queue');
+    app('events')->dispatch(new JobProcessing('redis', $job));
+    app('events')->dispatch(new JobProcessed('redis', $job));
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->toHaveKey('worker.memory.php_bytes');
+
+    $sample = $families['worker.memory.php_bytes']->samples[0];
+
+    expect($sample->value)->toBeGreaterThan(1_000_000)
+        ->and($sample->labels['queue'])->toBe('default')
+        ->and($sample->labels['pid'])->toBe((string) getmypid());
+});
+
+it('samples host and process metrics via telemetry:monitor --once', function () {
+    config()->set('telemetry.monitor.processes', ['php-tests' => 'php']);
+
+    $this->artisan('telemetry:monitor', ['--once' => true])->assertSuccessful();
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->toHaveKeys(['system.memory.usage', 'system.cpu.load_average', 'process.count'])
+        ->and($families['process.count']->samples[0]->labels['process'])->toBe('php-tests')
+        ->and($families['process.count']->samples[0]->value)->toBeGreaterThanOrEqual(1.0);
+
+    // Disk + network land when the platform source supports them.
+    if (isset($families['system.filesystem.usage'])) {
+        expect($families['system.filesystem.usage']->samples)->not->toBeEmpty();
+    }
+});
