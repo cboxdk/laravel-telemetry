@@ -20,6 +20,7 @@ use Cbox\Telemetry\Support\TelemetryBatch;
 use Cbox\Telemetry\Support\TraceParent;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanStatus;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Http\Request;
@@ -59,8 +60,13 @@ class TelemetryManager
         private readonly Tracer $tracer,
         private readonly array $resource = [],
         private readonly int $maxBufferedEvents = 5000,
+        private readonly bool $tailDetails = false,
+        private readonly float $slowRequestMs = 1000.0,
+        private readonly float $slowSpanMs = 100.0,
     ) {
-        $this->tracer->onBufferFull(fn () => $this->flush());
+        // A buffer-cap flush means the trace is pathological — keep every
+        // detail for it.
+        $this->tracer->onBufferFull(fn () => $this->flush(forceDetails: true));
     }
 
     public function enabled(): bool
@@ -362,7 +368,7 @@ class TelemetryManager
      * Flush buffered spans and events to every exporter that supports them.
      * Called from terminable middleware and after each queue job.
      */
-    public function flush(): void
+    public function flush(bool $forceDetails = false): void
     {
         // Buffered stores push their aggregated metric writes at the same
         // points spans flush — request terminate, after each queue job —
@@ -374,6 +380,11 @@ class TelemetryManager
         }
 
         $spans = $this->tracer->drain();
+
+        if (! $forceDetails) {
+            $spans = $this->applyTailDetailPolicy($spans);
+        }
+
         $events = $this->events;
         $this->events = [];
 
@@ -471,6 +482,44 @@ class TelemetryManager
     public function handleExceptionsUsing(?Closure $handler): void
     {
         FailSafe::handleExceptionsUsing($handler);
+    }
+
+    /**
+     * Tail detail retention: MANY details for traces that failed or were
+     * slow, a lean skeleton (+ the always-flowing aggregates) when all
+     * was well. Possible because the whole trace sits in memory until
+     * terminate.
+     *
+     * A trace keeps its detail spans (cache ops, queries) when it has an
+     * error span, any span at/over slow_request_ms, or a DETAIL span
+     * at/over slow_span_ms (a slow query makes its trace interesting).
+     *
+     * @param  list<Span>  $spans
+     * @return list<Span>
+     */
+    private function applyTailDetailPolicy(array $spans): array
+    {
+        if (! $this->tailDetails || $spans === []) {
+            return $spans;
+        }
+
+        /** @var array<string, bool> $interesting */
+        $interesting = [];
+
+        foreach ($spans as $span) {
+            if (
+                $span->status() === SpanStatus::Error
+                || $span->durationMs() >= $this->slowRequestMs
+                || ($span->isDetail() && $span->durationMs() >= $this->slowSpanMs)
+            ) {
+                $interesting[$span->traceId] = true;
+            }
+        }
+
+        return array_values(array_filter(
+            $spans,
+            fn (Span $span): bool => ! $span->isDetail() || ($interesting[$span->traceId] ?? false),
+        ));
     }
 
     private function bootProviders(): void

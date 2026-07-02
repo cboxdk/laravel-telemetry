@@ -91,6 +91,9 @@ class TelemetryServiceProvider extends ServiceProvider
                 tracer: $app->make(Tracer::class),
                 resource: $this->buildResource($app),
                 maxBufferedEvents: (int) $app->make('config')->get('telemetry.events.max_buffer', 5000),
+                tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
+                slowRequestMs: (float) $app->make('config')->get('telemetry.traces.details.slow_request_ms', 1000),
+                slowSpanMs: (float) $app->make('config')->get('telemetry.traces.details.slow_span_ms', 100),
             );
 
             foreach ($this->buildExporters($app) as $exporter) {

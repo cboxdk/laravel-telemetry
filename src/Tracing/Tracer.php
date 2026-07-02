@@ -201,7 +201,7 @@ final class Tracer
      *
      * @param  array<string, scalar|null>  $attributes
      */
-    public function recordSpan(string $name, float $durationMs, array $attributes = [], SpanKind $kind = SpanKind::Internal): Span
+    public function recordSpan(string $name, float $durationMs, array $attributes = [], SpanKind $kind = SpanKind::Internal, bool $detail = false): Span
     {
         $durationNano = (int) ($durationMs * 1_000_000);
         $start = (int) (microtime(true) * 1e9) - $durationNano;
@@ -223,6 +223,10 @@ final class Tracer
             onEnd: fn (Span $ended) => $this->finish($ended),
             startUnixNano: $start,
         );
+
+        if ($detail) {
+            $span->markDetail();
+        }
 
         $span->end($start + $durationNano);
 

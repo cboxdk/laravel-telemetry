@@ -157,6 +157,16 @@ return [
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 
+        // Tail detail retention: keep detail spans (cache ops, queries)
+        // only for traces with errors or slowness — MANY details when it
+        // hurts, a lean skeleton + aggregates when all is well. The
+        // decision is made at flush, when the whole trace is in memory.
+        'details' => [
+            'mode' => env('TELEMETRY_TRACE_DETAILS', 'always'), // always | tail
+            'slow_request_ms' => env('TELEMETRY_SLOW_REQUEST_MS', 1000),
+            'slow_span_ms' => env('TELEMETRY_SLOW_SPAN_MS', 100),
+        ],
+
         // Also trust the caller's SAMPLING decision. Disable on public
         // edges so clients cannot force sampling on (bypassing your
         // sample rate) or off (hiding from tracing); trace ids are still

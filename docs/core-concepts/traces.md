@@ -183,6 +183,28 @@ Route::post('/checkout', ...)->middleware(Sample::always());
 Route::get('/feed', ...)->middleware(Sample::rate(0.01));
 ```
 
+## Tail detail retention
+
+MANY details when it hurts, a lean skeleton when all is well:
+
+```dotenv
+TELEMETRY_TRACE_DETAILS=tail
+TELEMETRY_SLOW_REQUEST_MS=1000
+TELEMETRY_SLOW_SPAN_MS=100
+```
+
+In `tail` mode, detail spans (cache operations, queries) are kept only
+for traces that turned out interesting: an error span anywhere, a
+request over `slow_request_ms`, or a single detail span over
+`slow_span_ms` (one slow query keeps the WHOLE trace's details). Healthy
+fast traces ship the skeleton — root span with all its tallies
+(`db.query.count`, `cache.event.count`, resources) — while counters and
+histograms flow unconditionally.
+
+The decision happens at flush, when the entire trace is in memory —
+tail-based detail retention without a collector. Buffer-cap force
+flushes always keep details: a 5000-span request IS interesting.
+
 ## Bootstrap visibility
 
 When `LARAVEL_START` is defined (it is, in every standard `public/

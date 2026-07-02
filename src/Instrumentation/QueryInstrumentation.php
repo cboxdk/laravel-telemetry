@@ -68,6 +68,7 @@ final class QueryInstrumentation
                     'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
                 ],
                 SpanKind::Client,
+                detail: true,
             );
         });
     }

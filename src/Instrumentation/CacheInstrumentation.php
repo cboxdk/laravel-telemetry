@@ -135,6 +135,7 @@ final class CacheInstrumentation
                     'cache.operation' => $operation,
                 ],
                 SpanKind::Client,
+                detail: true,
             );
 
             $telemetry->tracer()->bumpStat('cache.event.count', 1);

@@ -15,6 +15,11 @@ Initial release.
 
 ### Observability UX
 
+- Tail detail retention (`traces.details.mode=tail`): cache/query detail
+  spans are kept only for traces with errors, slow requests or a slow
+  query — healthy fast traces ship a lean skeleton with tallies while
+  counters/histograms flow unconditionally. Decided at flush with the
+  whole trace in memory; buffer-cap flushes always keep details.
 - Worker memory self-reporting: `worker.memory.{php,rss}_bytes{queue,pid}`
   gauges set after every job — the memory-leak curve, no daemon needed.
 - `telemetry:monitor` (node_exporter analog, optional): host CPU (between-

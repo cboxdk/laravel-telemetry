@@ -35,6 +35,12 @@ final class Span
 
     private bool $ended = false;
 
+    /**
+     * Detail spans (cache ops, fast queries) are droppable at flush time
+     * when the trace is healthy and fast — tail detail retention.
+     */
+    private bool $detail = false;
+
     /** Per-span resource baseline (only when measuring is enabled). */
     private ?float $startCpuMs = null;
 
@@ -60,6 +66,18 @@ final class Span
         $this->attributes = $attributes;
         $this->startUnixNano = $startUnixNano ?? (int) (microtime(true) * 1e9);
         $this->startMonotonic = hrtime(true);
+    }
+
+    public function markDetail(): self
+    {
+        $this->detail = true;
+
+        return $this;
+    }
+
+    public function isDetail(): bool
+    {
+        return $this->detail;
     }
 
     /**

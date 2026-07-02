@@ -23,6 +23,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - Label values must be bounded: route patterns, status codes, queue names, plans. NEVER user ids, emails, URLs or UUIDs as label values — put those on span attributes or events instead.
 - Do not wrap telemetry calls in try/catch and do not check `Telemetry::enabled()` — recording never throws and no-ops when disabled.
 - HTTP requests, queue jobs (incl. dispatch counts + wait time), DB queries, scheduled tasks, mail, notifications, outgoing Http-client calls and reported exceptions are auto-instrumented; do not add manual spans/counters for those.
+- For high-traffic apps set TELEMETRY_TRACE_DETAILS=tail: full cache/query detail on failing/slow traces, lean skeleton otherwise. Enable instrument.cache_spans freely in this mode.
 - Cache keys must NEVER be metric labels; for per-key visibility enable `instrument.cache_spans` (keys on spans are safe).
 - Per-route sampling: `->middleware(Sample::never())` on health checks, `Sample::rate(0.01)` on noisy feeds (Cbox\Telemetry\Http\Middleware\Sample). Error spans always export regardless of sampling.
 - For outbound HTTP to services you own, use `Http::withTraceparent()->post(...)` so the trace continues across services. Do not add the header for third-party APIs.
