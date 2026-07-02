@@ -8,6 +8,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "30s",
+  "graphTooltip": 1,
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -113,15 +114,15 @@
       "tags": [
         "telemetry"
       ],
-      "title": "Telemetry",
-      "asDropdown": true,
+      "asDropdown": false,
       "includeVars": true,
-      "keepTime": true
+      "keepTime": true,
+      "title": ""
     }
   ],
   "panels": [
     {
-      "id": 35,
+      "id": 41,
       "type": "stat",
       "title": "Requests / min",
       "datasource": {
@@ -136,7 +137,7 @@
       },
       "targets": [
         {
-          "refId": "Q36",
+          "refId": "Q42",
           "expr": "sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -148,11 +149,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqpm",
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -167,11 +169,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 37,
+      "id": 43,
       "type": "stat",
       "title": "p50",
       "datasource": {
@@ -186,7 +190,7 @@
       },
       "targets": [
         {
-          "refId": "Q38",
+          "refId": "Q44",
           "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -198,11 +202,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -217,11 +222,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 39,
+      "id": 45,
       "type": "stat",
       "title": "p95",
       "datasource": {
@@ -236,7 +243,7 @@
       },
       "targets": [
         {
-          "refId": "Q40",
+          "refId": "Q46",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -248,12 +255,21 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 2000
               }
             ]
           }
@@ -267,11 +283,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 41,
+      "id": 47,
       "type": "stat",
       "title": "p99",
       "datasource": {
@@ -286,7 +304,7 @@
       },
       "targets": [
         {
-          "refId": "Q42",
+          "refId": "Q48",
           "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -298,11 +316,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -317,11 +336,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 43,
+      "id": 49,
       "type": "stat",
       "title": "p95 memory",
       "datasource": {
@@ -336,7 +357,7 @@
       },
       "targets": [
         {
-          "refId": "Q44",
+          "refId": "Q50",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[10m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -348,11 +369,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -367,11 +389,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 45,
+      "id": 51,
       "type": "stat",
       "title": "p95 CPU",
       "datasource": {
@@ -386,7 +410,7 @@
       },
       "targets": [
         {
-          "refId": "Q46",
+          "refId": "Q52",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[10m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -398,11 +422,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -417,11 +442,26 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 48,
+      "id": 53,
+      "type": "row",
+      "title": "Traffic & latency",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "panels": []
+    },
+    {
+      "id": 55,
       "type": "timeseries",
       "title": "Rate by route",
       "datasource": {
@@ -432,11 +472,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "targets": [
         {
-          "refId": "Q47",
+          "refId": "Q54",
           "expr": "sum by (http_route) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])) * 60",
           "legendFormat": "{{http_route}}",
           "datasource": {
@@ -448,10 +488,16 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqpm",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
@@ -461,22 +507,19 @@
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 51,
+      "id": 58,
       "type": "timeseries",
-      "title": "Latency percentiles (filtered)",
+      "title": "Latency percentiles",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -485,11 +528,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 4
+        "y": 5
       },
       "targets": [
         {
-          "refId": "Q49",
+          "refId": "Q56",
           "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
@@ -498,7 +541,7 @@
           }
         },
         {
-          "refId": "Q50",
+          "refId": "Q57",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "datasource": {
@@ -510,33 +553,111 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
             }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 53,
+      "id": 59,
+      "type": "row",
+      "title": "Resources per route",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "panels": []
+    },
+    {
+      "id": 61,
       "type": "timeseries",
       "title": "p95 memory by route",
       "datasource": {
@@ -547,11 +668,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 14
       },
       "targets": [
         {
-          "refId": "Q52",
+          "refId": "Q60",
           "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
@@ -563,10 +684,16 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
@@ -576,22 +703,19 @@
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 55,
+      "id": 63,
       "type": "timeseries",
-      "title": "p95 CPU time by route",
+      "title": "p95 CPU by route",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -600,11 +724,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 14
       },
       "targets": [
         {
-          "refId": "Q54",
+          "refId": "Q62",
           "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
@@ -616,10 +740,16 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
@@ -629,20 +759,30 @@
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 56,
+      "id": 64,
+      "type": "row",
+      "title": "Traces & logs",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "id": 65,
       "type": "table",
       "title": "Request traces \u2014 click for the waterfall (per-span CPU/memory in attributes)",
       "datasource": {
@@ -653,7 +793,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 23
       },
       "targets": [
         {
@@ -670,13 +810,19 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 57,
+      "id": 66,
       "type": "table",
       "title": "Failing requests",
       "datasource": {
@@ -687,7 +833,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 32
       },
       "targets": [
         {
@@ -704,15 +850,21 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 58,
+      "id": 67,
       "type": "logs",
-      "title": "Correlated logs",
+      "title": "Correlated logs \u2014 trace_id links to Tempo",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -721,7 +873,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 41
       },
       "targets": [
         {
@@ -738,7 +890,8 @@
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending",
-        "dedupStrategy": "none"
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false
       },
       "fieldConfig": {
         "defaults": {},

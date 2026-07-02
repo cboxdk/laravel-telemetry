@@ -247,12 +247,12 @@ final class QueueInstrumentation
                 $labels = ['queue' => $queue ?? 'default', 'pid' => (string) getmypid()];
 
                 $this->telemetry()
-                    ->gauge('worker.memory.php_bytes', description: 'Worker PHP allocator usage after each job', unit: 'By')
+                    ->gauge('worker.memory.php', description: 'Worker PHP allocator usage after each job', unit: 'By')
                     ->set((float) memory_get_usage(true), $labels);
 
                 if (($rss = ResourceUsage::currentRssBytes()) !== null) {
                     $this->telemetry()
-                        ->gauge('worker.memory.rss_bytes', description: 'Worker resident set size after each job', unit: 'By')
+                        ->gauge('worker.memory.rss', description: 'Worker resident set size after each job', unit: 'By')
                         ->set((float) $rss, $labels);
                 }
             });

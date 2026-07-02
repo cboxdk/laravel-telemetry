@@ -1,6 +1,6 @@
 {
-  "uid": "cbox-tel-drilldown",
-  "title": "Telemetry / Drill-down",
+  "uid": "cbox-tel-users",
+  "title": "Telemetry / Users",
   "tags": [
     "telemetry",
     "cboxdk"
@@ -8,6 +8,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "30s",
+  "graphTooltip": 1,
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -46,17 +47,6 @@
         "options": []
       },
       {
-        "name": "minms",
-        "type": "textbox",
-        "label": "min duration (ms)",
-        "query": "10",
-        "current": {
-          "text": "10",
-          "value": "10"
-        },
-        "options": []
-      },
-      {
         "name": "minmb",
         "type": "textbox",
         "label": "min memory (MB)",
@@ -75,17 +65,17 @@
       "tags": [
         "telemetry"
       ],
-      "title": "Telemetry",
-      "asDropdown": true,
+      "asDropdown": false,
       "includeVars": true,
-      "keepTime": true
+      "keepTime": true,
+      "title": ""
     }
   ],
   "panels": [
     {
-      "id": 84,
+      "id": 198,
       "type": "table",
-      "title": "Requests for user $user (enduser.id)",
+      "title": "Requests for user $user",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -111,15 +101,21 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 85,
+      "id": 199,
       "type": "table",
-      "title": "Memory hogs \u2014 requests over $minmb MB (php.memory.peak_bytes)",
+      "title": "Errors hit by user $user",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -138,22 +134,28 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.php.memory.peak_bytes > $minmb000000}",
+          "query": "{resource.service.name=~\"$service\" && span.enduser.id=~\"$user\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 86,
+      "id": 200,
       "type": "table",
-      "title": "Slowest DB queries (> $minms ms) \u2014 span level",
+      "title": "Memory hogs (> $minmb MB)",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -172,116 +174,37 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=\"db.query\" && duration>${minms}ms} | select(span.db.query.text, span.db.namespace)",
-          "limit": 20,
-          "spss": 3,
-          "tableType": "spans"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 87,
-      "type": "table",
-      "title": "Outgoing calls (client spans)",
-      "datasource": {
-        "type": "tempo",
-        "uid": "tempo"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 27
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
-          },
-          "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=client && name!=\"db.query\"}",
-          "limit": 20,
-          "spss": 3,
-          "tableType": "spans"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {}
-    },
-    {
-      "id": 88,
-      "type": "table",
-      "title": "All error spans",
-      "datasource": {
-        "type": "tempo",
-        "uid": "tempo"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 36
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
-          },
-          "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && kind=server && span.php.memory.peak_bytes > $minmb000000}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 89,
-      "type": "logs",
-      "title": "Warnings & errors",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
+      "id": 201,
+      "type": "text",
+      "title": "Tip",
       "gridPos": {
-        "h": 9,
+        "h": 3,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 27
       },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "expr": "{service_name=~\"$service\"} | detected_level=~\"(warn|error).*\""
-        }
-      ],
       "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "enableLogDetails": true,
-        "sortOrder": "Descending",
-        "dedupStrategy": "none"
+        "mode": "markdown",
+        "content": "Request spans carry `enduser.id` (opt-out: `TELEMETRY_INSTRUMENT_USER=false`). Enrich with names via `Telemetry::resolveUserUsing()` \u2014 explicit PII opt-in."
       },
       "fieldConfig": {
         "defaults": {},

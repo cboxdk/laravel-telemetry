@@ -182,9 +182,9 @@ it('self-reports worker memory after each job for leak tracking', function () {
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKey('worker.memory.php_bytes');
+    expect($families)->toHaveKey('worker.memory.php');
 
-    $sample = $families['worker.memory.php_bytes']->samples[0];
+    $sample = $families['worker.memory.php']->samples[0];
 
     expect($sample->value)->toBeGreaterThan(1_000_000)
         ->and($sample->labels['queue'])->toBe('default')

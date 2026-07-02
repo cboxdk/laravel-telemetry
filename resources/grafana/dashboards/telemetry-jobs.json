@@ -1,6 +1,6 @@
 {
-  "uid": "cbox-tel-queue",
-  "title": "Telemetry / Queue & Schedule",
+  "uid": "cbox-tel-jobs",
+  "title": "Telemetry / Jobs",
   "tags": [
     "telemetry",
     "cboxdk"
@@ -8,6 +8,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "30s",
+  "graphTooltip": 1,
   "time": {
     "from": "now-1h",
     "to": "now"
@@ -82,17 +83,17 @@
       "tags": [
         "telemetry"
       ],
-      "title": "Telemetry",
-      "asDropdown": true,
+      "asDropdown": false,
       "includeVars": true,
-      "keepTime": true
+      "keepTime": true,
+      "title": ""
     }
   ],
   "panels": [
     {
-      "id": 59,
+      "id": 68,
       "type": "stat",
-      "title": "Processed / min",
+      "title": "Dispatched / min",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -105,8 +106,8 @@
       },
       "targets": [
         {
-          "refId": "Q60",
-          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
+          "refId": "Q69",
+          "expr": "sum(rate(queue_jobs_dispatched_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -117,11 +118,12 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -136,13 +138,15 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 61,
+      "id": 70,
       "type": "stat",
-      "title": "Released / min",
+      "title": "Processed / min",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -155,7 +159,60 @@
       },
       "targets": [
         {
-          "refId": "Q62",
+          "refId": "Q71",
+          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 72,
+      "type": "stat",
+      "title": "Released / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "Q73",
           "expr": "sum(rate(queue_jobs_released_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -167,6 +224,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -190,11 +248,13 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 63,
+      "id": 74,
       "type": "stat",
       "title": "Failed / min",
       "datasource": {
@@ -204,12 +264,12 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 8,
+        "x": 12,
         "y": 0
       },
       "targets": [
         {
-          "refId": "Q64",
+          "refId": "Q75",
           "expr": "sum(rate(queue_jobs_failed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -221,6 +281,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -243,64 +304,16 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "value",
-        "graphMode": "area"
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 65,
+      "id": 76,
       "type": "stat",
-      "title": "p95 job duration",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 0
-      },
-      "targets": [
-        {
-          "refId": "Q66",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])))",
-          "legendFormat": "__auto",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "value",
-        "graphMode": "area"
-      }
-    },
-    {
-      "id": 67,
-      "type": "stat",
-      "title": "p95 job memory",
+      "title": "p95 duration",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -313,8 +326,8 @@
       },
       "targets": [
         {
-          "refId": "Q68",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_memory_peak_bytes_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[10m])))",
+          "refId": "Q77",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -324,12 +337,13 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               }
             ]
@@ -344,13 +358,15 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
       }
     },
     {
-      "id": 69,
+      "id": 78,
       "type": "stat",
-      "title": "p95 job CPU",
+      "title": "p95 wait time",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -363,8 +379,8 @@
       },
       "targets": [
         {
-          "refId": "Q70",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_cpu_time_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[10m])))",
+          "refId": "Q79",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_wait_time_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -375,12 +391,17 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": null
+              },
+              {
+                "color": "orange",
+                "value": 30000
               }
             ]
           }
@@ -394,11 +415,27 @@
           ]
         },
         "colorMode": "value",
-        "graphMode": "area"
-      }
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "description": "Time from dispatch until the attempt started \u2014 queue lag."
     },
     {
-      "id": 74,
+      "id": 80,
+      "type": "row",
+      "title": "Throughput & latency",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "panels": []
+    },
+    {
+      "id": 84,
       "type": "timeseries",
       "title": "Outcomes by job",
       "datasource": {
@@ -409,11 +446,11 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "targets": [
         {
-          "refId": "Q71",
+          "refId": "Q81",
           "expr": "sum by (job_name) (rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "ok {{job_name}}",
           "datasource": {
@@ -422,7 +459,7 @@
           }
         },
         {
-          "refId": "Q72",
+          "refId": "Q82",
           "expr": "sum by (job_name) (rate(queue_jobs_released_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "retry {{job_name}}",
           "datasource": {
@@ -431,7 +468,7 @@
           }
         },
         {
-          "refId": "Q73",
+          "refId": "Q83",
           "expr": "sum by (job_name) (rate(queue_jobs_failed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "fail {{job_name}}",
           "datasource": {
@@ -443,33 +480,167 @@
       "fieldConfig": {
         "defaults": {
           "unit": "opm",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^ok .*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^retry .*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^fail .*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 86,
+      "type": "timeseries",
+      "title": "Queue wait time p95 (dispatch \u2192 start)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "Q85",
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(queue_job_wait_time_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])))",
+          "legendFormat": "{{queue}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 30000
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 76,
+      "id": 87,
+      "type": "row",
+      "title": "Resources & leaks",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "panels": []
+    },
+    {
+      "id": 89,
       "type": "timeseries",
       "title": "p95 duration by job",
       "datasource": {
@@ -479,12 +650,12 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 4
+        "x": 0,
+        "y": 14
       },
       "targets": [
         {
-          "refId": "Q75",
+          "refId": "Q88",
           "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])))",
           "legendFormat": "{{job_name}}",
           "datasource": {
@@ -496,10 +667,16 @@
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
@@ -509,22 +686,19 @@
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 78,
+      "id": 92,
       "type": "timeseries",
-      "title": "p95 memory by job",
+      "title": "Worker memory \u2014 a climbing line IS the leak",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -532,14 +706,23 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 12
+        "x": 12,
+        "y": 14
       },
       "targets": [
         {
-          "refId": "Q77",
-          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_memory_peak_bytes_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])))",
-          "legendFormat": "{{job_name}}",
+          "refId": "Q90",
+          "expr": "worker_memory_rss_bytes{service_name=~\"$service\"}",
+          "legendFormat": "rss pid {{pid}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "Q91",
+          "expr": "worker_memory_php_bytes{service_name=~\"$service\"}",
+          "legendFormat": "php pid {{pid}}",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -549,10 +732,16 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
+          "min": 0,
           "custom": {
             "drawStyle": "line",
+            "lineInterpolation": "smooth",
             "lineWidth": 2,
-            "fillOpacity": 12,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
             "stacking": {
               "mode": "none"
             }
@@ -562,75 +751,33 @@
       },
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
+          "displayMode": "list",
+          "placement": "bottom"
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
-      }
+      },
+      "description": "Workers self-report after every job. One line per worker process."
     },
     {
-      "id": 80,
-      "type": "timeseries",
-      "title": "Scheduled task p95 duration",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "id": 93,
+      "type": "row",
+      "title": "Traces",
+      "collapsed": false,
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 12
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
       },
-      "targets": [
-        {
-          "refId": "Q79",
-          "expr": "histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
-          "legendFormat": "{{task}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "mean",
-            "max"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
+      "panels": []
     },
     {
-      "id": 81,
+      "id": 94,
       "type": "table",
-      "title": "Job runs (consumer spans) \u2014 origin request in messaging.origin.name",
+      "title": "Job runs \u2014 origin request in messaging.origin.name, queue lag in wait_time_ms",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -639,7 +786,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 23
       },
       "targets": [
         {
@@ -649,22 +796,28 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=consumer}",
+          "query": "{resource.service.name=~\"$service\" && kind=consumer} | select(span.messaging.origin.name, span.messaging.wait_time_ms)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
+      "options": {
+        "cellHeight": "sm"
+      }
     },
     {
-      "id": 82,
+      "id": 95,
       "type": "table",
-      "title": "Failed job attempts",
+      "title": "Failed attempts",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -673,7 +826,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 32
       },
       "targets": [
         {
@@ -690,45 +843,15 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
         "overrides": []
       },
-      "options": {}
-    },
-    {
-      "id": 83,
-      "type": "logs",
-      "title": "Worker logs",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 38
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "expr": "{service_name=~\"$service\"} |~ \"(?i)(job|queue|schedule)\""
-        }
-      ],
       "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "enableLogDetails": true,
-        "sortOrder": "Descending",
-        "dedupStrategy": "none"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+        "cellHeight": "sm"
       }
     }
   ],

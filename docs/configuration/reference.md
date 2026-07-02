@@ -134,7 +134,7 @@ everything and a `public` endpoint filtered to a prefix list:
 
 `telemetry:monitor --once` from the scheduler (cron mode) or without
 `--once` under supervisor (daemon mode). Queue workers additionally
-self-report `worker.memory.{php,rss}_bytes{queue,pid}` after every job —
+self-report `worker.memory.{php,rss}{queue,pid} (By)` after every job —
 no monitor required for worker leak tracking.
 
 ## Built-in providers

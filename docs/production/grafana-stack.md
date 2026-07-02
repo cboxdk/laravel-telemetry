@@ -66,12 +66,17 @@ Everything this package exports is built for Grafana's cross-linking:
 - **Metrics → traces**: dashboards share the `service.name` resource
   attribute across all three signals.
 
-## Bundled dashboards
+## Bundled dashboards — the Nightwatch-style suite
 
-The package ships four service-scoped dashboards — Overview, Requests
-(latency/memory/CPU percentiles per route, trace tables), Queue &
-Schedule (outcomes incl. retries, per-job resources) and Drill-down
-(per-user traces, memory hogs, slowest queries with SQL text):
+Thirteen service-scoped dashboards mirroring an APM sidebar, linked as
+top-bar tabs with shared time range and filters: **Overview** (Activity /
+Application / Drill-down sections, click-through tables), **Requests**,
+**Jobs** (incl. queue wait time and worker leak curves), **Commands**,
+**Scheduled Tasks**, **Exceptions**, **Queries** (slowest SQL, N+1
+suspects), **Cache** (hit ratio + key-level spans), **Outgoing
+Requests**, **Mail & Notifications**, **System**, **Users** and **Logs**.
+Semantic colors throughout (green=ok, orange=retry/4xx, red=fail/5xx),
+drill-down field links between dashboards, shared crosshair:
 
 ```bash
 # straight into Grafana:
@@ -83,7 +88,12 @@ php artisan telemetry:dashboards --export=deploy/grafana/dashboards
 
 Every panel filters on the `$service` variable, so one import serves all
 apps shipping to the same stack. Datasource UIDs follow the
-grafana/otel-lgtm convention (`prometheus`/`tempo`/`loki`).
+grafana/otel-lgtm convention (`prometheus`/`tempo`/`loki`); regenerate
+after edits with `python3 resources/grafana/generate.py`.
+
+Note: Grafana v13.0's anonymous mode currently fails to lazy-load panel
+plugins (blank panels) — log in, or pin an older image, when using
+anonymous access.
 
 ## Query starters
 

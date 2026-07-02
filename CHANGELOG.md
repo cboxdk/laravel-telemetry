@@ -20,7 +20,7 @@ Initial release.
   query — healthy fast traces ship a lean skeleton with tallies while
   counters/histograms flow unconditionally. Decided at flush with the
   whole trace in memory; buffer-cap flushes always keep details.
-- Worker memory self-reporting: `worker.memory.{php,rss}_bytes{queue,pid}`
+- Worker memory self-reporting: `worker.memory.{php,rss}{queue,pid}`
   gauges set after every job — the memory-leak curve, no daemon needed.
 - `telemetry:monitor` (node_exporter analog, optional): host CPU (between-
   tick delta), memory, load, disk, network + foreign processes (Reverb,
@@ -61,9 +61,13 @@ Initial release.
 - Per-span resource attribution: every sampled span carries its own
   `php.cpu.time_ms` and `php.memory.delta_bytes`, so trace waterfalls
   show where CPU/memory went (backdated query spans excluded).
-- Bundled Grafana dashboards (Overview, Requests, Queue & Schedule,
-  Drill-down) — service-scoped, imported with `telemetry:dashboards`
-  or exported for file provisioning.
+- Bundled Grafana dashboard suite: thirteen service-scoped dashboards
+  mirroring an APM sidebar (Overview, Requests, Jobs, Commands,
+  Scheduled Tasks, Exceptions, Queries, Cache, Outgoing, Mail &
+  Notifications, System, Users, Logs) — linked as top-bar tabs with
+  shared time/filters, semantic colors, drill-down field links, worker
+  leak curves and queue wait-time panels. `telemetry:dashboards`
+  imports or exports them.
 
 - Per-request/job/task resource attribution: `php.memory.peak_bytes` and
   `php.cpu.time_ms` span attributes plus memory/CPU histograms
