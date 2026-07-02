@@ -35,6 +35,11 @@ final class Span
 
     private bool $ended = false;
 
+    /** Per-span resource baseline (only when measuring is enabled). */
+    private ?float $startCpuMs = null;
+
+    private ?int $startMemoryBytes = null;
+
     /**
      * @param  array<string, scalar|null>  $attributes
      * @param  Closure(Span): void  $onEnd
@@ -134,6 +139,17 @@ final class Span
         return $this;
     }
 
+    /**
+     * Capture a CPU/memory baseline so end() can attribute this span's
+     * own resource cost. Called by the tracer for sampled spans when
+     * resource instrumentation is on.
+     */
+    public function measureResources(): void
+    {
+        $this->startCpuMs = self::cpuNowMs();
+        $this->startMemoryBytes = memory_get_usage(true);
+    }
+
     public function end(?int $endUnixNano = null): void
     {
         if ($this->ended) {
@@ -143,7 +159,36 @@ final class Span
         $this->ended = true;
         $this->endUnixNano = $endUnixNano ?? $this->startUnixNano + (hrtime(true) - $this->startMonotonic);
 
+        if ($this->startCpuMs !== null) {
+            // ??= — a unit-of-work measurement (request/job/task) on the
+            // root span always wins over the span's own numbers.
+            $this->attributes['php.cpu.time_ms'] ??= round(max(0.0, self::cpuNowMs() - $this->startCpuMs), 3);
+        }
+
+        if ($this->startMemoryBytes !== null) {
+            // Allocation delta (may be negative when memory is freed) —
+            // honest per-span attribution; a true peak only exists per
+            // unit of work.
+            $this->attributes['php.memory.delta_bytes'] ??= memory_get_usage(true) - $this->startMemoryBytes;
+        }
+
         ($this->onEnd)($this);
+    }
+
+    private static function cpuNowMs(): float
+    {
+        if (! function_exists('getrusage')) {
+            return 0.0;
+        }
+
+        $usage = getrusage();
+
+        if ($usage === false) {
+            return 0.0;
+        }
+
+        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec']) * 1000.0
+            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) / 1000.0;
     }
 
     public function hasEnded(): bool

@@ -36,10 +36,21 @@ final class Tracer
     /** @var array<string, scalar|null> ambient dimensions merged into every finished span */
     private array $contextAttributes = [];
 
+    private bool $measureSpanResources = false;
+
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
     ) {}
+
+    /**
+     * Give every sampled span its own CPU-time and memory-delta
+     * attributes (a getrusage + memory_get_usage pair per span).
+     */
+    public function measureSpanResources(bool $enabled = true): void
+    {
+        $this->measureSpanResources = $enabled;
+    }
 
     /**
      * Add ambient context dimensions (team, tenant, plan, …). They merge
@@ -107,6 +118,10 @@ final class Tracer
             attributes: $attributes,
             onEnd: fn (Span $span) => $this->finish($span),
         );
+
+        if ($this->measureSpanResources && $span->sampled) {
+            $span->measureResources();
+        }
 
         $this->stack[] = $span;
 

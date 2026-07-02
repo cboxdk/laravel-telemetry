@@ -15,6 +15,13 @@ Initial release.
 
 ### Observability UX
 
+- Per-span resource attribution: every sampled span carries its own
+  `php.cpu.time_ms` and `php.memory.delta_bytes`, so trace waterfalls
+  show where CPU/memory went (backdated query spans excluded).
+- Bundled Grafana dashboards (Overview, Requests, Queue & Schedule,
+  Drill-down) — service-scoped, imported with `telemetry:dashboards`
+  or exported for file provisioning.
+
 - Per-request/job/task resource attribution: `php.memory.peak_bytes` and
   `php.cpu.time_ms` span attributes plus memory/CPU histograms
   (getrusage + memory_reset_peak_usage — worker-safe). With

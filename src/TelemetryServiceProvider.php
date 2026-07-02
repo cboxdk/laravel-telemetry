@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry;
 
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Console\DashboardsCommand;
 use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
 use Cbox\Telemetry\Contracts\Exporter;
@@ -62,10 +63,16 @@ class TelemetryServiceProvider extends ServiceProvider
             $config = $app->make('config');
             $enabled = (bool) $config->get('telemetry.enabled');
 
-            return new Tracer(
+            $tracer = new Tracer(
                 sampleRate: $enabled ? (float) $config->get('telemetry.traces.sample_rate', 1.0) : 0.0,
                 maxBuffer: (int) $config->get('telemetry.traces.max_buffer', 5000),
             );
+
+            if ($enabled && $config->get('telemetry.instrument.resources', true)) {
+                $tracer->measureSpanResources();
+            }
+
+            return $tracer;
         });
 
         $this->app->singleton(TelemetryManager::class, function (Application $app) {
@@ -96,7 +103,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 __DIR__.'/../config/telemetry.php' => config_path('telemetry.php'),
             ], 'telemetry-config');
 
-            $this->commands([FlushCommand::class, DoctorCommand::class]);
+            $this->commands([FlushCommand::class, DoctorCommand::class, DashboardsCommand::class]);
         }
 
         if (! $this->app->make('config')->get('telemetry.enabled')) {

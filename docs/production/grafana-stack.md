@@ -66,6 +66,25 @@ Everything this package exports is built for Grafana's cross-linking:
 - **Metrics → traces**: dashboards share the `service.name` resource
   attribute across all three signals.
 
+## Bundled dashboards
+
+The package ships four service-scoped dashboards — Overview, Requests
+(latency/memory/CPU percentiles per route, trace tables), Queue &
+Schedule (outcomes incl. retries, per-job resources) and Drill-down
+(per-user traces, memory hogs, slowest queries with SQL text):
+
+```bash
+# straight into Grafana:
+php artisan telemetry:dashboards --grafana=https://grafana.example.com --token=$TOKEN
+
+# or export for file provisioning:
+php artisan telemetry:dashboards --export=deploy/grafana/dashboards
+```
+
+Every panel filters on the `$service` variable, so one import serves all
+apps shipping to the same stack. Datasource UIDs follow the
+grafana/otel-lgtm convention (`prometheus`/`tempo`/`loki`).
+
 ## Query starters
 
 ```promql

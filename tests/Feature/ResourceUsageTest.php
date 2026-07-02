@@ -115,3 +115,37 @@ it('captures real process RSS and cpu utilization via cboxdk/system-metrics', fu
     expect($span->attributes()['process.memory.rss_peak_bytes'])->toBeGreaterThan(1_000_000)
         ->and($span->attributes())->toHaveKey('process.cpu.utilization');
 });
+
+it('attributes cpu time and memory delta to every sub-span', function () {
+    Telemetry::span('outer', function () {
+        Telemetry::span('inner.allocating', function () {
+            $waste = str_repeat('w', 3_000_000);
+
+            return strlen($waste);
+        });
+    });
+
+    Telemetry::flush();
+
+    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
+
+    $inner = $spans->firstWhere('name', 'inner.allocating');
+    $outer = $spans->firstWhere('name', 'outer');
+
+    expect($inner->attributes())->toHaveKeys(['php.cpu.time_ms', 'php.memory.delta_bytes'])
+        ->and($outer->attributes())->toHaveKeys(['php.cpu.time_ms', 'php.memory.delta_bytes']);
+});
+
+it('does not add resource attributes to backdated query spans', function () {
+    Telemetry::span('request-ish', function () {
+        Telemetry::tracer()->recordSpan('db.query', 5.0, ['db.system.name' => 'sqlite']);
+    });
+
+    Telemetry::flush();
+
+    $query = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans)
+        ->firstWhere('name', 'db.query');
+
+    expect($query->attributes())->not->toHaveKey('php.cpu.time_ms')
+        ->and($query->attributes())->not->toHaveKey('php.memory.delta_bytes');
+});

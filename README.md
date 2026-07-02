@@ -43,6 +43,10 @@ spec-stable HTTP JSON.
 - ✅ Provider contract so packages publish telemetry without coupling
 - ✅ Host CPU/memory/load via [`cboxdk/system-metrics`](https://github.com/cboxdk/system-metrics) — just install it
 - ✅ Zero cost when disabled; telemetry never throws into your app
+- ✅ Resource attribution: peak memory + CPU per request/job/task, per-span
+  CPU & memory deltas, real RSS via `cboxdk/system-metrics`
+- ✅ Ships four Grafana dashboards (`telemetry:dashboards`) — overview,
+  requests, queue & schedule, drill-down — service-scoped, LGTM-ready
 - ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
   guidelines, `llms.txt` and an agent guide — your AI assistant follows the
   conventions out of the box

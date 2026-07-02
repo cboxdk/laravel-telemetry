@@ -63,6 +63,16 @@ unit of work: `process.memory.rss_peak_bytes` (sees non-PHP allocations
 the PHP allocator misses) and `process.cpu.utilization` — the same
 mechanism `cboxdk/laravel-queue-metrics` uses for per-job metrics.
 
+**Every sub-span** also carries its own `php.cpu.time_ms` and
+`php.memory.delta_bytes` (allocation delta — may be negative), so the
+trace waterfall shows WHERE the CPU and memory went, not just the
+totals. Backdated query spans are excluded (their work already happened
+when they're recorded).
+
+```traceql
+{ name = "order.payment" } | select(span.php.cpu.time_ms, span.php.memory.delta_bytes)
+```
+
 ```traceql
 { kind = server && span.php.memory.peak_bytes > 134217728 }  # requests over 128 MB
 ```
