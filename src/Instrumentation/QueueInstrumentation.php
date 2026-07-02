@@ -145,6 +145,8 @@ final class QueueInstrumentation
 
             $this->jobSpans[] = $span;
 
+            $this->telemetry()->publishTraceContext();
+
             // Resource capture per job — skipped for sync jobs, which run
             // inside a request that is already being measured.
             if ($event->connectionName !== 'sync' && config('telemetry.instrument.resources', true)) {

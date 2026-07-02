@@ -7,6 +7,7 @@ use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Route;
 
 beforeEach(function () {
@@ -104,4 +105,41 @@ it('marks 5xx responses as errors', function () {
 
     expect($span->status())->toBe(SpanStatus::Error)
         ->and($span->attributes()['http.response.status_code'])->toBe(500);
+});
+
+it('exposes the trace id in a response header by default', function () {
+    $response = $this->get('/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($response->headers->get('X-Trace-Id'))->toBe($span->traceId);
+});
+
+it('supports a custom header name and disabling it', function () {
+    config()->set('telemetry.traces.response_header', 'X-Request-Ref');
+
+    expect($this->get('/users/7')->headers->get('X-Request-Ref'))->toMatch('/^[0-9a-f]{32}$/');
+
+    config()->set('telemetry.traces.response_header', null);
+
+    $response = $this->get('/users/7');
+
+    expect($response->headers->has('X-Trace-Id'))->toBeFalse()
+        ->and($response->headers->has('X-Request-Ref'))->toBeFalse();
+});
+
+it('publishes the trace id to Laravel Context for error trackers and logs', function () {
+    $this->get('/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect(Context::get('trace_id'))->toBe($span->traceId);
+});
+
+it('does not touch Laravel Context when sharing is disabled', function () {
+    config()->set('telemetry.traces.share_context', false);
+
+    $this->get('/users/7');
+
+    expect(Context::get('trace_id'))->toBeNull();
 });

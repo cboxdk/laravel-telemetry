@@ -105,6 +105,17 @@
           "value": "0"
         },
         "options": []
+      },
+      {
+        "name": "traceid",
+        "type": "textbox",
+        "label": "trace id",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": []
       }
     ]
   },
@@ -646,7 +657,7 @@
     {
       "id": 59,
       "type": "row",
-      "title": "Resources per route",
+      "title": "Errors \u2014 4xx & 5xx",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -659,7 +670,7 @@
     {
       "id": 61,
       "type": "timeseries",
-      "title": "p95 memory by route",
+      "title": "Responses by status code",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -673,6 +684,177 @@
       "targets": [
         {
           "refId": "Q60",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{http_response_status_code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^2.."
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^3.."
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^4.."
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^5.."
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "4xx is client noise worth watching \u2014 auth failures, validation storms, broken API consumers."
+    },
+    {
+      "id": 62,
+      "type": "table",
+      "title": "Client errors (4xx) \u2014 click to inspect what the caller sent",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && kind=server && span.http.response.status_code >= 400 && span.http.response.status_code < 500}",
+          "limit": 20,
+          "spss": 3,
+          "tableType": "traces"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 63,
+      "type": "row",
+      "title": "Resources per route",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "panels": []
+    },
+    {
+      "id": 65,
+      "type": "timeseries",
+      "title": "p95 memory by route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "Q64",
           "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
@@ -713,7 +895,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 67,
       "type": "timeseries",
       "title": "p95 CPU by route",
       "datasource": {
@@ -724,11 +906,11 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 23
       },
       "targets": [
         {
-          "refId": "Q62",
+          "refId": "Q66",
           "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
@@ -769,7 +951,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 68,
       "type": "row",
       "title": "Traces & logs",
       "collapsed": false,
@@ -777,12 +959,53 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 31
       },
       "panels": []
     },
     {
-      "id": 65,
+      "id": 69,
+      "type": "table",
+      "title": "Trace lookup \u2014 paste an id from X-Trace-Id, Sentry or a support case into the \u201ctrace id\u201d box above",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{trace:id = \"$traceid\"}",
+          "limit": 20,
+          "spss": 3,
+          "tableType": "traces"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "description": "The id a user quotes from the error page (or the X-Trace-Id response header / the Sentry trace_id tag) resolves straight to its waterfall here."
+    },
+    {
+      "id": 70,
       "type": "table",
       "title": "Request traces \u2014 click for the waterfall (per-span CPU/memory in attributes)",
       "datasource": {
@@ -793,7 +1016,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 37
       },
       "targets": [
         {
@@ -822,7 +1045,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 71,
       "type": "table",
       "title": "Failing requests",
       "datasource": {
@@ -833,7 +1056,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 46
       },
       "targets": [
         {
@@ -862,7 +1085,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 72,
       "type": "logs",
       "title": "Correlated logs \u2014 trace_id links to Tempo",
       "datasource": {
@@ -873,7 +1096,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 55
       },
       "targets": [
         {

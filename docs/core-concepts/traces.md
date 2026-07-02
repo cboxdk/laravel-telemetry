@@ -160,6 +160,22 @@ Http::withTraceparent()->post($url, $payload);
 
 The macro is a no-op when no trace is active.
 
+## The trace id as a support reference
+
+The trace id doubles as the reference that ties error trackers, support
+cases and logs back to the trace:
+
+- **`X-Trace-Id` response header** on every traced request
+  (`traces.response_header`, set null to disable).
+- **Laravel `Context`**: `trace_id` is added at trace start — Sentry
+  (≥ 4.x), Flare and every log channel pick it up automatically. An
+  explicit Sentry scope tag is set too (`traces.share_context`).
+- **Error pages**: `Telemetry::traceId()` is available while the error
+  view renders — show it as “quote this reference id to support”.
+
+The full flows (Sentry → trace, support case → trace, error page
+recipe) live in [Error tracking & support flow](../production/error-tracking.md).
+
 ## Sampling
 
 `traces.sample_rate` (0–1) decides once per trace, at the root. Children

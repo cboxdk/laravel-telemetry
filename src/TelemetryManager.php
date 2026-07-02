@@ -24,6 +24,7 @@ use Cbox\Telemetry\Tracing\SpanStatus;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Context;
 
 /**
  * The telemetry entry point, resolved behind the Telemetry facade.
@@ -182,6 +183,42 @@ class TelemetryManager
     public function resetContext(): void
     {
         $this->tracer->resetContext();
+    }
+
+    /**
+     * Publish the trace id to the wider ecosystem so error trackers and
+     * logs can correlate back to the trace:
+     *
+     * - Laravel's Context facade (`trace_id`) — picked up automatically
+     *   by sentry-laravel (>= 4.x), Flare and every log channel.
+     * - An explicit Sentry scope tag when the SDK is installed, so the
+     *   issue page shows trace_id even on older SDK versions.
+     *
+     * Called by the request/job/task instrumentation at trace start.
+     */
+    public function publishTraceContext(): void
+    {
+        if (! $this->enabled || ! config('telemetry.traces.share_context', true)) {
+            return;
+        }
+
+        $traceId = $this->tracer->traceId();
+
+        if ($traceId === null) {
+            return;
+        }
+
+        FailSafe::guard(function () use ($traceId) {
+            if (class_exists(Context::class)) {
+                Context::add('trace_id', $traceId);
+            }
+
+            if (function_exists('\Sentry\configureScope')) {
+                \Sentry\configureScope(function ($scope) use ($traceId): void {
+                    $scope->setTag('trace_id', $traceId);
+                });
+            }
+        });
     }
 
     /**

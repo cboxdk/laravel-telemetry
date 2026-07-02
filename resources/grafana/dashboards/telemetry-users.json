@@ -73,7 +73,7 @@
   ],
   "panels": [
     {
-      "id": 198,
+      "id": 203,
       "type": "table",
       "title": "Requests for user $user",
       "datasource": {
@@ -113,7 +113,7 @@
       }
     },
     {
-      "id": 199,
+      "id": 204,
       "type": "table",
       "title": "Errors hit by user $user",
       "datasource": {
@@ -153,7 +153,7 @@
       }
     },
     {
-      "id": 200,
+      "id": 205,
       "type": "table",
       "title": "Memory hogs (> $minmb MB)",
       "datasource": {
@@ -193,7 +193,7 @@
       }
     },
     {
-      "id": 201,
+      "id": 206,
       "type": "text",
       "title": "Tip",
       "gridPos": {

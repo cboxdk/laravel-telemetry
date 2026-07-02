@@ -61,6 +61,8 @@ final class TraceRequest
 
             $request->attributes->set(self::SPAN_KEY, $span);
 
+            $this->telemetry->publishTraceContext();
+
             // The framework-boot phase, visible in the waterfall — from
             // LARAVEL_START (public/index.php) until this middleware ran.
             if (defined('LARAVEL_START')) {
@@ -77,7 +79,19 @@ final class TraceRequest
             }
         });
 
-        return $next($request);
+        $response = $next($request);
+
+        // Expose the trace id to the caller — the support-case reference
+        // ("quote id X to support") and the debugging entry point.
+        FailSafe::guard(function () use ($response) {
+            $header = config('telemetry.traces.response_header', 'X-Trace-Id');
+
+            if (is_string($header) && $header !== '' && ($traceId = $this->telemetry->traceId()) !== null) {
+                $response->headers->set($header, $traceId);
+            }
+        });
+
+        return $response;
     }
 
     public function terminate(Request $request, Response $response): void

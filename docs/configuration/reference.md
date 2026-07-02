@@ -89,6 +89,8 @@ everything and a `public` endpoint filtered to a prefix list:
 | `traces.continue_incoming` | `TELEMETRY_TRACES_CONTINUE_INCOMING` | `true` |
 | `traces.trust_incoming_sampling` | `TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING` | `true` — disable on public edges so clients can't force sampling |
 | `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
+| `traces.share_context` | `TELEMETRY_TRACES_SHARE_CONTEXT` | `true` — publishes `trace_id` into Laravel `Context` (Sentry/Flare/logs pick it up) + a Sentry scope tag |
+| `traces.response_header` | `TELEMETRY_TRACES_RESPONSE_HEADER` | `X-Trace-Id` — the support reference id on every response; `null` disables |
 | `traces.details.mode` | `TELEMETRY_TRACE_DETAILS` | `always` — `tail` keeps cache/query detail spans only for failing or slow traces |
 | `traces.details.slow_request_ms` | `TELEMETRY_SLOW_REQUEST_MS` | `1000` |
 | `traces.details.slow_span_ms` | `TELEMETRY_SLOW_SPAN_MS` | `100` |

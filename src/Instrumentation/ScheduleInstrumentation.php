@@ -70,6 +70,8 @@ final class ScheduleInstrumentation
                 'schedule.on_one_server' => $event->task->onOneServer,
             ]);
 
+            $telemetry->publishTraceContext();
+
             $this->running[spl_object_id($event->task)] = [
                 'span' => $span,
                 'usage' => config('telemetry.instrument.resources', true) ? ResourceUsage::start() : null,

@@ -154,6 +154,18 @@ return [
         // 10%-sampled app still surfaces every failing span.
         'always_sample_errors' => env('TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS', true),
 
+        // Publish trace_id into Laravel's Context facade at trace start —
+        // Sentry (>= 4.x), Flare and every log channel pick it up
+        // automatically, closing the loop: error tracker -> trace id ->
+        // Tempo waterfall. An explicit Sentry scope tag is also set when
+        // the SDK is installed.
+        'share_context' => env('TELEMETRY_TRACES_SHARE_CONTEXT', true),
+
+        // Expose the trace id on every response — the support-case
+        // reference ("quote id X to support") and the Tempo lookup key.
+        // Set to null/empty to disable.
+        'response_header' => env('TELEMETRY_TRACE_RESPONSE_HEADER', 'X-Trace-Id'),
+
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 

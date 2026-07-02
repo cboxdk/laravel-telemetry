@@ -51,7 +51,7 @@
   ],
   "panels": [
     {
-      "id": 143,
+      "id": 148,
       "type": "stat",
       "title": "Hit ratio",
       "datasource": {
@@ -66,7 +66,7 @@
       },
       "targets": [
         {
-          "refId": "Q144",
+          "refId": "Q149",
           "expr": "100 * sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"hit\"}[10m])) / sum(rate(cache_operations_total{service_name=~\"$service\",operation=~\"hit|miss\"}[10m]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -112,7 +112,7 @@
       }
     },
     {
-      "id": 145,
+      "id": 150,
       "type": "stat",
       "title": "Ops / min",
       "datasource": {
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "refId": "Q146",
+          "refId": "Q151",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -165,7 +165,7 @@
       }
     },
     {
-      "id": 147,
+      "id": 152,
       "type": "stat",
       "title": "Writes / min",
       "datasource": {
@@ -180,7 +180,7 @@
       },
       "targets": [
         {
-          "refId": "Q148",
+          "refId": "Q153",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"write\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -218,7 +218,7 @@
       }
     },
     {
-      "id": 151,
+      "id": 156,
       "type": "timeseries",
       "title": "Hits vs misses",
       "datasource": {
@@ -233,7 +233,7 @@
       },
       "targets": [
         {
-          "refId": "Q149",
+          "refId": "Q154",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"hit\"}[$__rate_interval])) * 60",
           "legendFormat": "hits",
           "datasource": {
@@ -242,7 +242,7 @@
           }
         },
         {
-          "refId": "Q150",
+          "refId": "Q155",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"miss\"}[$__rate_interval])) * 60",
           "legendFormat": "misses",
           "datasource": {
@@ -419,7 +419,7 @@
       }
     },
     {
-      "id": 153,
+      "id": 158,
       "type": "timeseries",
       "title": "Operations by store",
       "datasource": {
@@ -434,7 +434,7 @@
       },
       "targets": [
         {
-          "refId": "Q152",
+          "refId": "Q157",
           "expr": "sum by (store, operation) (rate(cache_operations_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
           "legendFormat": "{{store}} {{operation}}",
           "datasource": {
@@ -475,7 +475,7 @@
       }
     },
     {
-      "id": 154,
+      "id": 159,
       "type": "table",
       "title": "Slowest cache operations \u2014 key on the span",
       "datasource": {
@@ -515,7 +515,7 @@
       }
     },
     {
-      "id": 155,
+      "id": 160,
       "type": "text",
       "title": "Enable",
       "gridPos": {

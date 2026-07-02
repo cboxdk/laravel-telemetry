@@ -15,6 +15,12 @@ Initial release.
 
 ### Observability UX
 
+- The trace id as a support reference: `X-Trace-Id` on every response
+  (`traces.response_header`), `trace_id` published into Laravel `Context`
+  at trace start — Sentry (≥ 4.x), Flare and all log channels pick it up
+  automatically — plus an explicit Sentry scope tag
+  (`traces.share_context`). Requests dashboard gained a trace-id lookup
+  panel and a 4xx errors section.
 - Tail detail retention (`traces.details.mode=tail`): cache/query detail
   spans are kept only for traces with errors, slow requests or a slow
   query — healthy fast traces ship a lean skeleton with tallies while

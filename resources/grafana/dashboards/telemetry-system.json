@@ -51,7 +51,7 @@
   ],
   "panels": [
     {
-      "id": 178,
+      "id": 183,
       "type": "stat",
       "title": "CPU",
       "datasource": {
@@ -66,7 +66,7 @@
       },
       "targets": [
         {
-          "refId": "Q179",
+          "refId": "Q184",
           "expr": "system_cpu_utilization_ratio{service_name=~\"$service\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -112,7 +112,7 @@
       }
     },
     {
-      "id": 180,
+      "id": 185,
       "type": "stat",
       "title": "Memory",
       "datasource": {
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "refId": "Q181",
+          "refId": "Q186",
           "expr": "system_memory_utilization_ratio{state=\"used\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -173,7 +173,7 @@
       }
     },
     {
-      "id": 182,
+      "id": 187,
       "type": "stat",
       "title": "Load 1m",
       "datasource": {
@@ -188,7 +188,7 @@
       },
       "targets": [
         {
-          "refId": "Q183",
+          "refId": "Q188",
           "expr": "system_cpu_load_average_ratio{period=\"1m\"}",
           "legendFormat": "__auto",
           "datasource": {
@@ -226,7 +226,7 @@
       }
     },
     {
-      "id": 184,
+      "id": 189,
       "type": "stat",
       "title": "Disk used",
       "datasource": {
@@ -241,7 +241,7 @@
       },
       "targets": [
         {
-          "refId": "Q185",
+          "refId": "Q190",
           "expr": "system_filesystem_usage_bytes{state=\"used\"} / (system_filesystem_usage_bytes{state=\"used\"} + system_filesystem_usage_bytes{state=\"free\"}) * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -287,7 +287,7 @@
       }
     },
     {
-      "id": 186,
+      "id": 191,
       "type": "row",
       "title": "Host",
       "collapsed": false,
@@ -300,7 +300,7 @@
       "panels": []
     },
     {
-      "id": 188,
+      "id": 193,
       "type": "timeseries",
       "title": "Memory by state",
       "datasource": {
@@ -315,7 +315,7 @@
       },
       "targets": [
         {
-          "refId": "Q187",
+          "refId": "Q192",
           "expr": "system_memory_usage_bytes",
           "legendFormat": "{{state}}",
           "datasource": {
@@ -402,7 +402,7 @@
       }
     },
     {
-      "id": 190,
+      "id": 195,
       "type": "timeseries",
       "title": "Load averages",
       "datasource": {
@@ -417,7 +417,7 @@
       },
       "targets": [
         {
-          "refId": "Q189",
+          "refId": "Q194",
           "expr": "system_cpu_load_average_ratio",
           "legendFormat": "{{period}}",
           "datasource": {
@@ -458,7 +458,7 @@
       }
     },
     {
-      "id": 192,
+      "id": 197,
       "type": "timeseries",
       "title": "Network I/O rate",
       "datasource": {
@@ -473,7 +473,7 @@
       },
       "targets": [
         {
-          "refId": "Q191",
+          "refId": "Q196",
           "expr": "rate(system_network_io_bytes[$__rate_interval])",
           "legendFormat": "{{direction}}",
           "datasource": {
@@ -514,7 +514,7 @@
       }
     },
     {
-      "id": 194,
+      "id": 199,
       "type": "timeseries",
       "title": "Monitored process groups",
       "datasource": {
@@ -529,7 +529,7 @@
       },
       "targets": [
         {
-          "refId": "Q193",
+          "refId": "Q198",
           "expr": "process_memory_rss_bytes",
           "legendFormat": "{{process}}",
           "datasource": {
@@ -571,7 +571,7 @@
       "description": "telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."
     },
     {
-      "id": 195,
+      "id": 200,
       "type": "row",
       "title": "Workers",
       "collapsed": false,
@@ -584,7 +584,7 @@
       "panels": []
     },
     {
-      "id": 197,
+      "id": 202,
       "type": "timeseries",
       "title": "Worker leak curves \u2014 one line per worker process",
       "datasource": {
@@ -599,7 +599,7 @@
       },
       "targets": [
         {
-          "refId": "Q196",
+          "refId": "Q201",
           "expr": "worker_memory_rss_bytes{service_name=~\"$service\"}",
           "legendFormat": "pid {{pid}}",
           "datasource": {
