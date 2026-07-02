@@ -67,6 +67,6 @@ queue_depth{queue="default"} > 1000
   and rate(queue_jobs_processed_total{queue="default"}[5m]) < 1
 
 # p95 job runtime regression
-histogram_quantile(0.95, sum by (le, job)
+histogram_quantile(0.95, sum by (le, job_name)
   (rate(queue_job_duration_bucket[10m]))) > 30000
 ```

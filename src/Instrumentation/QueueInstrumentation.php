@@ -137,7 +137,10 @@ final class QueueInstrumentation
     private function completeJob(string $job, ?string $queue, string $outcome, bool $sync): void
     {
         FailSafe::guard(function () use ($job, $queue, $outcome) {
-            $labels = ['job' => $job, 'queue' => $queue ?? 'default'];
+            // "job.name", not "job" — a bare `job` label collides with
+            // Prometheus' reserved scrape-job label and gets overwritten
+            // by collectors.
+            $labels = ['job.name' => $job, 'queue' => $queue ?? 'default'];
 
             if ($span = array_pop($this->jobSpans)) {
                 if ($span->status() === SpanStatus::Unset) {
