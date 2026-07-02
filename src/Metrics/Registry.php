@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Exceptions\GaugeShapeConflict;
 use Cbox\Telemetry\Exceptions\InstrumentTypeMismatch;
 use Cbox\Telemetry\Metrics\Instruments\Counter;
 use Cbox\Telemetry\Metrics\Instruments\Gauge;
@@ -64,10 +65,18 @@ final class Registry
         string $unit = '',
     ): Gauge|ObservableGauge {
         if ($callback !== null) {
+            if (isset($this->gauges[$name])) {
+                throw new GaugeShapeConflict($name, existingIsObservable: false);
+            }
+
             return $this->observables[$name] ??= new ObservableGauge(
                 $this->define($name, MetricType::Gauge, $description, $unit),
                 $callback,
             );
+        }
+
+        if (isset($this->observables[$name])) {
+            throw new GaugeShapeConflict($name, existingIsObservable: true);
         }
 
         return $this->gauges[$name] ??= new Gauge(

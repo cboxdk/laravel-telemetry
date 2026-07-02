@@ -27,9 +27,13 @@ final class ArrayMetricStore implements MetricStore
     /** @var array<string, array{definition: MetricDefinition, series: array<string, array{bucketCounts: list<int>, sum: float, count: int}>}> */
     private array $histograms = [];
 
+    /** @var array<string, int> first-write timestamps (unix nanos) */
+    private array $since = [];
+
     public function incrementCounter(MetricDefinition $definition, array $labels, float $by): void
     {
         $key = Labels::encode($labels);
+        $this->since[$definition->name] ??= (int) (microtime(true) * 1e9);
 
         $this->counters[$definition->name] ??= ['definition' => $definition, 'series' => []];
         $this->counters[$definition->name]['series'][$key] ??= 0.0;
@@ -39,6 +43,7 @@ final class ArrayMetricStore implements MetricStore
     public function setGauge(MetricDefinition $definition, array $labels, float $value): void
     {
         $key = Labels::encode($labels);
+        $this->since[$definition->name] ??= (int) (microtime(true) * 1e9);
 
         $this->gauges[$definition->name] ??= ['definition' => $definition, 'series' => []];
         $this->gauges[$definition->name]['series'][$key] = $value;
@@ -47,6 +52,7 @@ final class ArrayMetricStore implements MetricStore
     public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
     {
         $key = Labels::encode($labels);
+        $this->since[$definition->name] ??= (int) (microtime(true) * 1e9);
 
         $this->gauges[$definition->name] ??= ['definition' => $definition, 'series' => []];
         $this->gauges[$definition->name]['series'][$key] ??= 0.0;
@@ -57,6 +63,7 @@ final class ArrayMetricStore implements MetricStore
     {
         $key = Labels::encode($labels);
         $bounds = $definition->buckets ?? [];
+        $this->since[$definition->name] ??= (int) (microtime(true) * 1e9);
 
         $this->histograms[$definition->name] ??= ['definition' => $definition, 'series' => []];
         $this->histograms[$definition->name]['series'][$key] ??= [
@@ -82,7 +89,7 @@ final class ArrayMetricStore implements MetricStore
                 $samples[] = new Sample(Labels::decode($encoded), $value);
             }
 
-            $families[] = new MetricFamily($entry['definition'], $samples);
+            $families[] = new MetricFamily($entry['definition'], $samples, $this->since[$entry['definition']->name] ?? null);
         }
 
         foreach ($this->histograms as $entry) {
@@ -99,7 +106,7 @@ final class ArrayMetricStore implements MetricStore
                 );
             }
 
-            $families[] = new MetricFamily($entry['definition'], $samples);
+            $families[] = new MetricFamily($entry['definition'], $samples, $this->since[$entry['definition']->name] ?? null);
         }
 
         return $families;
@@ -110,6 +117,7 @@ final class ArrayMetricStore implements MetricStore
         $this->counters = [];
         $this->gauges = [];
         $this->histograms = [];
+        $this->since = [];
     }
 
     /**

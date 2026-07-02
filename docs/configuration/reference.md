@@ -53,6 +53,10 @@ Valid entries: `otlp`, `null`, or a fully-qualified class name implementing
 | `otlp.headers` | — | `[]` |
 | `otlp.timeout` | `TELEMETRY_OTLP_TIMEOUT` | `3.0` s |
 | `otlp.connect_timeout` | `TELEMETRY_OTLP_CONNECT_TIMEOUT` | `1.0` s |
+| `otlp.compression` | `TELEMETRY_OTLP_COMPRESSION` | `true` (gzip bodies > 1 KB) |
+
+After a retryable transport failure (429/5xx, network), an in-process
+circuit breaker skips exports for 30 s (or the server's `Retry-After`).
 
 ### Prometheus
 
@@ -81,6 +85,13 @@ everything and a `public` endpoint filtered to a prefix list:
 | `traces.sample_rate` | `TELEMETRY_TRACES_SAMPLE_RATE` | `1.0` |
 | `traces.max_buffer` | `TELEMETRY_TRACES_MAX_BUFFER` | `5000` |
 | `traces.continue_incoming` | `TELEMETRY_TRACES_CONTINUE_INCOMING` | `true` |
+| `traces.trust_incoming_sampling` | `TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING` | `true` — disable on public edges so clients can't force sampling |
+
+## Events
+
+| Key | Env | Default |
+|---|---|---|
+| `events.max_buffer` | `TELEMETRY_EVENTS_MAX_BUFFER` | `5000` (force-flush above) |
 
 ## Histograms
 
@@ -95,6 +106,7 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.requests` | `TELEMETRY_INSTRUMENT_REQUESTS` | `true` |
 | `instrument.jobs` | `TELEMETRY_INSTRUMENT_JOBS` | `true` |
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
+| `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 

@@ -34,7 +34,7 @@ class TelemetryManager
     /** @var list<TelemetryProvider> */
     private array $pendingProviders = [];
 
-    private bool $providersBooted = false;
+    private int $bootedProviders = 0;
 
     /** @var list<Exporter> */
     private array $exporters = [];
@@ -52,6 +52,7 @@ class TelemetryManager
         private readonly Registry $registry,
         private readonly Tracer $tracer,
         private readonly array $resource = [],
+        private readonly int $maxBufferedEvents = 5000,
     ) {
         $this->tracer->onBufferFull(fn () => $this->flush());
     }
@@ -148,13 +149,16 @@ class TelemetryManager
 
     /**
      * Continue a trace from an incoming W3C traceparent header.
+     *
+     * With $trustSampling disabled, the caller's ids are kept for
+     * correlation but the sampling decision is made locally.
      */
-    public function continueTrace(?string $traceparent): void
+    public function continueTrace(?string $traceparent, bool $trustSampling = true): void
     {
         $parent = TraceParent::parse($traceparent);
 
         if ($parent !== null) {
-            $this->tracer->continueFrom($parent);
+            $this->tracer->continueFrom($parent, $trustSampling);
         }
     }
 
@@ -204,6 +208,12 @@ class TelemetryManager
         }
 
         $this->events[] = $event;
+
+        // Cap like the span buffer — long-running workers must not grow
+        // memory without bound.
+        if (count($this->events) >= $this->maxBufferedEvents) {
+            $this->flush();
+        }
     }
 
     /*
@@ -223,7 +233,6 @@ class TelemetryManager
         }
 
         $this->pendingProviders[] = $provider;
-        $this->providersBooted = false;
     }
 
     /**
@@ -282,18 +291,20 @@ class TelemetryManager
      * Push metrics from the shared store (plus observable gauges) to every
      * exporter that supports metrics. Run by the `telemetry:flush` command.
      */
-    public function flushMetrics(): void
+    public function flushMetrics(): int
     {
         $metrics = $this->collect();
 
         if ($metrics === []) {
-            return;
+            return 0;
         }
 
         $this->export(new TelemetryBatch(
             resource: $this->resource,
             metrics: $metrics,
         ), Signal::Metrics);
+
+        return count($metrics);
     }
 
     /**
@@ -357,13 +368,11 @@ class TelemetryManager
 
     private function bootProviders(): void
     {
-        if ($this->providersBooted) {
-            return;
-        }
+        // Only providers added since the last boot run — register() must
+        // never execute twice for the same provider.
+        while ($this->bootedProviders < count($this->pendingProviders)) {
+            $provider = $this->pendingProviders[$this->bootedProviders++];
 
-        $this->providersBooted = true;
-
-        foreach ($this->pendingProviders as $provider) {
             FailSafe::guard(fn () => $provider->register($this->registry));
         }
     }

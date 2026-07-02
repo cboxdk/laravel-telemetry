@@ -40,12 +40,16 @@ final class Tracer
 
     /**
      * Continue a trace started elsewhere (incoming request, queued job).
+     *
+     * With $trustSampling disabled, the remote trace/span ids are kept for
+     * correlation but the sampling decision is made locally — callers
+     * cannot force sampling on or off.
      */
-    public function continueFrom(TraceParent $parent): void
+    public function continueFrom(TraceParent $parent, bool $trustSampling = true): void
     {
         $this->remoteParent = $parent;
         $this->traceId = $parent->traceId;
-        $this->sampled = $parent->sampled;
+        $this->sampled = $trustSampling ? $parent->sampled : null;
     }
 
     /**

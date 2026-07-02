@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry;
 
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\MetricStore;
@@ -71,6 +72,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 registry: $app->make(Registry::class),
                 tracer: $app->make(Tracer::class),
                 resource: $this->buildResource($app),
+                maxBufferedEvents: (int) $app->make('config')->get('telemetry.events.max_buffer', 5000),
             );
 
             foreach ($this->buildExporters($app) as $exporter) {
@@ -92,7 +94,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 __DIR__.'/../config/telemetry.php' => config_path('telemetry.php'),
             ], 'telemetry-config');
 
-            $this->commands([FlushCommand::class]);
+            $this->commands([FlushCommand::class, DoctorCommand::class]);
         }
 
         if (! $this->app->make('config')->get('telemetry.enabled')) {
@@ -171,6 +173,7 @@ class TelemetryServiceProvider extends ServiceProvider
             'Exporters' => implode(', ', (array) config('telemetry.exporters', [])) ?: 'none',
             'Prometheus' => config('telemetry.prometheus.enabled')
                 ? collect((array) config('telemetry.prometheus.endpoints'))->map(fn ($e) => '/'.ltrim($e['path'] ?? '', '/'))->implode(', ')
+                    .(config('telemetry.prometheus.allowed_ips') === [] ? ' <fg=yellow;options=bold>(OPEN — no IP allowlist)</>' : '')
                 : 'off',
             'Trace Sample Rate' => (string) config('telemetry.traces.sample_rate'),
             'System Metrics' => class_exists(SystemMetrics::class) && config('telemetry.providers.system.enabled')
@@ -249,6 +252,7 @@ class TelemetryServiceProvider extends ServiceProvider
                         headers: (array) $config->get('telemetry.otlp.headers', []),
                         timeout: (float) $config->get('telemetry.otlp.timeout', 3.0),
                         connectTimeout: (float) $config->get('telemetry.otlp.connect_timeout', 1.0),
+                        compress: (bool) $config->get('telemetry.otlp.compression', true),
                     ),
                     new OtlpSerializer($this->buildResource($app)),
                 ),
@@ -330,6 +334,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->make(QueryInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
+            (float) $this->app->make('config')->get('telemetry.instrument.queries_min_duration', 0),
         );
     }
 

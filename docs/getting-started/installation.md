@@ -71,6 +71,16 @@ TELEMETRY_ENABLED=false
 
 Instruments become no-ops, no listeners are registered, routes disappear.
 
+## Verify the setup
+
+```bash
+php artisan telemetry:doctor
+```
+
+Checks the store round trip, exporter reachability and warns about an
+unprotected scrape endpoint. Run it after install and from deploy
+pipelines.
+
 ## Agent prompt
 
 Paste this into your AI assistant (Claude Code, Cursor, Copilot) to have
@@ -95,8 +105,8 @@ Install and configure cboxdk/laravel-telemetry in this Laravel app:
 5. Add the telemetry log channel to the stack in config/logging.php:
    'telemetry' => ['driver' => 'telemetry', 'level' => 'info'] and append
    'telemetry' to the stack channel list.
-6. Verify: php artisan about must show a Telemetry section; a request to
-   /telemetry/metrics must return Prometheus text.
+6. Verify: php artisan telemetry:doctor must pass all checks, and a
+   request to /telemetry/metrics must return Prometheus text.
 7. Do NOT publish the config unless we need non-default endpoints.
 
 Conventions and API: read vendor/cboxdk/laravel-telemetry/llms.txt and

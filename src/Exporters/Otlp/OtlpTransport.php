@@ -16,6 +16,8 @@ use Cbox\Telemetry\Support\ExportResult;
  */
 class OtlpTransport
 {
+    private const COMPRESSION_THRESHOLD = 1024;
+
     /**
      * @param  array<string, string>  $headers
      */
@@ -24,6 +26,7 @@ class OtlpTransport
         private readonly array $headers = [],
         private readonly float $timeout = 3.0,
         private readonly float $connectTimeout = 1.0,
+        private readonly bool $compress = true,
     ) {}
 
     /**
@@ -32,9 +35,24 @@ class OtlpTransport
     public function post(string $path, array $payload): ExportResult
     {
         $url = rtrim($this->endpoint, '/').$path;
-        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+
+        try {
+            $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            return ExportResult::failed('payload serialization failed: '.$e->getMessage());
+        }
 
         $headers = ['Content-Type: application/json'];
+
+        // gzip large batches — 5000 spans of JSON compress ~10x.
+        if ($this->compress && strlen($body) > self::COMPRESSION_THRESHOLD) {
+            $compressed = gzencode($body, 6);
+
+            if ($compressed !== false) {
+                $body = $compressed;
+                $headers[] = 'Content-Encoding: gzip';
+            }
+        }
 
         foreach ($this->headers as $name => $value) {
             $headers[] = "{$name}: {$value}";
@@ -54,6 +72,10 @@ class OtlpTransport
             CURLOPT_HEADER => true,
             CURLOPT_TIMEOUT_MS => (int) ($this->timeout * 1000),
             CURLOPT_CONNECTTIMEOUT_MS => (int) ($this->connectTimeout * 1000),
+            // Explicit, even though these are curl's defaults — telemetry
+            // credentials ride on these requests.
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
         ]);
 
         $response = curl_exec($handle);

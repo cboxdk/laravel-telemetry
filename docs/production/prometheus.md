@@ -41,6 +41,12 @@ observable-gauge callbacks. Keep callbacks cheap and bounded; the system
 provider's CPU sampling adds `cpu_interval` (default 100 ms) to each
 scrape — set `TELEMETRY_SYSTEM_CPU_INTERVAL=0` to skip it.
 
+## Route caching
+
+Scrape routes are only registered while telemetry and Prometheus are
+enabled — rebuild the route cache (`php artisan route:cache`) after
+toggling `TELEMETRY_ENABLED` or `TELEMETRY_PROMETHEUS_ENABLED`.
+
 ## Counter resets
 
 The store is cumulative and survives deploys (it lives in Redis, not the

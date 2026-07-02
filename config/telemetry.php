@@ -85,6 +85,9 @@ return [
         ],
         'timeout' => env('TELEMETRY_OTLP_TIMEOUT', 3.0),
         'connect_timeout' => env('TELEMETRY_OTLP_CONNECT_TIMEOUT', 1.0),
+
+        // gzip request bodies above 1 KB.
+        'compression' => env('TELEMETRY_OTLP_COMPRESSION', true),
     ],
 
     /*
@@ -140,6 +143,24 @@ return [
 
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
+
+        // Also trust the caller's SAMPLING decision. Disable on public
+        // edges so clients cannot force sampling on (bypassing your
+        // sample rate) or off (hiding from tracing); trace ids are still
+        // continued for correlation.
+        'trust_incoming_sampling' => env('TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Events
+    |--------------------------------------------------------------------------
+    */
+
+    'events' => [
+        // Force-flush when this many events are buffered (protects
+        // long-running workers using the telemetry log channel).
+        'max_buffer' => env('TELEMETRY_EVENTS_MAX_BUFFER', 5000),
     ],
 
     /*
@@ -169,6 +190,10 @@ return [
 
         // db.client.* query spans (only recorded inside a sampled trace).
         'queries' => env('TELEMETRY_INSTRUMENT_QUERIES', true),
+
+        // Skip query spans faster than this (ms) — a noise floor for
+        // N+1-heavy codepaths. 0 records everything.
+        'queries_min_duration' => env('TELEMETRY_QUERIES_MIN_DURATION', 0),
 
         // Artisan command spans.
         'commands' => env('TELEMETRY_INSTRUMENT_COMMANDS', false),

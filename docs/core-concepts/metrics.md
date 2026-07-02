@@ -61,12 +61,18 @@ ids.
 
 | Driver | Write mechanics | Scope |
 |---|---|---|
-| `redis` | one HASH per metric family + index SETs, MULTI/EXEC writes, `SMEMBERS`+`HGETALL` scrape — never `KEYS`/`SCAN` | cluster-wide |
+| `redis` | one HASH per metric family + index SETs; steady-state writes are a single atomic command (Redis Cluster-safe); `SMEMBERS`+`HGETALL` scrape — never `KEYS`/`SCAN` | cluster-wide |
 | `apcu` | CAS loops with explicit key indexes — never iterates the full APCu keyspace | single node |
 | `array` | plain arrays | per process (tests) |
 
 Metadata (description, unit, buckets) is written idempotently with the
 first sample, so scrapes are self-describing.
+
+**Changing histogram buckets** requires a store wipe
+(`php artisan telemetry:flush --wipe`) — old bucket counts cannot be
+re-binned into new boundaries. Metadata itself refreshes automatically on
+deploy. On **Redis Cluster** every write is a single command, so the store
+works without cross-slot transaction concerns.
 
 There is deliberately **no summary instrument** — quantiles come from
 histograms in your backend (`histogram_quantile()` in PromQL).

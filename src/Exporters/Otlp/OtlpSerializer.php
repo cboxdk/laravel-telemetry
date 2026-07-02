@@ -160,11 +160,19 @@ final readonly class OtlpSerializer
                 continue;
             }
 
-            $points[] = [
+            $point = [
                 'attributes' => $this->attributes($sample->labels),
                 'timeUnixNano' => $now,
-                'asDouble' => $sample->value,
+                'asDouble' => $this->finite($sample->value),
             ];
+
+            if ($family->startUnixNano !== null) {
+                // Cumulative start — lets backends (Mimir, collectors)
+                // detect counter resets.
+                $point['startTimeUnixNano'] = (string) $family->startUnixNano;
+            }
+
+            $points[] = $point;
         }
 
         return $points;
@@ -182,17 +190,32 @@ final readonly class OtlpSerializer
                 continue;
             }
 
-            $points[] = [
+            $point = [
                 'attributes' => $this->attributes($sample->labels),
                 'timeUnixNano' => $now,
                 'count' => (string) $sample->count,
-                'sum' => $sample->sum,
+                'sum' => $this->finite($sample->sum),
                 'bucketCounts' => array_map(static fn (int $count): string => (string) $count, $sample->bucketCounts),
                 'explicitBounds' => $sample->bounds,
             ];
+
+            if ($family->startUnixNano !== null) {
+                $point['startTimeUnixNano'] = (string) $family->startUnixNano;
+            }
+
+            $points[] = $point;
         }
 
         return $points;
+    }
+
+    /**
+     * NAN/INF are not JSON-encodable — one poisoned value must never
+     * drop an entire batch.
+     */
+    private function finite(float $value): float
+    {
+        return is_finite($value) ? $value : 0.0;
     }
 
     /**
@@ -243,7 +266,8 @@ final readonly class OtlpSerializer
         return match (true) {
             is_bool($value) => ['boolValue' => $value],
             is_int($value) => ['intValue' => (string) $value],
-            is_float($value) => ['doubleValue' => $value],
+            is_float($value) && is_finite($value) => ['doubleValue' => $value],
+            is_float($value) => ['stringValue' => (string) $value], // NAN/INF break JSON
             default => ['stringValue' => $value === null ? '' : (string) $value],
         };
     }

@@ -10,8 +10,8 @@ weight: 4
 
 | Operation | Cost |
 |---|---|
-| `counter()->inc()` / `gauge()->set()` | one Redis MULTI (3 cmds, 1 round trip) or APCu CAS loop |
-| `histogram()->record()` | one Redis MULTI (5 cmds, 1 round trip) |
+| `counter()->inc()` / `gauge()->set()` | ONE Redis command (bookkeeping runs once per process & metric) or an APCu CAS loop |
+| `histogram()->record()` | three Redis commands |
 | `span()` start/end | in-memory only; export batched at terminate |
 | `event()` | in-memory only |
 | Observable gauge | zero until scrape/flush |
@@ -37,6 +37,13 @@ weight: 4
   loop resolves the same object.
 - Every capture path is exception-guarded; telemetry failure never becomes
   application failure.
+
+## When the OTLP backend is down
+
+Exports never retry in-request; a retryable failure trips a per-process
+circuit breaker so subsequent requests skip the export entirely for 30 s
+(or the server's `Retry-After`). Worst case is one timeout per worker per
+cooldown window — not per request.
 
 ## Octane
 

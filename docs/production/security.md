@@ -30,10 +30,15 @@ weight: 5
 
 `traces.continue_incoming` trusts `traceparent` from clients, which lets
 callers set your trace ids and sampling decision. That's standard W3C
-behaviour and safe for internal meshes; disable it on public edges if you
-don't want clients influencing sampling:
+behaviour and safe for internal meshes. On public edges you have two
+knobs:
 
 ```dotenv
+# Keep trace-id correlation but decide sampling locally —
+# clients can no longer force sampling on (bypassing your rate) or off:
+TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING=false
+
+# Or ignore incoming trace context entirely:
 TELEMETRY_TRACES_CONTINUE_INCOMING=false
 ```
 

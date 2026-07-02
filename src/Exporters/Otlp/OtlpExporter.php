@@ -19,6 +19,16 @@ use Cbox\Telemetry\Support\TelemetryBatch;
  */
 final class OtlpExporter implements Exporter
 {
+    /**
+     * Circuit breaker: after a retryable failure, exports are skipped
+     * until this timestamp. Static so it survives across requests within
+     * a long-lived FPM/Octane worker — a dead collector costs each worker
+     * one timeout, not one per request.
+     */
+    private static int $openUntil = 0;
+
+    private const DEFAULT_COOLDOWN_SECONDS = 30;
+
     public function __construct(
         private readonly OtlpTransport $transport,
         private readonly OtlpSerializer $serializer,
@@ -36,6 +46,10 @@ final class OtlpExporter implements Exporter
 
     public function export(TelemetryBatch $batch): ExportResult
     {
+        if (time() < self::$openUntil) {
+            return ExportResult::retryable('circuit open — recent transport failure');
+        }
+
         $results = [];
 
         if ($batch->spans !== []) {
@@ -64,6 +78,10 @@ final class OtlpExporter implements Exporter
 
         foreach ($results as $result) {
             if (! $result->success) {
+                if ($result->retryable) {
+                    self::$openUntil = time() + ($result->retryAfterSeconds ?? self::DEFAULT_COOLDOWN_SECONDS);
+                }
+
                 return $result;
             }
         }
@@ -75,5 +93,13 @@ final class OtlpExporter implements Exporter
         }
 
         return ExportResult::ok();
+    }
+
+    /**
+     * @internal test hook
+     */
+    public static function resetCircuit(): void
+    {
+        self::$openUntil = 0;
     }
 }

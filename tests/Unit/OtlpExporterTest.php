@@ -14,6 +14,8 @@ use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\TelemetryBatch;
 use Cbox\Telemetry\Tracing\Tracer;
 
+beforeEach(fn () => OtlpExporter::resetCircuit());
+
 final class FakeTransport extends OtlpTransport
 {
     /** @var array<string, array<string, mixed>> */
@@ -70,7 +72,7 @@ it('skips paths for empty signals', function () {
     expect(array_keys($transport->posts))->toBe(['/v1/logs']);
 });
 
-it('surfaces the first failure', function () {
+it('surfaces the first failure and opens the circuit', function () {
     $transport = new FakeTransport;
     $transport->responses['/v1/metrics'] = ExportResult::retryable('HTTP 503', retryAfterSeconds: 30);
 
@@ -81,6 +83,14 @@ it('surfaces the first failure', function () {
     expect($result->success)->toBeFalse()
         ->and($result->retryable)->toBeTrue()
         ->and($result->retryAfterSeconds)->toBe(30);
+
+    // Circuit is now open: the next export never touches the transport.
+    $posts = count($transport->posts);
+    $second = $exporter->export(otlpBatch());
+
+    expect(count($transport->posts))->toBe($posts)
+        ->and($second->retryable)->toBeTrue()
+        ->and($second->reason)->toContain('circuit open');
 });
 
 it('surfaces partial rejections when everything else succeeded', function () {

@@ -24,6 +24,9 @@ use Cbox\Telemetry\Metrics\Sample;
  */
 final class ApcuMetricStore implements MetricStore
 {
+    /** @var array<string, true> per-process memo of indexed series */
+    private array $indexed = [];
+
     public function __construct(
         private readonly string $prefix = 'telemetry',
     ) {
@@ -94,7 +97,7 @@ final class ApcuMetricStore implements MetricStore
                     $samples[] = new Sample(Labels::decode($series), $this->toFloat($raw));
                 }
 
-                $families[] = new MetricFamily($definition, $samples);
+                $families[] = new MetricFamily($definition, $samples, $this->since($type, $name));
             }
         }
 
@@ -130,7 +133,7 @@ final class ApcuMetricStore implements MetricStore
                 );
             }
 
-            $families[] = new MetricFamily($definition, $samples);
+            $families[] = new MetricFamily($definition, $samples, $this->since(MetricType::Histogram, $name));
         }
 
         return $families;
@@ -140,8 +143,9 @@ final class ApcuMetricStore implements MetricStore
     {
         foreach (MetricType::cases() as $type) {
             foreach ($this->names($type) as $name) {
-                $definition = $this->definition($type, $name);
-                $bucketSlots = count($definition->buckets ?? []) + 1;
+                // Delete a generous fixed range of bucket slots so bucket
+                // keys are removed even when the meta entry is gone.
+                $bucketSlots = max(64, count($this->definition($type, $name)->buckets ?? []) + 1);
 
                 foreach ($this->seriesOf($type, $name) as $series) {
                     $base = $this->valueKey($type, $name, $series);
@@ -157,26 +161,46 @@ final class ApcuMetricStore implements MetricStore
 
                 apcu_delete($this->seriesIndexKey($type, $name));
                 apcu_delete($this->metaKey($type, $name));
+                apcu_delete($this->sinceKey($type, $name));
             }
 
             apcu_delete($this->nameIndexKey($type));
         }
+
+        $this->indexed = [];
+    }
+
+    private function since(MetricType $type, string $name): ?int
+    {
+        $since = apcu_fetch($this->sinceKey($type, $name));
+
+        return is_int($since) ? $since : null;
     }
 
     /**
      * Register the metric name, definition and series in the explicit
-     * indexes. The hot path is two apcu_fetch existence checks; the
-     * lock-guarded insert only runs the first time a series appears.
+     * indexes. Memoized per process — the steady-state hot path skips
+     * this entirely. Meta uses apcu_store so definition changes (buckets,
+     * description) propagate on deploy; `since` keeps the first write.
      */
     private function index(MetricDefinition $definition, string $series): void
     {
         $type = $definition->type;
+        $memo = "{$type->value}:{$definition->name}:{$series}";
 
-        apcu_add($this->metaKey($type, $definition->name), json_encode([
+        if (isset($this->indexed[$memo])) {
+            return;
+        }
+
+        $this->indexed[$memo] = true;
+
+        apcu_store($this->metaKey($type, $definition->name), json_encode([
             'description' => $definition->description,
             'unit' => $definition->unit,
             'buckets' => $definition->buckets,
         ], JSON_THROW_ON_ERROR));
+
+        apcu_add($this->sinceKey($type, $definition->name), (int) (microtime(true) * 1e9));
 
         $this->appendUnique($this->nameIndexKey($type), $definition->name);
         $this->appendUnique($this->seriesIndexKey($type, $definition->name), $series);
@@ -313,6 +337,11 @@ final class ApcuMetricStore implements MetricStore
     private function metaKey(MetricType $type, string $name): string
     {
         return "{$this->prefix}:meta:{$type->value}:{$name}";
+    }
+
+    private function sinceKey(MetricType $type, string $name): string
+    {
+        return "{$this->prefix}:since:{$type->value}:{$name}";
     }
 
     private function nameIndexKey(MetricType $type): string

@@ -35,7 +35,10 @@ final class TraceRequest
 
         FailSafe::guard(function () use ($request) {
             if (config('telemetry.traces.continue_incoming')) {
-                $this->telemetry->continueTrace($request->headers->get('traceparent'));
+                $this->telemetry->continueTrace(
+                    $request->headers->get('traceparent'),
+                    trustSampling: (bool) config('telemetry.traces.trust_incoming_sampling', true),
+                );
             }
 
             $span = $this->telemetry->tracer()->startSpan(

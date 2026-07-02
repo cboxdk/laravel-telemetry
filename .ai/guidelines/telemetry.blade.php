@@ -41,6 +41,7 @@ Or inline: `Telemetry::contributes('my-domain', fn (\Cbox\Telemetry\Metrics\Regi
 
 ### Operations
 
+- Verify any setup change with `php artisan telemetry:doctor` (store round trip, exporter reachability, config warnings).
 - Prometheus scrape endpoint: `GET /telemetry/metrics` (config `telemetry.prometheus`).
 - OTLP metrics need the scheduler: `Schedule::command('telemetry:flush')->everyMinute()->onOneServer();`
 - Ship logs as trace-correlated OTLP records by adding the `telemetry` log channel to the stack in `config/logging.php`: `['driver' => 'telemetry', 'level' => 'info']`.

@@ -19,16 +19,29 @@ final class QueryInstrumentation
 {
     private const MAX_QUERY_LENGTH = 500;
 
+    private float $minDurationMs = 0.0;
+
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
-    public function register(Dispatcher $events): void
+    public function register(Dispatcher $events, float $minDurationMs = 0.0): void
     {
+        $this->minDurationMs = $minDurationMs;
+
         $events->listen(QueryExecuted::class, $this->queryExecuted(...));
     }
 
     private function queryExecuted(QueryExecuted $event): void
     {
-        if ($this->telemetry->currentSpan() === null) {
+        $current = $this->telemetry->currentSpan();
+
+        // Only record inside a *sampled* trace — unsampled traces must not
+        // pay per-query span cost on N+1-heavy requests.
+        if ($current === null || ! $current->sampled) {
+            return;
+        }
+
+        // Optional noise floor: skip sub-threshold queries entirely.
+        if ($event->time < $this->minDurationMs) {
             return;
         }
 

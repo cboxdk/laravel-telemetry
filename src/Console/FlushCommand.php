@@ -30,15 +30,13 @@ final class FlushCommand extends Command
             return self::SUCCESS;
         }
 
-        $families = $telemetry->collect();
-
-        $telemetry->flushMetrics();
+        $count = $telemetry->flushMetrics();
         $telemetry->flush();
 
         $this->components->info(sprintf(
             'Flushed %d metric %s to %d exporter(s).',
-            count($families),
-            count($families) === 1 ? 'family' : 'families',
+            $count,
+            $count === 1 ? 'family' : 'families',
             count($telemetry->exporters()),
         ));
 

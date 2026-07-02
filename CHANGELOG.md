@@ -6,6 +6,29 @@ All notable changes to `cboxdk/laravel-telemetry` are documented here.
 
 Initial release.
 
+### Hardening (post-review)
+
+- Redis store: steady-state writes are now a single atomic command
+  (Redis Cluster-safe, ~5x fewer round trips); metadata refreshes per
+  deploy; `__since` field feeds OTLP cumulative start timestamps.
+- Event buffer capped (`events.max_buffer`) — long-running workers can't
+  grow memory unbounded.
+- Registry rejects mixing push and observable gauges under one name;
+  the Prometheus renderer additionally deduplicates same-name families
+  so a collision can never fail the whole scrape.
+- Queue instrumentation covers released-for-retry attempts
+  (`queue.jobs.released`) and keeps job spans on a stack so nested sync
+  dispatches can't leak the outer span.
+- OTLP: per-process circuit breaker after retryable failures (honours
+  Retry-After), gzip request compression, explicit TLS verification,
+  NAN/INF-safe serialization, `startTimeUnixNano` on cumulative points.
+- Query spans skip unsampled traces and support a
+  `queries_min_duration` noise floor.
+- `traces.trust_incoming_sampling` — keep trace-id correlation on public
+  edges while deciding sampling locally.
+- New `telemetry:doctor` command: store round trip, exporter
+  reachability, config warnings (flags an unprotected scrape endpoint).
+
 - Counters, push/observable gauges and histograms over a shared metric
   store (Redis, APCu, array drivers).
 - Tracing with W3C trace context: automatic request, queue job, DB query

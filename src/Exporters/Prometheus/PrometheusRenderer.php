@@ -27,7 +27,7 @@ final class PrometheusRenderer
     {
         $output = [];
 
-        foreach ($families as $family) {
+        foreach ($this->deduplicate($families) as $family) {
             $name = $family->definition->prometheusName();
 
             if ($family->type() === MetricType::Counter) {
@@ -59,6 +59,41 @@ final class PrometheusRenderer
     }
 
     /**
+     * A duplicate family name would fail the entire Prometheus scrape
+     * ("duplicate metric family"). Merge same-type duplicates (e.g. a
+     * stored push gauge and an observable from another process sharing a
+     * name); on a type conflict the first family wins.
+     *
+     * @param  list<MetricFamily>  $families
+     * @return list<MetricFamily>
+     */
+    private function deduplicate(array $families): array
+    {
+        /** @var array<string, MetricFamily> $byName */
+        $byName = [];
+
+        foreach ($families as $family) {
+            $existing = $byName[$family->name()] ?? null;
+
+            if ($existing === null) {
+                $byName[$family->name()] = $family;
+
+                continue;
+            }
+
+            if ($existing->type() === $family->type()) {
+                $byName[$family->name()] = new MetricFamily(
+                    $existing->definition,
+                    [...$existing->samples, ...$family->samples],
+                    $existing->startUnixNano ?? $family->startUnixNano,
+                );
+            }
+        }
+
+        return array_values($byName);
+    }
+
+    /**
      * @return list<string>
      */
     private function renderHistogram(string $name, HistogramSample $sample): array
@@ -72,9 +107,13 @@ final class PrometheusRenderer
             $lines[] = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => $this->formatValue($bound)]).' '.$cumulative;
         }
 
-        $lines[] = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => '+Inf']).' '.$sample->count;
+        // The +Inf bucket must never be below the cumulated buckets, even
+        // when non-atomic stores let count lag momentarily.
+        $total = max($sample->count, $cumulative + ($sample->bucketCounts[count($sample->bounds)] ?? 0));
+
+        $lines[] = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => '+Inf']).' '.$total;
         $lines[] = $name.'_sum'.$this->renderLabels($sample->labels).' '.$this->formatValue($sample->sum);
-        $lines[] = $name.'_count'.$this->renderLabels($sample->labels).' '.$sample->count;
+        $lines[] = $name.'_count'.$this->renderLabels($sample->labels).' '.$total;
 
         return $lines;
     }
@@ -94,7 +133,8 @@ final class PrometheusRenderer
         $parts = [];
 
         foreach ($all as $key => $value) {
-            $parts[] = $this->sanitizeLabelName($key).'="'.$this->escapeLabelValue($value).'"';
+            // Array keys may be ints (json_decode of numeric label names).
+            $parts[] = $this->sanitizeLabelName((string) $key).'="'.$this->escapeLabelValue($value).'"';
         }
 
         return '{'.implode(',', $parts).'}';
@@ -102,7 +142,10 @@ final class PrometheusRenderer
 
     private function sanitizeLabelName(string $name): string
     {
-        return (string) preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
+        $name = (string) preg_replace('/[^a-zA-Z0-9_]/', '_', $name);
+
+        // Label names must not start with a digit.
+        return preg_match('/^[0-9]/', $name) === 1 ? '_'.$name : $name;
     }
 
     private function escapeLabelValue(string $value): string
