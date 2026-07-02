@@ -91,6 +91,9 @@ final class TraceRequest
             $this->telemetry
                 ->histogram('http.server.request.duration', description: 'HTTP server request duration', unit: 'ms')
                 ->record($span->durationMs(), [
+                    // App-defined bounded dimensions (plan, team, …) via
+                    // Telemetry::labelRequestsUsing(); core labels win.
+                    ...$this->telemetry->resolveRequestLabels($request),
                     'http.request.method' => $request->method(),
                     'http.route' => $route,
                     'http.response.status_code' => (string) $response->getStatusCode(),

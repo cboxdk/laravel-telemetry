@@ -37,7 +37,9 @@ final class TelemetryLogHandler extends AbstractProcessingHandler
             $this->telemetry->recordEvent(new TelemetryEvent(
                 name: $record->message,
                 timeUnixNano: (int) ((float) $record->datetime->format('U.u') * 1e9),
-                attributes: ['log.channel' => $record->channel] + $this->contextAttributes($record->context),
+                attributes: $this->telemetry->contextAttributes()
+                    + ['log.channel' => $record->channel]
+                    + $this->contextAttributes($record->context),
                 traceId: $span->traceId ?? $this->telemetry->traceId(),
                 spanId: $span?->spanId,
                 severityNumber: $this->severityNumber($record->level),

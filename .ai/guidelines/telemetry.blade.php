@@ -11,6 +11,11 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - A decision or state transition you will query later → `Telemetry::event('autoscale.decision', ['workers' => 7])`.
 - Traced work → `Telemetry::span('import.customers', fn ($span) => ...)`. The closure form ends the span, records exceptions and rethrows — prefer it over manual `->end()`.
 
+### Custom dimensions
+
+- Set ambient facets once per request (middleware, after tenant/auth resolution): `Telemetry::context(['team.id' => $id, 'plan' => $plan])` — they flow to every span/event/log AND into dispatched jobs automatically. Never put unbounded ids in metric labels; context is for traces/events/logs.
+- For bounded metric dimensions (plan/tier/team) use `Telemetry::labelRequestsUsing(fn ($request) => ['plan' => ...])` — enables p95 per plan in PromQL. Bounded values only.
+
 ### Rules
 
 - Metric names: lowercase, dot-namespaced, OTel-style (`orders.created`, `billing.invoices.overdue`). Names match `[a-z][a-z0-9._]*`. A name keeps one instrument type forever.

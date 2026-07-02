@@ -22,6 +22,7 @@ use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
+use Illuminate\Http\Request;
 
 /**
  * The telemetry entry point, resolved behind the Telemetry facade.
@@ -44,6 +45,8 @@ class TelemetryManager
     private array $events = [];
 
     private bool $flushing = false;
+
+    private ?Closure $requestLabelResolver = null;
 
     /**
      * @param  array<string, scalar>  $resource
@@ -171,6 +174,66 @@ class TelemetryManager
         $this->tracer->resetContext();
     }
 
+    /**
+     * Add custom dimensions (team, tenant, plan, …) that merge into every
+     * span, event and telemetry-channel log record for the rest of the
+     * request/job — and travel with dispatched jobs:
+     *
+     *     Telemetry::context(['team.id' => $team->id, 'plan' => $plan]);
+     *
+     * Traces/events/logs only — never metric labels (cardinality safety);
+     * use labelRequestsUsing() for bounded metric dimensions.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function context(array $attributes): void
+    {
+        if (! $this->enabled) {
+            return;
+        }
+
+        $this->tracer->addContext($attributes);
+    }
+
+    /**
+     * @return array<string, scalar|null>
+     */
+    public function contextAttributes(): array
+    {
+        return $this->tracer->contextAttributes();
+    }
+
+    /**
+     * Add BOUNDED extra labels (plan, tier, team — never ids with
+     * unbounded cardinality) to the http.server.request.duration metric:
+     *
+     *     Telemetry::labelRequestsUsing(fn ($request) => [
+     *         'plan' => $request->user()?->plan ?? 'guest',
+     *     ]);
+     *
+     * Enables p95/p99 per plan/team in PromQL.
+     *
+     * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
+     */
+    public function labelRequestsUsing(?Closure $resolver): void
+    {
+        $this->requestLabelResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     *
+     * @return array<string, scalar|null>
+     */
+    public function resolveRequestLabels(mixed $request): array
+    {
+        if ($this->requestLabelResolver === null) {
+            return [];
+        }
+
+        return FailSafe::guard(fn (): array => ($this->requestLabelResolver)($request)) ?? [];
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Events
@@ -189,7 +252,8 @@ class TelemetryManager
         $this->recordEvent(new TelemetryEvent(
             name: $name,
             timeUnixNano: (int) (microtime(true) * 1e9),
-            attributes: $attributes,
+            // Ambient context dimensions ride along; explicit wins.
+            attributes: [...$this->tracer->contextAttributes(), ...$attributes],
             traceId: $span->traceId ?? $this->tracer->traceId(),
             spanId: $span?->spanId,
         ));

@@ -91,6 +91,21 @@ final class Span
     }
 
     /**
+     * Fill attributes without overwriting — span-specific values always
+     * win over ambient context dimensions.
+     *
+     * @param  array<string, scalar|null>  $defaults
+     */
+    public function mergeMissingAttributes(array $defaults): self
+    {
+        foreach ($defaults as $key => $value) {
+            $this->attributes[$key] ??= $value;
+        }
+
+        return $this;
+    }
+
+    /**
      * @param  array<string, scalar|null>  $attributes
      */
     public function addEvent(string $name, array $attributes = []): self

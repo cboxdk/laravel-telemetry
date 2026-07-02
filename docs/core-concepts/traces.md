@@ -46,6 +46,55 @@ Request spans carry `enduser.id` (the authenticated user's id — never
 name or email) so traces are filterable per user in TraceQL:
 `{ span.enduser.id = "42" }`. Disable with `instrument.user`.
 
+## Custom dimensions (context)
+
+Nightwatch-style facets — set once, applied everywhere:
+
+```php
+// e.g. in middleware, after tenant/team resolution:
+Telemetry::context([
+    'team.id' => $team->id,
+    'team.name' => $team->slug,
+    'plan' => $team->plan,
+]);
+```
+
+From that point every span, event and telemetry-channel log record in the
+request carries the dimensions (span-specific attributes win on
+conflict) — and **dispatched jobs inherit them**, together with
+`messaging.origin.name` (the dispatching request/command name), so a job
+is queryable by team AND traceable back to the exact request that queued
+it:
+
+```traceql
+{ span.team.name = "checkout" && kind = consumer }
+{ span.messaging.origin.name = "POST /demo/orders" }
+```
+
+Context clears automatically between requests and jobs.
+
+## Metric dimensions (bounded!)
+
+Context is traces/events/logs only — metric labels multiply cardinality.
+For **bounded** dimensions (plan, tier, team — never raw ids) opt in to
+extra request-duration labels:
+
+```php
+Telemetry::labelRequestsUsing(fn ($request) => [
+    'plan' => $request->user()?->plan ?? 'guest',
+]);
+```
+
+That enables per-plan latency in PromQL:
+
+```promql
+histogram_quantile(0.95, sum by (le, plan)
+  (rate(http_server_request_duration_milliseconds_bucket[5m])))
+```
+
+Core labels (`http.route`, method, status) always win over resolver
+labels; a throwing resolver is reported and ignored.
+
 ## Context propagation
 
 Outbound propagation uses the full W3C `traceparent` — trace id **and**

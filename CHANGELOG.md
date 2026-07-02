@@ -15,6 +15,12 @@ Initial release.
 
 ### Observability UX
 
+- `Telemetry::context([...])`: custom dimensions (team, tenant, plan)
+  merged into every span, event and log record — inherited by dispatched
+  jobs along with `messaging.origin.name` (the dispatch origin).
+- `Telemetry::labelRequestsUsing()`: bounded extra labels on the request
+  duration histogram — p95/p99 per plan/team in PromQL.
+
 - Request spans carry `enduser.id` (authenticated user id, opt-out via
   `instrument.user`) for per-user trace filtering.
 - Queue metric label renamed `job` -> `job.name` (`job_name` in

@@ -49,9 +49,21 @@ final class QueueInstrumentation
     {
         if ($propagate) {
             $queue->createPayloadUsing(function () {
-                $traceparent = $this->telemetry()->traceparent();
+                $telemetry = $this->telemetry();
+                $traceparent = $telemetry->traceparent();
 
-                return $traceparent === null ? [] : ['telemetry' => ['traceparent' => $traceparent]];
+                if ($traceparent === null) {
+                    return [];
+                }
+
+                // Carry the full context: trace position, ambient custom
+                // dimensions (team, plan, …) and where this dispatch came
+                // from — the worker restores all of it.
+                return ['telemetry' => array_filter([
+                    'traceparent' => $traceparent,
+                    'context' => $telemetry->contextAttributes() ?: null,
+                    'origin' => $telemetry->tracer()->rootSpan()?->name,
+                ])];
             });
         }
 
@@ -66,31 +78,47 @@ final class QueueInstrumentation
     private function jobProcessing(JobProcessing $event): void
     {
         FailSafe::guard(function () use ($event) {
+            $payload = $event->job->payload();
+            $carried = is_array($payload['telemetry'] ?? null) ? $payload['telemetry'] : [];
+
             // Sync jobs run inline inside the dispatcher's context — the
             // consumer span nests naturally and the caller's trace must
             // survive the job. Only real workers reset + continue.
             if ($event->connectionName !== 'sync') {
                 $this->telemetry()->resetContext();
 
-                $payload = $event->job->payload();
-                $traceparent = $payload['telemetry']['traceparent'] ?? null;
-
-                if (is_string($traceparent)) {
-                    $this->telemetry()->continueTrace($traceparent);
+                if (is_string($carried['traceparent'] ?? null)) {
+                    $this->telemetry()->continueTrace($carried['traceparent']);
                 }
+
+                // Restore the dispatcher's custom dimensions (team, plan…)
+                // so the job's spans, events and logs carry them too.
+                if (is_array($carried['context'] ?? null)) {
+                    $this->telemetry()->context($carried['context']);
+                }
+            }
+
+            $attributes = [
+                'messaging.system' => 'laravel_queue',
+                'messaging.operation.type' => 'process',
+                'messaging.destination.name' => $event->job->getQueue(),
+                'messaging.consumer.connection' => $event->connectionName,
+                'laravel.job.class' => $event->job->resolveName(),
+                'laravel.job.attempts' => $event->job->attempts(),
+            ];
+
+            // The human-readable dispatch origin ("POST /demo/orders",
+            // "artisan reports:send") — queryable without walking the trace.
+            if (is_string($carried['origin'] ?? null)) {
+                $attributes['messaging.origin.name'] = $carried['origin'];
+            } elseif ($event->connectionName === 'sync' && ($root = $this->telemetry()->tracer()->rootSpan()) !== null) {
+                $attributes['messaging.origin.name'] = $root->name;
             }
 
             $this->jobSpans[] = $this->telemetry()->tracer()->startSpan(
                 $event->job->resolveName().' process',
                 SpanKind::Consumer,
-                [
-                    'messaging.system' => 'laravel_queue',
-                    'messaging.operation.type' => 'process',
-                    'messaging.destination.name' => $event->job->getQueue(),
-                    'messaging.consumer.connection' => $event->connectionName,
-                    'laravel.job.class' => $event->job->resolveName(),
-                    'laravel.job.attempts' => $event->job->attempts(),
-                ],
+                $attributes,
             );
         });
     }

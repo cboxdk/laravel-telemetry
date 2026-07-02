@@ -33,10 +33,42 @@ final class Tracer
 
     private ?Closure $onBufferFull = null;
 
+    /** @var array<string, scalar|null> ambient dimensions merged into every finished span */
+    private array $contextAttributes = [];
+
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
     ) {}
+
+    /**
+     * Add ambient context dimensions (team, tenant, plan, …). They merge
+     * into every span that finishes from now on — span-specific
+     * attributes win on conflict.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function addContext(array $attributes): void
+    {
+        $this->contextAttributes = [...$this->contextAttributes, ...$attributes];
+    }
+
+    /**
+     * @return array<string, scalar|null>
+     */
+    public function contextAttributes(): array
+    {
+        return $this->contextAttributes;
+    }
+
+    /**
+     * The root of the active context — e.g. the request span, useful as
+     * the origin name for dispatched work.
+     */
+    public function rootSpan(): ?Span
+    {
+        return $this->stack[0] ?? null;
+    }
 
     /**
      * Continue a trace started elsewhere (incoming request, queued job).
@@ -208,6 +240,7 @@ final class Tracer
         $this->remoteParent = null;
         $this->traceId = null;
         $this->sampled = null;
+        $this->contextAttributes = [];
     }
 
     private function finish(Span $span): void
@@ -222,6 +255,10 @@ final class Tracer
 
         if (! $span->sampled) {
             return;
+        }
+
+        if ($this->contextAttributes !== []) {
+            $span->mergeMissingAttributes($this->contextAttributes);
         }
 
         $this->finished[] = $span;
