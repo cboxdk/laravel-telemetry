@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Support\Redactor;
 
 function redactor(array $config = []): Redactor
@@ -73,4 +74,28 @@ it('does nothing when disabled', function () {
     $redactor = redactor(['enabled' => false]);
 
     expect($redactor->value('user.password', 'hunter2'))->toBe('hunter2');
+});
+
+it('scrubs log messages, not just attributes', function () {
+    $redactor = redactor();
+
+    $events = $redactor->events([new TelemetryEvent(
+        name: 'refresh failed for Bearer abcdef1234567890abcdef',
+        timeUnixNano: 1,
+        severityNumber: 17,
+        severityText: 'ERROR',
+    )]);
+
+    expect($events[0]->name)->toBe('refresh failed for Bearer [REDACTED]');
+});
+
+it('applies the custom hook to log messages', function () {
+    $redactor = redactor();
+    $redactor->redactUsing(fn (string $key, string $value) => $key === 'log.message' ? strtoupper($value) : null);
+
+    $log = $redactor->events([new TelemetryEvent('sensitive line', 1, severityNumber: 9, severityText: 'INFO')]);
+    $event = $redactor->events([new TelemetryEvent('order.placed', 1)]);
+
+    expect($log[0]->name)->toBe('SENSITIVE LINE')
+        ->and($event[0]->name)->toBe('order.placed');
 });

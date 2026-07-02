@@ -46,6 +46,9 @@ exporter:
   value — JWTs, `Bearer`/`Basic` credentials and url userinfo
   (`redis://user:pass@host`) by default — wherever they appear:
   exception messages, event payloads, log records.
+- The engine covers **log records** too — the message itself (key
+  `log.message`) and its context attributes are scrubbed like everything
+  else.
 - **Custom hook**, run last:
 
 ```php

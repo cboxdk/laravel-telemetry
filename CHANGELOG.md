@@ -8,6 +8,13 @@ Initial release.
 
 ### Performance
 
+- OTLP spool + flush daemon for high traffic
+  (`TELEMETRY_OTLP_SPOOL=true` + `telemetry:flush --daemon`): requests
+  push serialized spans/events to a capped Redis list (one RPUSH, no
+  HTTP at terminate); the daemon ships merged batches every second and
+  metrics every 15 s. Endpoint-down chunks are requeued, daemon-down
+  caps at drop-oldest, SIGTERM drains before exit. Cron mode drains the
+  spool once per run.
 - Write buffering (`buffer_writes`, default on): metric writes aggregate
   in memory and flush once at request/job terminate — repeated increments
   cost one store command, histogram observations flush as pre-aggregated
@@ -22,8 +29,8 @@ Initial release.
   Login/Logout events are remembered within the request, so the login
   POST itself and logout requests get user attribution too.
 - Redaction engine (`telemetry.redaction`): every span attribute, span
-  event (exception messages) and telemetry event passes one choke point
-  at flush — key-segment matching (`password`, `api_key`, …) replaces
+  event (exception messages), telemetry event and log record (message +
+  context) passes one choke point at flush — key-segment matching (`password`, `api_key`, …) replaces
   whole values, regex patterns scrub embedded secrets (JWTs,
   Bearer/Basic credentials, url userinfo), and
   `Telemetry::redactUsing()` adds a custom last pass.

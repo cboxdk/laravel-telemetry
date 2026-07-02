@@ -97,6 +97,17 @@ return [
 
         // gzip request bodies above 1 KB.
         'compression' => env('TELEMETRY_OTLP_COMPRESSION', true),
+
+        // High-traffic mode: instead of POSTing at request terminate,
+        // spans/events are pushed to a capped Redis list (one RPUSH per
+        // request) and `telemetry:flush --daemon` ships them in merged
+        // batches every --interval seconds. Drop-oldest above max_items.
+        'spool' => [
+            'enabled' => env('TELEMETRY_OTLP_SPOOL', false),
+            'connection' => env('TELEMETRY_SPOOL_CONNECTION', 'default'),
+            'key' => env('TELEMETRY_SPOOL_KEY', 'telemetry:spool'),
+            'max_items' => env('TELEMETRY_SPOOL_MAX_ITEMS', 20000),
+        ],
     ],
 
     /*

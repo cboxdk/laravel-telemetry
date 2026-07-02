@@ -57,6 +57,15 @@ Valid entries: `otlp`, `null`, or a fully-qualified class name implementing
 | `otlp.connect_timeout` | `TELEMETRY_OTLP_CONNECT_TIMEOUT` | `1.0` s |
 | `otlp.compression` | `TELEMETRY_OTLP_COMPRESSION` | `true` (gzip bodies > 1 KB) |
 
+| `otlp.spool.enabled` | `TELEMETRY_OTLP_SPOOL` | `false` — spans/events go to a Redis list instead of POSTing at terminate; `telemetry:flush` (cron or `--daemon`) ships merged batches |
+| `otlp.spool.connection` | `TELEMETRY_SPOOL_CONNECTION` | `default` |
+| `otlp.spool.key` | `TELEMETRY_SPOOL_KEY` | `telemetry:spool` |
+| `otlp.spool.max_items` | `TELEMETRY_SPOOL_MAX_ITEMS` | `20000` (drop-oldest above) |
+
+Daemon mode for high traffic:
+`telemetry:flush --daemon --interval=1 --metrics-interval=15 --max-batch=200`
+(one process under supervisor; graceful SIGTERM drain).
+
 After a retryable transport failure (429/5xx, network), an in-process
 circuit breaker skips exports for 30 s (or the server's `Retry-After`).
 
@@ -104,8 +113,10 @@ everything and a `public` endpoint filtered to a prefix list:
 | `redaction.patterns` | — | `Redactor::defaultPatterns()` — JWTs, Bearer/Basic credentials, url userinfo (regex ⇒ replacement) |
 | `redaction.replacement` | — | `[REDACTED]` |
 
-Applied to span attributes, span events and telemetry events at flush.
-Custom last-pass hook: `Telemetry::redactUsing(fn ($key, $value) => ...)`.
+Applied to span attributes, span events, telemetry events AND log
+records (message + context) at flush. Custom last-pass hook:
+`Telemetry::redactUsing(fn ($key, $value) => ...)` — log messages arrive
+with the key `log.message`.
 
 ## Events
 

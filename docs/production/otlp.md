@@ -39,6 +39,49 @@ so one flusher is enough (and avoids duplicate datapoints).
 Metrics are exported with cumulative temporality — backends see monotonic
 series regardless of how many PHP processes contributed.
 
+## High traffic: the spool + flush daemon
+
+At scale, two costs bite: per-request OTLP POSTs at terminate, and a
+one-minute metrics cadence that is too coarse. The spool solves both —
+the Nightwatch-agent model, with Redis instead of a local socket:
+
+```dotenv
+TELEMETRY_OTLP_SPOOL=true
+```
+
+```bash
+php artisan telemetry:flush --daemon --interval=1 --metrics-interval=15
+```
+
+With the spool enabled, requests serialize their spans/events and push
+them to a capped Redis list — one `RPUSH`, microseconds, no HTTP in the
+request lifecycle. The daemon (one process, under supervisor) drains the
+list every `--interval` seconds, merges up to `--max-batch` entries into
+a single OTLP request, and flushes metrics every `--metrics-interval`
+seconds — sub-second span delivery, sub-minute metrics.
+
+Delivery semantics:
+
+- **Endpoint down** → the chunk is requeued at the front and retried
+  next tick; nothing is lost to a collector hiccup.
+- **Daemon down** → the list caps at `otlp.spool.max_items` (20 000 by
+  default) with drop-oldest semantics; app memory and Redis stay bounded.
+- **SIGTERM** → the daemon drains what remains before exiting, so
+  restarts don't strand telemetry.
+
+Supervisor program:
+
+```ini
+[program:telemetry-flush]
+command=php /var/www/artisan telemetry:flush --daemon --interval=1
+autorestart=true
+stopwaitsecs=10
+```
+
+Cron mode still works with the spool — `telemetry:flush` (no flags)
+drains it once per run. Without the spool, spans export directly at
+terminate and only metrics need the scheduler, as above.
+
 ## Latency budget
 
 Trace export happens after the response is sent (terminable middleware),
@@ -47,9 +90,9 @@ but still occupies the FPM worker. The transport uses tight timeouts
 429/503 responses are classified retryable and simply dropped for that
 batch — telemetry is best-effort by design.
 
-If your OTLP backend is slow or far away, put a local OTel collector or
-Grafana Alloy next to the app as a fast buffer — supported, just never
-required.
+If your OTLP backend is slow or far away, enable the spool above — it is
+exactly that fast local buffer, without the extra binary. A local OTel
+collector or Grafana Alloy works too — supported, just never required.
 
 ## No collector? No problem
 

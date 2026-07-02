@@ -130,7 +130,9 @@ final class Redactor
         }
 
         return array_map(fn (TelemetryEvent $event): TelemetryEvent => new TelemetryEvent(
-            name: $event->name,
+            // Log records carry the log MESSAGE as their name — free-form
+            // text that needs the same scrubbing as any attribute value.
+            name: $this->value($event->severityText !== null ? 'log.message' : 'event.name', $event->name),
             timeUnixNano: $event->timeUnixNano,
             attributes: $this->attributes($event->attributes),
             traceId: $event->traceId,
@@ -172,7 +174,11 @@ final class Redactor
         }
 
         foreach ($this->patterns as $pattern => $replacement) {
-            $scrubbed = @preg_replace($pattern, $replacement, $value);
+            if (! $this->patternCompiles($pattern)) {
+                continue;
+            }
+
+            $scrubbed = preg_replace($pattern, $replacement, $value);
 
             if (is_string($scrubbed)) {
                 $value = $scrubbed;
@@ -184,6 +190,26 @@ final class Redactor
         }
 
         return $value;
+    }
+
+    /** @var array<string, bool> */
+    private array $compiles = [];
+
+    /**
+     * A pattern that fails to compile is skipped (checked once, silently
+     * — a broken config entry must never break telemetry).
+     */
+    private function patternCompiles(string $pattern): bool
+    {
+        return $this->compiles[$pattern] ??= (function () use ($pattern): bool {
+            set_error_handler(static fn (): bool => true);
+
+            try {
+                return preg_match($pattern, '') !== false;
+            } finally {
+                restore_error_handler();
+            }
+        })();
     }
 
     /**

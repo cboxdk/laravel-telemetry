@@ -16,6 +16,9 @@ use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Prometheus\PrometheusRenderer;
+use Cbox\Telemetry\Exporters\Spool\RedisSpool;
+use Cbox\Telemetry\Exporters\Spool\Spool;
+use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
@@ -39,6 +42,7 @@ use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Tracing\Tracer;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
+use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
@@ -60,6 +64,29 @@ class TelemetryServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->singleton(OtlpTransport::class, function (Application $app) {
+            $config = $app->make('config');
+
+            return new OtlpTransport(
+                endpoint: (string) $config->get('telemetry.otlp.endpoint'),
+                headers: (array) $config->get('telemetry.otlp.headers', []),
+                timeout: (float) $config->get('telemetry.otlp.timeout', 3.0),
+                connectTimeout: (float) $config->get('telemetry.otlp.connect_timeout', 1.0),
+                compress: (bool) $config->get('telemetry.otlp.compression', true),
+            );
+        });
+
+        $this->app->singleton(Spool::class, function (Application $app) {
+            $config = $app->make('config');
+
+            return new RedisSpool(
+                redis: $app->make('redis'),
+                connection: (string) $config->get('telemetry.otlp.spool.connection', 'default'),
+                key: (string) $config->get('telemetry.otlp.spool.key', 'telemetry:spool'),
+                maxItems: (int) $config->get('telemetry.otlp.spool.max_items', 20000),
+            );
+        });
+
         $this->mergeConfigFrom(__DIR__.'/../config/telemetry.php', 'telemetry');
 
         $this->app->singleton(MetricStore::class, fn (Application $app) => $this->buildStore($app));
@@ -286,16 +313,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         foreach ($names as $name) {
             $exporters[] = match (true) {
-                $name === 'otlp' => new OtlpExporter(
-                    new OtlpTransport(
-                        endpoint: (string) $config->get('telemetry.otlp.endpoint'),
-                        headers: (array) $config->get('telemetry.otlp.headers', []),
-                        timeout: (float) $config->get('telemetry.otlp.timeout', 3.0),
-                        connectTimeout: (float) $config->get('telemetry.otlp.connect_timeout', 1.0),
-                        compress: (bool) $config->get('telemetry.otlp.compression', true),
-                    ),
-                    new OtlpSerializer($this->buildResource($app)),
-                ),
+                $name === 'otlp' => $this->buildOtlpExporter($app, $config),
                 $name === 'null' => new NullExporter,
                 // Custom exporters: reference the class name in config,
                 // resolved through the container.
@@ -306,6 +324,24 @@ class TelemetryServiceProvider extends ServiceProvider
 
         /** @var list<Exporter> $exporters */
         return $exporters;
+    }
+
+    /**
+     * Direct OTLP, or — with the spool enabled — spans/events buffered
+     * in Redis for `telemetry:flush --daemon` to ship in merged batches.
+     */
+    private function buildOtlpExporter(Application $app, Repository $config): Exporter
+    {
+        $direct = new OtlpExporter(
+            $app->make(OtlpTransport::class),
+            $serializer = new OtlpSerializer($this->buildResource($app)),
+        );
+
+        if (! $config->get('telemetry.otlp.spool.enabled', false)) {
+            return $direct;
+        }
+
+        return new SpoolingOtlpExporter($direct, $serializer, $app->make(Spool::class));
     }
 
     private function registerPrometheusRoutes(): void
