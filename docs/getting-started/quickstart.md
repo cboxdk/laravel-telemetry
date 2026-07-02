@@ -87,3 +87,32 @@ Events are exported as OTLP log records, correlated to the active trace.
 
 - `GET /telemetry/metrics` — Prometheus text format, rendered on demand.
 - OTLP backend — spans/events at terminate, metrics via `telemetry:flush`.
+
+## Agent prompt
+
+Have your AI assistant instrument the app's important flows:
+
+```text
+Instrument the business-critical flows of this Laravel app with
+cboxdk/laravel-telemetry (already installed; use the
+Cbox\Telemetry\Facades\Telemetry facade).
+
+First read vendor/cboxdk/laravel-telemetry/docs/getting-started/api-reference.md
+and docs/core-concepts/naming.md. Then:
+
+1. Identify the 3-5 most important domain flows (checkout, imports,
+   signups, ...) by reading the codebase. Propose the list before coding.
+2. For each flow add: a counter for occurrences (OTel-style dot-namespaced
+   name, e.g. orders.created), a histogram with unit 'ms' for duration
+   where timing matters (prefer ->time(fn () => ...)), and
+   Telemetry::event() for decisions worth auditing.
+3. Wrap multi-step domain operations in Telemetry::span('domain.op',
+   fn ($span) => ...) with bounded attributes.
+4. Rules: labels must be bounded values (plan, status, queue) — never ids,
+   emails or URLs; do not wrap calls in try/catch; do not add spans for
+   HTTP requests, queue jobs or DB queries (auto-instrumented).
+5. Write Pest tests using Telemetry::fake() asserting each new metric and
+   span (assertCounterIncremented, assertSpanRecorded, ...).
+6. Run composer test and show me a summary table of every metric/span/event
+   added: name, type, unit, labels.
+```

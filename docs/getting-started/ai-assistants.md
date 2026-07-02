@@ -24,6 +24,24 @@ try/catch), auto-instrumentation boundaries (don't hand-roll request/job
 spans), `Telemetry::fake()` in tests, and the provider pattern for
 packages.
 
+## Copy-paste agent prompts
+
+Several documentation pages end with an **Agent prompt** block — a
+self-contained task you can paste straight into your assistant:
+
+| Task | Where |
+|---|---|
+| Install & configure the package | [Installation](installation.md#agent-prompt) |
+| Instrument the app's key flows | [Quickstart](quickstart.md#agent-prompt) |
+| Wire the log channel into the stack | [Logs](../core-concepts/logs.md#agent-prompt) |
+| Add telemetry to your own package | [Providers](../extension-points/providers.md#agent-prompt) |
+| Connect to the Grafana stack | [Grafana stack](../production/grafana-stack.md#agent-prompt) |
+
+Each prompt encodes the guardrails (bounded labels, no defensive
+try/catch, don't re-instrument what's automatic, verify with tests) so
+the result follows the conventions even if the assistant never reads the
+rest of the docs.
+
 ## llms.txt
 
 The repo root contains an [`llms.txt`](../../llms.txt) index mapping every

@@ -27,5 +27,6 @@ Initial release.
 - `php artisan about` section showing store, exporters, endpoints and
   sample rate.
 - AI surface: Laravel Boost package guidelines (`.ai/guidelines/`),
-  `llms.txt` documentation index, and an `AGENTS.md`/`CLAUDE.md` agent
-  guide for contributors.
+  `llms.txt` documentation index, an `AGENTS.md`/`CLAUDE.md` agent guide
+  for contributors, and copy-paste **Agent prompt** blocks in the docs
+  (install, instrument-my-app, log channel, package provider, Grafana).

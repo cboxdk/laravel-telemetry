@@ -59,6 +59,24 @@ supporting the events signal (`/v1/logs` on OTLP).
 Log records emitted *while a flush is exporting* are dropped — a failing
 exporter that reports through the logging stack can never feed itself.
 
+## Agent prompt
+
+```text
+Wire cboxdk/laravel-telemetry's log channel into this Laravel app:
+
+1. In config/logging.php add:
+   'telemetry' => ['driver' => 'telemetry', 'level' => env('TELEMETRY_LOG_LEVEL', 'info')]
+   and append 'telemetry' to the channels array of the 'stack' channel.
+   If LOG_CHANNEL is not 'stack', ask me before changing it.
+2. Leave all existing channels untouched — telemetry is additive.
+3. Verify with a Pest test: Telemetry::fake(), then
+   Log::channel('telemetry')->warning('test', ['k' => 'v']) and assert via
+   $fake->recordedEvents() that severityNumber is 13 and the context
+   attribute log.context.k equals 'v'.
+4. Note in your summary: records correlate to the active trace
+   automatically; nothing else to configure.
+```
+
 ## Logs vs. events
 
 - **`telemetry` channel** — your existing operational logging, exported.

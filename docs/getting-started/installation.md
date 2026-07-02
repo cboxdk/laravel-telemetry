@@ -70,3 +70,35 @@ TELEMETRY_ENABLED=false
 ```
 
 Instruments become no-ops, no listeners are registered, routes disappear.
+
+## Agent prompt
+
+Paste this into your AI assistant (Claude Code, Cursor, Copilot) to have
+it perform the installation:
+
+```text
+Install and configure cboxdk/laravel-telemetry in this Laravel app:
+
+1. composer require cboxdk/laravel-telemetry
+2. Pick the metric store: set TELEMETRY_STORE=redis in .env if the app has
+   Redis configured (check config/database.php); otherwise use apcu when
+   ext-apcu is available, else ask me. If Redis is shared with the queue,
+   add a dedicated `telemetry` connection in config/database.php and set
+   TELEMETRY_REDIS_CONNECTION=telemetry.
+3. If we export to an OTLP backend (Tempo/Grafana/Honeycomb), set
+   TELEMETRY_EXPORTERS=otlp and OTEL_EXPORTER_OTLP_ENDPOINT, and register
+   Schedule::command('telemetry:flush')->everyMinute()->onOneServer() in
+   routes/console.php. Skip this if we only scrape Prometheus.
+4. Protect the Prometheus endpoint: set TELEMETRY_ALLOWED_IPS to our
+   monitoring CIDR, or disable it with TELEMETRY_PROMETHEUS_ENABLED=false
+   if unused.
+5. Add the telemetry log channel to the stack in config/logging.php:
+   'telemetry' => ['driver' => 'telemetry', 'level' => 'info'] and append
+   'telemetry' to the stack channel list.
+6. Verify: php artisan about must show a Telemetry section; a request to
+   /telemetry/metrics must return Prometheus text.
+7. Do NOT publish the config unless we need non-default endpoints.
+
+Conventions and API: read vendor/cboxdk/laravel-telemetry/llms.txt and
+vendor/cboxdk/laravel-telemetry/docs/getting-started/api-reference.md.
+```

@@ -86,6 +86,30 @@ system_memory_utilization{state="used"} > 0.9
 { name =~ "POST /checkout.*" && duration > 500ms && status = error }
 ```
 
+## Agent prompt
+
+```text
+Connect this Laravel app's cboxdk/laravel-telemetry to our Grafana stack:
+
+1. Ask me which flavour: (a) Grafana Cloud, (b) self-hosted
+   Tempo/Loki/Mimir behind one Alloy endpoint, or (c) self-hosted with
+   separate endpoints.
+2. Set TELEMETRY_EXPORTERS=otlp and OTEL_EXPORTER_OTLP_ENDPOINT. For
+   Grafana Cloud, publish the config (artisan vendor:publish
+   --tag=telemetry-config) and set otlp.headers Authorization to
+   'Basic '.base64_encode(instanceId.':'.token) reading BOTH from env —
+   never hardcode credentials.
+3. Metrics: prefer Prometheus/Alloy scraping GET /telemetry/metrics
+   (set TELEMETRY_ALLOWED_IPS accordingly). Only schedule
+   telemetry:flush ->everyMinute()->onOneServer() if we push via OTLP.
+4. Add the telemetry log channel to the logging stack so logs land in
+   Loki trace-correlated.
+5. Verify: php artisan telemetry:flush runs clean; php artisan about
+   shows the exporter; traces appear in Tempo after hitting any route.
+6. Summarize which signal goes where and what I must configure in
+   Grafana (Loki derived field on traceId -> Tempo; Tempo trace-to-logs).
+```
+
 ## Alternatives
 
 Anything with an OTLP HTTP receiver works unchanged: Honeycomb, Datadog,

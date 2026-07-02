@@ -62,6 +62,35 @@ Telemetry::contributes('my-app', function (Registry $registry) {
 });
 ```
 
+## Agent prompt
+
+For package authors — paste into your assistant inside the package repo:
+
+```text
+Add optional cboxdk/laravel-telemetry support to this Laravel package
+without making it a hard dependency:
+
+1. Create src/Telemetry/<PackageName>TelemetryProvider.php implementing
+   Cbox\Telemetry\Contracts\TelemetryProvider. name() returns
+   '<vendor>.<package>'. In register(Registry $registry) declare:
+   - observable gauges (callback form) for state that is cheap to query,
+   - counters/histograms for things the package's own event handlers
+     record. Names: lowercase dot-namespaced, prefixed with the package
+     domain; declare units; bounded labels only.
+2. In the package service provider's boot():
+   if (class_exists(\Cbox\Telemetry\Facades\Telemetry::class)) {
+       \Cbox\Telemetry\Facades\Telemetry::provider(new ...);
+   }
+3. composer.json: add cboxdk/laravel-telemetry to require-dev and suggest
+   (never require).
+4. Test with new \Cbox\Telemetry\Testing\TelemetryFake: register the
+   provider, call $fake->collect(), assert the expected families and
+   values. Also test that the package boots fine WITHOUT telemetry
+   installed (the guard).
+5. Document the published metrics in the package README: name, type,
+   unit, labels.
+```
+
 ## Guidelines
 
 - Prefix metric names with your package domain (`queue_autoscale.*`).
