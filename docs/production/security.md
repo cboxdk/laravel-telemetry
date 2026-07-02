@@ -1,7 +1,7 @@
 ---
 title: Security
 description: Keeping telemetry from leaking what it shouldn't
-weight: 4
+weight: 5
 ---
 
 # Security

@@ -1,7 +1,7 @@
 ---
 title: Naming
 description: One canonical vocabulary — OpenTelemetry semantic conventions
-weight: 5
+weight: 6
 ---
 
 # Naming

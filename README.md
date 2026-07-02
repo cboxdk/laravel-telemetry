@@ -33,6 +33,8 @@ spec-stable HTTP JSON.
 - ✅ Pure Composer package — deploys anywhere Laravel runs
 - ✅ Prometheus scrape endpoint(s) with IP allowlisting and metric filters
 - ✅ Real OTLP (`/v1/traces`, `/v1/metrics`, `/v1/logs`) without the SDK
+- ✅ `telemetry` log channel: Laravel logs become trace-correlated OTLP log
+  records (severity-mapped, feedback-loop safe)
 - ✅ Auto-instrumentation: requests, queue jobs (full W3C trace propagation
   into workers), DB queries, commands — plus `Http::withTraceparent()` for
   outbound calls
@@ -72,12 +74,18 @@ Full documentation lives in [`docs/`](docs/index.md):
   [metrics](docs/core-concepts/metrics.md),
   [traces](docs/core-concepts/traces.md),
   [events](docs/core-concepts/events.md),
+  [logs](docs/core-concepts/logs.md),
   [naming](docs/core-concepts/naming.md)
+- Cookbook —
+  [multi-tenant SaaS](docs/cookbook/multi-tenant-saas.md),
+  [queue monitoring](docs/cookbook/queue-monitoring.md),
+  [external services](docs/cookbook/external-services.md)
 - [Configuration reference](docs/configuration/reference.md)
 - [Extension points](docs/extension-points/providers.md) —
   [custom exporters](docs/extension-points/exporters.md)
 - [Production](docs/production/prometheus.md) —
   [OTLP](docs/production/otlp.md),
+  [**the recommended Grafana stack**](docs/production/grafana-stack.md),
   [performance](docs/production/performance.md),
   [security](docs/production/security.md)
 

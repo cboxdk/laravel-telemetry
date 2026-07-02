@@ -18,6 +18,7 @@ use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
+use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ApcuMetricStore;
 use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
@@ -32,9 +33,12 @@ use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Log\LogManager;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Octane\Events\RequestReceived;
+use Monolog\Level;
+use Monolog\Logger;
 
 class TelemetryServiceProvider extends ServiceProvider
 {
@@ -104,6 +108,31 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerOctaneReset();
         $this->registerHttpClientMacro();
         $this->registerAboutCommand();
+        $this->registerLogDriver();
+    }
+
+    /**
+     * The `telemetry` log channel: ships log records as trace-correlated
+     * OTLP log records. Add it to a stack in config/logging.php:
+     *
+     *     'telemetry' => ['driver' => 'telemetry', 'level' => 'info'],
+     */
+    private function registerLogDriver(): void
+    {
+        if (! class_exists(Logger::class)) {
+            return;
+        }
+
+        $this->callAfterResolving('log', function (LogManager $log) {
+            $log->extend('telemetry', function ($app, array $config) {
+                return new Logger('telemetry', [
+                    new TelemetryLogHandler(
+                        $app->make(TelemetryManager::class),
+                        $config['level'] ?? Level::Debug,
+                    ),
+                ]);
+            });
+        });
     }
 
     /**

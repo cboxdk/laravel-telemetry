@@ -42,6 +42,8 @@ class TelemetryManager
     /** @var list<TelemetryEvent> */
     private array $events = [];
 
+    private bool $flushing = false;
+
     /**
      * @param  array<string, scalar>  $resource
      */
@@ -177,19 +179,31 @@ class TelemetryManager
      */
     public function event(string $name, array $attributes = []): void
     {
-        if (! $this->enabled) {
-            return;
-        }
-
         $span = $this->tracer->currentSpan();
 
-        $this->events[] = new TelemetryEvent(
+        $this->recordEvent(new TelemetryEvent(
             name: $name,
             timeUnixNano: (int) (microtime(true) * 1e9),
             attributes: $attributes,
             traceId: $span->traceId ?? $this->tracer->traceId(),
             spanId: $span?->spanId,
-        );
+        ));
+    }
+
+    /**
+     * Buffer a pre-built event (used by the `telemetry` log channel).
+     *
+     * Events emitted while a flush is exporting are dropped — a failing
+     * exporter that logs through the telemetry channel must not feed
+     * itself.
+     */
+    public function recordEvent(TelemetryEvent $event): void
+    {
+        if (! $this->enabled || $this->flushing) {
+            return;
+        }
+
+        $this->events[] = $event;
     }
 
     /*
@@ -251,11 +265,17 @@ class TelemetryManager
             return;
         }
 
-        $this->export(new TelemetryBatch(
-            resource: $this->resource,
-            spans: $spans,
-            events: $events,
-        ), Signal::Traces, Signal::Events);
+        $this->flushing = true;
+
+        try {
+            $this->export(new TelemetryBatch(
+                resource: $this->resource,
+                spans: $spans,
+                events: $events,
+            ), Signal::Traces, Signal::Events);
+        } finally {
+            $this->flushing = false;
+        }
     }
 
     /**

@@ -24,6 +24,8 @@ Telemetry::span('import.customers', function () {
 });
 
 Telemetry::event('autoscale.decision', ['workers' => 5]);
+
+Log::info('Import done', ['rows' => 5021]); // → trace-correlated OTLP log
 ```
 
 ## Why this package
@@ -53,7 +55,9 @@ Telemetry::event('autoscale.decision', ['workers' => 5]);
 
 - Getting started: install, first metrics and spans, testing with the fake,
   and the one-page API reference.
-- Core concepts: architecture, metrics, traces, events, naming.
+- Core concepts: architecture, metrics, traces, events, logs, naming.
+- Cookbook: multi-tenant SaaS, queue monitoring, external services.
 - Configuration: every config key explained.
 - Extension points: telemetry providers and custom exporters.
-- Production: Prometheus setup, OTLP setup, performance and security notes.
+- Production: Prometheus setup, OTLP setup, the recommended Grafana stack,
+  performance and security notes.

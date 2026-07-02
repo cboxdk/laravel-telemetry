@@ -202,8 +202,8 @@ final readonly class OtlpSerializer
     {
         $record = [
             'timeUnixNano' => (string) $event->timeUnixNano,
-            'severityNumber' => 9, // INFO
-            'severityText' => 'INFO',
+            'severityNumber' => $event->severityNumber ?? 9, // default INFO
+            'severityText' => $event->severityText ?? 'INFO',
             'body' => ['stringValue' => $event->name],
             'attributes' => $this->attributes($event->attributes),
         ];

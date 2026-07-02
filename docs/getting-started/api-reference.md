@@ -62,10 +62,15 @@ Telemetry::resetContext();         // forget the active trace
 Http::withTraceparent()->post($url, $payload);
 ```
 
-## Events
+## Events & logs
 
 ```php
 Telemetry::event('autoscale.decision', ['workers' => 7]);
+```
+
+```php
+// config/logging.php — ship logs as trace-correlated OTLP log records
+'telemetry' => ['driver' => 'telemetry', 'level' => 'info'],
 ```
 
 ## Providers & exporters

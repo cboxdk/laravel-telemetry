@@ -22,5 +22,7 @@ Initial release.
 - Push gauges adjust atomically with `increment()`/`decrement()` for
   up-and-down values (in-flight jobs, active connections).
 - `Http::withTraceparent()` macro for opt-in outbound trace propagation.
+- `telemetry` log channel: Laravel logs exported as trace-correlated OTLP
+  log records with Monolog severity mapping and feedback-loop protection.
 - `php artisan about` section showing store, exporters, endpoints and
   sample rate.

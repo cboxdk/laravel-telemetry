@@ -1,7 +1,7 @@
 ---
 title: Performance
 description: What telemetry costs and how to tune it
-weight: 3
+weight: 4
 ---
 
 # Performance
