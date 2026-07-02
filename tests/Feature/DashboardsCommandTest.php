@@ -12,7 +12,7 @@ it('exports the bundled dashboards for file provisioning', function () {
 
     $files = glob("{$dir}/*.json");
 
-    expect($files)->toHaveCount(4);
+    expect($files)->toHaveCount(13);
 
     // Every dashboard is valid JSON, service-scoped and tagged.
     foreach ($files as $file) {
