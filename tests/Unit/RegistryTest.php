@@ -87,6 +87,19 @@ it('applies default buckets to histograms', function () {
         ->and($registry->histogram('custom.duration', buckets: [1.0, 2.0])->definition()->buckets)->toBe([1.0, 2.0]);
 });
 
+it('push gauges can increment and decrement atomically', function () {
+    $registry = registry();
+
+    $gauge = $registry->gauge('jobs.in_flight');
+    $gauge->increment(labels: ['queue' => 'default']);
+    $gauge->increment(2, ['queue' => 'default']);
+    $gauge->decrement(labels: ['queue' => 'default']);
+
+    $family = $registry->collect()[0];
+
+    expect($family->samples[0]->value)->toBe(2.0);
+});
+
 it('counters ignore negative increments', function () {
     $registry = registry();
 

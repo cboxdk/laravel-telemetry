@@ -44,6 +44,15 @@ final class ArrayMetricStore implements MetricStore
         $this->gauges[$definition->name]['series'][$key] = $value;
     }
 
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
+    {
+        $key = Labels::encode($labels);
+
+        $this->gauges[$definition->name] ??= ['definition' => $definition, 'series' => []];
+        $this->gauges[$definition->name]['series'][$key] ??= 0.0;
+        $this->gauges[$definition->name]['series'][$key] += $delta;
+    }
+
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
     {
         $key = Labels::encode($labels);

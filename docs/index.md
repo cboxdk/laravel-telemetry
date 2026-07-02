@@ -51,7 +51,8 @@ Telemetry::event('autoscale.decision', ['workers' => 5]);
 
 ## Sections
 
-- Getting started: install, first metrics and spans, testing with the fake.
+- Getting started: install, first metrics and spans, testing with the fake,
+  and the one-page API reference.
 - Core concepts: architecture, metrics, traces, events, naming.
 - Configuration: every config key explained.
 - Extension points: telemetry providers and custom exporters.

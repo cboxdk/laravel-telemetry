@@ -48,6 +48,14 @@ final class ApcuMetricStore implements MetricStore
         apcu_store($this->valueKey(MetricType::Gauge, $definition->name, $series), $this->toInt($value));
     }
 
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
+    {
+        $series = Labels::encode($labels);
+
+        $this->index($definition, $series);
+        $this->addFloat($this->valueKey(MetricType::Gauge, $definition->name, $series), $delta);
+    }
+
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
     {
         $series = Labels::encode($labels);

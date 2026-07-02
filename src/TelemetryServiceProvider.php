@@ -30,6 +30,8 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
+use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Octane\Events\RequestReceived;
@@ -100,6 +102,52 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerCommandInstrumentation();
         $this->registerSystemMetricsProvider();
         $this->registerOctaneReset();
+        $this->registerHttpClientMacro();
+        $this->registerAboutCommand();
+    }
+
+    /**
+     * Http::withTraceparent() attaches the current W3C trace context to an
+     * outbound request, so the downstream service continues the trace:
+     *
+     *     Http::withTraceparent()->post($url, $payload);
+     */
+    private function registerHttpClientMacro(): void
+    {
+        if (! class_exists(PendingRequest::class)) {
+            return;
+        }
+
+        $app = $this->app;
+
+        PendingRequest::macro('withTraceparent', function () use ($app) {
+            /** @var PendingRequest $this */
+            $traceparent = $app->make(TelemetryManager::class)->traceparent();
+
+            return $traceparent === null
+                ? $this
+                : $this->withHeaders(['traceparent' => $traceparent]);
+        });
+    }
+
+    private function registerAboutCommand(): void
+    {
+        if (! class_exists(AboutCommand::class)) {
+            return;
+        }
+
+        AboutCommand::add('Telemetry', fn () => [
+            'Enabled' => config('telemetry.enabled') ? '<fg=green;options=bold>ENABLED</>' : '<fg=yellow;options=bold>DISABLED</>',
+            'Metric Store' => (string) config('telemetry.store'),
+            'Exporters' => implode(', ', (array) config('telemetry.exporters', [])) ?: 'none',
+            'Prometheus' => config('telemetry.prometheus.enabled')
+                ? collect((array) config('telemetry.prometheus.endpoints'))->map(fn ($e) => '/'.ltrim($e['path'] ?? '', '/'))->implode(', ')
+                : 'off',
+            'Trace Sample Rate' => (string) config('telemetry.traces.sample_rate'),
+            'System Metrics' => class_exists(SystemMetrics::class) && config('telemetry.providers.system.enabled')
+                ? 'active'
+                : (config('telemetry.providers.system.enabled') ? 'install cboxdk/system-metrics to activate' : 'off'),
+        ]);
     }
 
     private function buildStore(Application $app): MetricStore

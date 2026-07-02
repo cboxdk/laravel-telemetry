@@ -72,6 +72,14 @@ final class TelemetryFake extends TelemetryManager
         }
     }
 
+    public function assertCounterNotIncremented(string $name): void
+    {
+        Assert::assertEmpty(
+            $this->samples($name, MetricType::Counter),
+            "Counter [{$name}] was unexpectedly incremented.",
+        );
+    }
+
     /**
      * @param  array<string, scalar|null>  $labels
      */
@@ -162,6 +170,14 @@ final class TelemetryFake extends TelemetryManager
         }
     }
 
+    public function assertSpanNotRecorded(string $name): void
+    {
+        Assert::assertEmpty(
+            $this->recordedSpans($name),
+            "A span named [{$name}] was unexpectedly recorded.",
+        );
+    }
+
     /**
      * @return list<Span>
      */
@@ -200,6 +216,14 @@ final class TelemetryFake extends TelemetryManager
 
             Assert::fail("An event named [{$name}] was emitted, but none matched the given callback.");
         }
+    }
+
+    public function assertEventNotEmitted(string $name): void
+    {
+        Assert::assertEmpty(
+            $this->recordedEvents($name),
+            "An event named [{$name}] was unexpectedly emitted.",
+        );
     }
 
     /**

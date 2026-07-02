@@ -52,12 +52,14 @@ span id — so downstream spans are children, not detached roots:
   dispatcher's context.)
 - **Incoming HTTP**: the middleware continues `traceparent` headers when
   `traces.continue_incoming` is on.
-- **Outbound HTTP**: attach the header yourself where you need it:
+- **Outbound HTTP**: opt in per request with the client macro (deliberate,
+  so trace headers never leak to third parties by accident):
 
 ```php
-Http::withHeaders(array_filter(['traceparent' => Telemetry::traceparent()]))
-    ->post($url, $payload);
+Http::withTraceparent()->post($url, $payload);
 ```
+
+The macro is a no-op when no trace is active.
 
 ## Sampling
 

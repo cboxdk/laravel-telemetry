@@ -65,6 +65,17 @@ it('asserts emitted events', function () {
     $fake->assertEventEmitted('autoscale.decision', fn ($event) => $event->attributes['workers'] === 5);
 });
 
+it('supports negative assertions', function () {
+    $fake = new TelemetryFake;
+
+    $fake->counter('orders.created')->inc();
+    $fake->span('work', fn () => null);
+
+    $fake->assertCounterNotIncremented('orders.cancelled');
+    $fake->assertSpanNotRecorded('other.work');
+    $fake->assertEventNotEmitted('never.happened');
+});
+
 it('correlates events to the active span', function () {
     $fake = new TelemetryFake;
 

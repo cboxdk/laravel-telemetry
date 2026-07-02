@@ -16,6 +16,8 @@ final class NullMetricStore implements MetricStore
 
     public function setGauge(MetricDefinition $definition, array $labels, float $value): void {}
 
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void {}
+
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void {}
 
     public function collect(): array

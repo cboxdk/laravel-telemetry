@@ -29,10 +29,13 @@ it('tracks the order', function () {
 | Assertion | Notes |
 |---|---|
 | `assertCounterIncremented($name, ?$labels)` | labels match exactly |
+| `assertCounterNotIncremented($name)` | |
 | `assertGaugeSet($name, ?$labels)` | push gauges |
 | `assertHistogramRecorded($name, ?$labels)` | |
 | `assertSpanRecorded($name, ?$callback)` | callback receives each `Span` |
+| `assertSpanNotRecorded($name)` | |
 | `assertEventEmitted($name, ?$callback)` | callback receives each `TelemetryEvent` |
+| `assertEventNotEmitted($name)` | |
 
 ## Reading values
 

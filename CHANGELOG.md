@@ -17,4 +17,10 @@ Initial release.
 - `telemetry:flush` command for scheduled OTLP metric export.
 - `TelemetryProvider` contract + `Telemetry::contributes()` for decoupled
   package telemetry; built-in `cboxdk/system-metrics` provider.
-- `Telemetry::fake()` with metric, span and event assertions.
+- `Telemetry::fake()` with metric, span and event assertions (positive and
+  negative).
+- Push gauges adjust atomically with `increment()`/`decrement()` for
+  up-and-down values (in-flight jobs, active connections).
+- `Http::withTraceparent()` macro for opt-in outbound trace propagation.
+- `php artisan about` section showing store, exporters, endpoints and
+  sample rate.

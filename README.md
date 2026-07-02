@@ -34,7 +34,8 @@ spec-stable HTTP JSON.
 - ✅ Prometheus scrape endpoint(s) with IP allowlisting and metric filters
 - ✅ Real OTLP (`/v1/traces`, `/v1/metrics`, `/v1/logs`) without the SDK
 - ✅ Auto-instrumentation: requests, queue jobs (full W3C trace propagation
-  into workers), DB queries, commands
+  into workers), DB queries, commands — plus `Http::withTraceparent()` for
+  outbound calls
 - ✅ `Telemetry::fake()` with assertions for counters, gauges, histograms,
   spans and events
 - ✅ Provider contract so packages publish telemetry without coupling
@@ -65,7 +66,8 @@ Full documentation lives in [`docs/`](docs/index.md):
 
 - [Getting started](docs/getting-started/installation.md) —
   [quickstart](docs/getting-started/quickstart.md),
-  [testing](docs/getting-started/testing.md)
+  [testing](docs/getting-started/testing.md),
+  [API reference](docs/getting-started/api-reference.md)
 - [Core concepts](docs/core-concepts/architecture.md) —
   [metrics](docs/core-concepts/metrics.md),
   [traces](docs/core-concepts/traces.md),

@@ -36,6 +36,29 @@ final readonly class Gauge
         ));
     }
 
+    /**
+     * Atomically increase the gauge — for values that go up and down
+     * (active connections, jobs in flight).
+     *
+     * @param  array<string, scalar|null>  $labels
+     */
+    public function increment(float $by = 1.0, array $labels = []): void
+    {
+        FailSafe::guard(fn () => $this->store->addGauge(
+            $this->definition,
+            $this->stringify($labels),
+            $by,
+        ));
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $labels
+     */
+    public function decrement(float $by = 1.0, array $labels = []): void
+    {
+        $this->increment(-$by, $labels);
+    }
+
     public function definition(): MetricDefinition
     {
         return $this->definition;

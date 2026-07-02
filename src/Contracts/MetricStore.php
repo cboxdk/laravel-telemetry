@@ -28,6 +28,13 @@ interface MetricStore
     public function setGauge(MetricDefinition $definition, array $labels, float $value): void;
 
     /**
+     * Atomically adjust a gauge by a (possibly negative) delta.
+     *
+     * @param  array<string, string>  $labels
+     */
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void;
+
+    /**
      * @param  array<string, string>  $labels
      */
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void;

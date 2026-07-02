@@ -27,6 +27,10 @@ Telemetry::gauge('queue.depth', fn () => Queue::size(), unit: '{jobs}');
 
 // Push: stored at event time. For values only known when they happen.
 Telemetry::gauge('deploy.timestamp')->set(now()->timestamp);
+
+// Push gauges also adjust atomically — for values that go up AND down:
+Telemetry::gauge('jobs.in_flight')->increment(labels: ['queue' => 'mail']);
+Telemetry::gauge('jobs.in_flight')->decrement(labels: ['queue' => 'mail']);
 ```
 
 Observable callbacks may return a single number or multiple series as

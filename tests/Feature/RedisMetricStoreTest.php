@@ -60,6 +60,17 @@ it('keeps the last gauge value per labelset', function () {
     expect($family->samples[0]->value)->toBe(4.0);
 });
 
+it('adjusts gauges atomically across store instances', function () {
+    $definition = new MetricDefinition('jobs.in_flight', MetricType::Gauge);
+    $other = new RedisMetricStore(app(Factory::class), 'default', $this->prefix);
+
+    $this->store->addGauge($definition, [], 3);
+    $other->addGauge($definition, [], 2);
+    $this->store->addGauge($definition, [], -1);
+
+    expect($this->store->collect()[0]->samples[0]->value)->toBe(4.0);
+});
+
 it('round-trips histograms with buckets, sum and count', function () {
     $definition = new MetricDefinition('req.duration', MetricType::Histogram, unit: 'ms', buckets: [10.0, 100.0]);
 

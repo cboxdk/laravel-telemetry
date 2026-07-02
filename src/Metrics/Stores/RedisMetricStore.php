@@ -67,6 +67,20 @@ final class RedisMetricStore implements MetricStore
         });
     }
 
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
+    {
+        $key = $this->familyKey(MetricType::Gauge, $definition->name);
+        $field = Labels::encode($labels);
+        $meta = $this->encodeMeta($definition);
+        $index = $this->indexKey(MetricType::Gauge);
+
+        $this->transaction(function ($tx) use ($key, $field, $delta, $meta, $index, $definition) {
+            $tx->hincrbyfloat($key, $field, $delta);
+            $tx->hsetnx($key, '__meta', $meta);
+            $tx->sadd($index, $definition->name);
+        });
+    }
+
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
     {
         $key = $this->familyKey(MetricType::Histogram, $definition->name);
