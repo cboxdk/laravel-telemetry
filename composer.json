@@ -69,7 +69,7 @@
         }
     },
     "scripts": {
-        "analyse": "vendor/bin/phpstan analyse",
+        "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
         "format": "vendor/bin/pint",
         "format:check": "vendor/bin/pint --test",
         "test": "vendor/bin/pest",
