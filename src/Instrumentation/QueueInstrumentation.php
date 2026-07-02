@@ -9,6 +9,7 @@ use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
@@ -34,13 +35,21 @@ final class QueueInstrumentation
     /** @var list<Span> */
     private array $jobSpans = [];
 
-    public function __construct(private readonly TelemetryManager $telemetry) {}
+    public function __construct(private readonly Container $container) {}
+
+    /**
+     * Resolved per event so Telemetry::fake() swaps take effect.
+     */
+    private function telemetry(): TelemetryManager
+    {
+        return $this->container->make(TelemetryManager::class);
+    }
 
     public function register(QueueManager $queue, Dispatcher $events, bool $propagate, bool $instrument): void
     {
         if ($propagate) {
             $queue->createPayloadUsing(function () {
-                $traceparent = $this->telemetry->traceparent();
+                $traceparent = $this->telemetry()->traceparent();
 
                 return $traceparent === null ? [] : ['telemetry' => ['traceparent' => $traceparent]];
             });
@@ -61,17 +70,17 @@ final class QueueInstrumentation
             // consumer span nests naturally and the caller's trace must
             // survive the job. Only real workers reset + continue.
             if ($event->connectionName !== 'sync') {
-                $this->telemetry->resetContext();
+                $this->telemetry()->resetContext();
 
                 $payload = $event->job->payload();
                 $traceparent = $payload['telemetry']['traceparent'] ?? null;
 
                 if (is_string($traceparent)) {
-                    $this->telemetry->continueTrace($traceparent);
+                    $this->telemetry()->continueTrace($traceparent);
                 }
             }
 
-            $this->jobSpans[] = $this->telemetry->tracer()->startSpan(
+            $this->jobSpans[] = $this->telemetry()->tracer()->startSpan(
                 $event->job->resolveName().' process',
                 SpanKind::Consumer,
                 [
@@ -137,19 +146,19 @@ final class QueueInstrumentation
 
                 $span->end();
 
-                $this->telemetry
+                $this->telemetry()
                     ->histogram('queue.job.duration', description: 'Queue job processing duration', unit: 'ms')
                     ->record($span->durationMs(), $labels);
             }
 
-            $this->telemetry
+            $this->telemetry()
                 ->counter("queue.jobs.{$outcome}", 'Queue job attempts by outcome')
                 ->inc(1, $labels);
         });
 
         if (! $sync) {
-            $this->telemetry->flush();
-            $this->telemetry->resetContext();
+            $this->telemetry()->flush();
+            $this->telemetry()->resetContext();
         }
     }
 

@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Instrumentation;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Events\QueryExecuted;
 
@@ -21,7 +22,7 @@ final class QueryInstrumentation
 
     private float $minDurationMs = 0.0;
 
-    public function __construct(private readonly TelemetryManager $telemetry) {}
+    public function __construct(private readonly Container $container) {}
 
     public function register(Dispatcher $events, float $minDurationMs = 0.0): void
     {
@@ -32,7 +33,10 @@ final class QueryInstrumentation
 
     private function queryExecuted(QueryExecuted $event): void
     {
-        $current = $this->telemetry->currentSpan();
+        // Resolved per event so Telemetry::fake() swaps take effect.
+        $telemetry = $this->container->make(TelemetryManager::class);
+
+        $current = $telemetry->currentSpan();
 
         // Only record inside a *sampled* trace — unsampled traces must not
         // pay per-query span cost on N+1-heavy requests.
@@ -45,8 +49,8 @@ final class QueryInstrumentation
             return;
         }
 
-        FailSafe::guard(function () use ($event) {
-            $this->telemetry->tracer()->recordSpan(
+        FailSafe::guard(function () use ($event, $telemetry) {
+            $telemetry->tracer()->recordSpan(
                 'db.query',
                 $event->time,
                 [

@@ -10,6 +10,7 @@ use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 
 /**
@@ -21,7 +22,15 @@ final class CommandInstrumentation
     /** @var list<Span> */
     private array $stack = [];
 
-    public function __construct(private readonly TelemetryManager $telemetry) {}
+    public function __construct(private readonly Container $container) {}
+
+    /**
+     * Resolved per event so Telemetry::fake() swaps take effect.
+     */
+    private function telemetry(): TelemetryManager
+    {
+        return $this->container->make(TelemetryManager::class);
+    }
 
     public function register(Dispatcher $events): void
     {
@@ -32,7 +41,7 @@ final class CommandInstrumentation
     private function commandStarting(CommandStarting $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $this->stack[] = $this->telemetry->tracer()->startSpan(
+            $this->stack[] = $this->telemetry()->tracer()->startSpan(
                 'artisan '.($event->command ?? 'unknown'),
                 attributes: ['laravel.command' => $event->command ?? 'unknown'],
             );
@@ -54,8 +63,8 @@ final class CommandInstrumentation
         });
 
         if ($this->stack === []) {
-            $this->telemetry->flush();
-            $this->telemetry->resetContext();
+            $this->telemetry()->flush();
+            $this->telemetry()->resetContext();
         }
     }
 }
