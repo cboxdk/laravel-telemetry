@@ -278,7 +278,7 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
 ])
 
 # ── 2 · Requests ─────────────────────────────────────────────────────
-RF = f'{SVC},http_route=~"$route",http_request_method=~"$method",http_response_status_code=~"$status"'
+RF = f'{SVC},http_route=~"$route",http_request_method=~"$method",http_response_status_code=~"$status",server_address=~"$host"'
 D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     stat("Requests / min", f'sum(rate({REQ}_count{{{RF}}}[5m])) * 60', 0, 0, unit="reqpm", decimals=0),
     stat("p50", f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 4, 0, unit="ms"),
@@ -287,11 +287,13 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     stat("p95 memory", f'histogram_quantile(0.95, sum by (le) (rate({MEM}_bucket{{{RF}}}[10m])))', 16, 0, unit="bytes"),
     stat("p95 CPU", f'histogram_quantile(0.95, sum by (le) (rate({CPU}_bucket{{{RF}}}[10m])))', 20, 0, unit="ms"),
     row("Traffic & latency", 4),
-    timeseries("Rate by route", [target(f'sum by (http_route) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{http_route}}')], 0, 5, unit="reqpm"),
+    timeseries("Rate by route", [target(f'sum by (http_route) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{http_route}}')], 0, 5, w=8, unit="reqpm"),
+    timeseries("Rate by domain", [target(f'sum by (server_address) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{server_address}}')], 8, 5, w=8, unit="reqpm",
+               description="Wildcard-tenant routes report the route's domain pattern, so cardinality stays bounded."),
     timeseries("Latency percentiles", [
         target(f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[$__rate_interval])))', 'p50'),
         target(f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{RF}}}[$__rate_interval])))', 'p95'),
-    ], 12, 5, unit="ms", colors=PERCENTILE_COLORS, threshold_line=1000),
+    ], 16, 5, w=8, unit="ms", colors=PERCENTILE_COLORS, threshold_line=1000),
     row("Errors — 4xx & 5xx", 13),
     timeseries("Responses by status code", [target(f'sum by (http_response_status_code) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{http_response_status_code}}')],
                0, 14, unit="reqpm", regex_colors={"^2..": "green", "^3..": "blue", "^4..": "orange", "^5..": "red"},
@@ -306,12 +308,12 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
            '{trace:id = "$traceid"}', 0, 32, h=5,
            description="The id a user quotes from the error page (or the X-Trace-Id response header / the Sentry trace_id tag) resolves straight to its waterfall here."),
     traces("Request traces — click for the waterfall (per-span CPU/memory in attributes)",
-           f'{{{TSVC} && kind=server && name=~"$method $route" && duration>${{minms}}ms}}', 0, 37),
+           f'{{{TSVC} && kind=server && name=~"$method $route" && span.server.address=~"$host" && duration>${{minms}}ms}}', 0, 37),
     traces("Failing requests", f'{{{TSVC} && kind=server && status=error}}', 0, 46),
     logs("Correlated logs — trace_id links to Tempo", '{service_name=~"$service"}', 0, 55),
-], variables=[qvar("route", f"{REQ}_count", "http_route"), qvar("method", f"{REQ}_count", "http_request_method"),
-              qvar("status", f"{REQ}_count", "http_response_status_code"), textvar("minms", "0", "min duration (ms)"),
-              textvar("traceid", "", "trace id")])
+], variables=[qvar("host", f"{REQ}_count", "server_address"), qvar("route", f"{REQ}_count", "http_route"),
+              qvar("method", f"{REQ}_count", "http_request_method"), qvar("status", f"{REQ}_count", "http_response_status_code"),
+              textvar("minms", "0", "min duration (ms)"), textvar("traceid", "", "trace id")])
 
 # ── 3 · Jobs ─────────────────────────────────────────────────────────
 QF = f'{SVC},queue=~"$queue",job_name=~"$job_name"'

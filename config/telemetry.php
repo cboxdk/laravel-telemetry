@@ -220,6 +220,21 @@ return [
         // HTTP server spans + http.server.* metrics via global middleware.
         'requests' => env('TELEMETRY_INSTRUMENT_REQUESTS', true),
 
+        // Add the domain as a server.address label on http.server.*
+        // metrics. Routes with a domain pattern report the PATTERN
+        // ("{tenant}.app.example"), keeping wildcard-tenant cardinality
+        // bounded; everything else reports the concrete host.
+        'host_label' => env('TELEMETRY_INSTRUMENT_HOST_LABEL', true),
+
+        // Request headers captured on the span as http.request.header.*
+        // (allowlist, lowercase). Credentials and session headers
+        // (Authorization, Cookie, X-Api-Key, …) are denylisted and never
+        // captured, even if listed here.
+        'request_headers' => ['accept', 'accept-language', 'content-type', 'origin', 'referer', 'x-forwarded-for', 'x-requested-with'],
+
+        // Response headers captured as http.response.header.*.
+        'response_headers' => ['content-type', 'cache-control'],
+
         // Job spans + queue metrics, with trace continuation from dispatch.
         'jobs' => env('TELEMETRY_INSTRUMENT_JOBS', true),
 

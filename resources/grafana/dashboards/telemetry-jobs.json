@@ -91,7 +91,7 @@
   ],
   "panels": [
     {
-      "id": 73,
+      "id": 75,
       "type": "stat",
       "title": "Dispatched / min",
       "datasource": {
@@ -106,61 +106,8 @@
       },
       "targets": [
         {
-          "refId": "Q74",
-          "expr": "sum(rate(queue_jobs_dispatched_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
-          "legendFormat": "__auto",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 75,
-      "type": "stat",
-      "title": "Processed / min",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 0
-      },
-      "targets": [
-        {
           "refId": "Q76",
-          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
+          "expr": "sum(rate(queue_jobs_dispatched_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -199,6 +146,59 @@
     {
       "id": 77,
       "type": "stat",
+      "title": "Processed / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "Q78",
+          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 79,
+      "type": "stat",
       "title": "Released / min",
       "datasource": {
         "type": "prometheus",
@@ -212,7 +212,7 @@
       },
       "targets": [
         {
-          "refId": "Q78",
+          "refId": "Q80",
           "expr": "sum(rate(queue_jobs_released_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -254,7 +254,7 @@
       }
     },
     {
-      "id": 79,
+      "id": 81,
       "type": "stat",
       "title": "Failed / min",
       "datasource": {
@@ -269,7 +269,7 @@
       },
       "targets": [
         {
-          "refId": "Q80",
+          "refId": "Q82",
           "expr": "sum(rate(queue_jobs_failed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -311,7 +311,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 83,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -326,7 +326,7 @@
       },
       "targets": [
         {
-          "refId": "Q82",
+          "refId": "Q84",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -364,7 +364,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 85,
       "type": "stat",
       "title": "p95 wait time",
       "datasource": {
@@ -379,7 +379,7 @@
       },
       "targets": [
         {
-          "refId": "Q84",
+          "refId": "Q86",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(queue_job_wait_time_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -422,7 +422,7 @@
       "description": "Time from dispatch until the attempt started \u2014 queue lag."
     },
     {
-      "id": 85,
+      "id": 87,
       "type": "row",
       "title": "Throughput & latency",
       "collapsed": false,
@@ -435,7 +435,7 @@
       "panels": []
     },
     {
-      "id": 89,
+      "id": 91,
       "type": "timeseries",
       "title": "Outcomes by job",
       "datasource": {
@@ -450,7 +450,7 @@
       },
       "targets": [
         {
-          "refId": "Q86",
+          "refId": "Q88",
           "expr": "sum by (job_name) (rate(queue_jobs_processed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "ok {{job_name}}",
           "datasource": {
@@ -459,7 +459,7 @@
           }
         },
         {
-          "refId": "Q87",
+          "refId": "Q89",
           "expr": "sum by (job_name) (rate(queue_jobs_released_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "retry {{job_name}}",
           "datasource": {
@@ -468,7 +468,7 @@
           }
         },
         {
-          "refId": "Q88",
+          "refId": "Q90",
           "expr": "sum by (job_name) (rate(queue_jobs_failed_total{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])) * 60",
           "legendFormat": "fail {{job_name}}",
           "datasource": {
@@ -555,7 +555,7 @@
       }
     },
     {
-      "id": 91,
+      "id": 93,
       "type": "timeseries",
       "title": "Queue wait time p95 (dispatch \u2192 start)",
       "datasource": {
@@ -570,7 +570,7 @@
       },
       "targets": [
         {
-          "refId": "Q90",
+          "refId": "Q92",
           "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(queue_job_wait_time_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])))",
           "legendFormat": "{{queue}}",
           "datasource": {
@@ -627,7 +627,7 @@
       }
     },
     {
-      "id": 92,
+      "id": 94,
       "type": "row",
       "title": "Resources & leaks",
       "collapsed": false,
@@ -640,7 +640,7 @@
       "panels": []
     },
     {
-      "id": 94,
+      "id": 96,
       "type": "timeseries",
       "title": "p95 duration by job",
       "datasource": {
@@ -655,7 +655,7 @@
       },
       "targets": [
         {
-          "refId": "Q93",
+          "refId": "Q95",
           "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",queue=~\"$queue\",job_name=~\"$job_name\"}[$__rate_interval])))",
           "legendFormat": "{{job_name}}",
           "datasource": {
@@ -696,7 +696,7 @@
       }
     },
     {
-      "id": 97,
+      "id": 99,
       "type": "timeseries",
       "title": "Worker memory \u2014 a climbing line IS the leak",
       "datasource": {
@@ -711,7 +711,7 @@
       },
       "targets": [
         {
-          "refId": "Q95",
+          "refId": "Q97",
           "expr": "worker_memory_rss_bytes{service_name=~\"$service\"}",
           "legendFormat": "rss pid {{pid}}",
           "datasource": {
@@ -720,7 +720,7 @@
           }
         },
         {
-          "refId": "Q96",
+          "refId": "Q98",
           "expr": "worker_memory_php_bytes{service_name=~\"$service\"}",
           "legendFormat": "php pid {{pid}}",
           "datasource": {
@@ -762,7 +762,7 @@
       "description": "Workers self-report after every job. One line per worker process."
     },
     {
-      "id": 98,
+      "id": 100,
       "type": "row",
       "title": "Traces",
       "collapsed": false,
@@ -775,7 +775,7 @@
       "panels": []
     },
     {
-      "id": 99,
+      "id": 101,
       "type": "table",
       "title": "Job runs \u2014 origin request in messaging.origin.name, queue lag in wait_time_ms",
       "datasource": {
@@ -815,7 +815,7 @@
       }
     },
     {
-      "id": 100,
+      "id": 102,
       "type": "table",
       "title": "Failed attempts",
       "datasource": {

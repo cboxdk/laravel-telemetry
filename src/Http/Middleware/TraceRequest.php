@@ -13,6 +13,7 @@ use Cbox\Telemetry\Tracing\SpanStatus;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\HeaderBag;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -33,6 +34,18 @@ final class TraceRequest
     /** Memory-peak buckets: 4 MB … 1 GB. */
     private const MEMORY_BUCKETS = [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824];
 
+    /**
+     * Never captured, even when explicitly allowlisted — credentials and
+     * session material don't belong in telemetry.
+     */
+    private const SENSITIVE_HEADERS = [
+        'authorization', 'proxy-authorization', 'cookie', 'set-cookie',
+        'x-api-key', 'x-csrf-token', 'x-xsrf-token', 'php-auth-user', 'php-auth-pw', 'php-auth-digest',
+    ];
+
+    /** Query parameters whose values are redacted in url.query. */
+    private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
+
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -52,11 +65,20 @@ final class TraceRequest
             $span = $this->telemetry->tracer()->startSpan(
                 $request->method().' '.$request->path(),
                 SpanKind::Server,
-                [
+                array_filter([
                     'http.request.method' => $request->method(),
                     'url.path' => '/'.ltrim($request->path(), '/'),
                     'url.scheme' => $request->getScheme(),
-                ],
+                    'url.query' => $this->redactedQuery($request),
+                    // The domain — apps routinely serve many subdomains or
+                    // wildcards, and traces must be filterable by which one.
+                    'server.address' => $request->getHost(),
+                    'server.port' => $request->getPort(),
+                    'client.address' => $request->ip(),
+                    'user_agent.original' => $request->userAgent(),
+                    'network.protocol.name' => 'http',
+                    'network.protocol.version' => $this->protocolVersion($request),
+                ], static fn ($value) => $value !== null && $value !== ''),
             );
 
             $request->attributes->set(self::SPAN_KEY, $span);
@@ -134,6 +156,12 @@ final class TraceRequest
                 $span->setAttribute('http.response.body.size', (int) $responseSize);
             }
 
+            // Allowlisted headers (OTel http.request.header.* /
+            // http.response.header.*). Credentials and session material
+            // are denylisted and never captured.
+            $this->captureHeaders($span, 'http.request.header.', $request->headers, config('telemetry.instrument.request_headers', []));
+            $this->captureHeaders($span, 'http.response.header.', $response->headers, config('telemetry.instrument.response_headers', []));
+
             if ($response->getStatusCode() >= 500) {
                 $span->setStatus(SpanStatus::Error);
             } elseif ($span->status() === SpanStatus::Unset) {
@@ -148,6 +176,17 @@ final class TraceRequest
                 'http.route' => $route,
                 'http.response.status_code' => (string) $response->getStatusCode(),
             ];
+
+            // Domain as a metric dimension. The ROUTE's domain pattern
+            // ("{tenant}.app.example") wins over the concrete host, so
+            // wildcard-tenant apps keep bounded cardinality while
+            // multi-domain apps can still tell their domains apart.
+            if (config('telemetry.instrument.host_label', true)) {
+                $routeObject = $request->route();
+                $domainPattern = is_object($routeObject) && method_exists($routeObject, 'getDomain') ? $routeObject->getDomain() : null;
+
+                $labels['server.address'] = is_string($domainPattern) && $domainPattern !== '' ? $domainPattern : $request->getHost();
+            }
 
             // Peak memory and CPU delta for THIS request — Nightwatch-style
             // resource attribution, per route and per custom dimension.
@@ -183,6 +222,65 @@ final class TraceRequest
 
         $this->telemetry->flush();
         $this->telemetry->resetContext();
+    }
+
+    /**
+     * @param  mixed  $allowlist
+     */
+    private function captureHeaders(Span $span, string $prefix, HeaderBag $headers, $allowlist): void
+    {
+        if (! is_array($allowlist)) {
+            return;
+        }
+
+        foreach ($allowlist as $name) {
+            if (! is_string($name)) {
+                continue;
+            }
+
+            $name = strtolower($name);
+
+            if (in_array($name, self::SENSITIVE_HEADERS, true) || ! $headers->has($name)) {
+                continue;
+            }
+
+            $values = array_filter($headers->all($name), is_string(...));
+
+            if ($values !== []) {
+                $span->setAttribute($prefix.str_replace('-', '_', $name), implode(', ', $values));
+            }
+        }
+    }
+
+    /**
+     * The query string with common secret parameters redacted — tokens,
+     * signatures and OAuth material never leave the app.
+     */
+    private function redactedQuery(Request $request): ?string
+    {
+        $query = $request->server->get('QUERY_STRING');
+
+        if (! is_string($query) || $query === '') {
+            return null;
+        }
+
+        $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
+
+        return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
+    }
+
+    /**
+     * "HTTP/2" → "2", "HTTP/1.1" → "1.1" (OTel network.protocol.version).
+     */
+    private function protocolVersion(Request $request): ?string
+    {
+        $protocol = $request->getProtocolVersion();
+
+        if (! is_string($protocol) || ! str_starts_with($protocol, 'HTTP/')) {
+            return null;
+        }
+
+        return substr($protocol, 5);
     }
 
     /**

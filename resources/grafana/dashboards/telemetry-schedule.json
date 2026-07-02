@@ -71,7 +71,7 @@
   ],
   "panels": [
     {
-      "id": 115,
+      "id": 117,
       "type": "stat",
       "title": "Processed / h",
       "datasource": {
@@ -86,7 +86,7 @@
       },
       "targets": [
         {
-          "refId": "Q116",
+          "refId": "Q118",
           "expr": "sum(increase(schedule_tasks_processed_total{service_name=~\"$service\",task=~\"$task\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -124,7 +124,7 @@
       }
     },
     {
-      "id": 117,
+      "id": 119,
       "type": "stat",
       "title": "Failed / h",
       "datasource": {
@@ -139,7 +139,7 @@
       },
       "targets": [
         {
-          "refId": "Q118",
+          "refId": "Q120",
           "expr": "(sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",task=~\"$task\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -181,7 +181,7 @@
       }
     },
     {
-      "id": 119,
+      "id": 121,
       "type": "stat",
       "title": "Skipped / h",
       "datasource": {
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "refId": "Q120",
+          "refId": "Q122",
           "expr": "(sum(increase(schedule_tasks_skipped_total{service_name=~\"$service\",task=~\"$task\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -239,7 +239,7 @@
       "description": "Skips from filters or withoutOverlapping locks \u2014 the outcome most monitoring misses."
     },
     {
-      "id": 121,
+      "id": 123,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -254,7 +254,7 @@
       },
       "targets": [
         {
-          "refId": "Q122",
+          "refId": "Q124",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",task=~\"$task\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -292,7 +292,7 @@
       }
     },
     {
-      "id": 126,
+      "id": 128,
       "type": "timeseries",
       "title": "Outcomes by task",
       "datasource": {
@@ -307,7 +307,7 @@
       },
       "targets": [
         {
-          "refId": "Q123",
+          "refId": "Q125",
           "expr": "sum by (task) (increase(schedule_tasks_processed_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "ok {{task}}",
           "datasource": {
@@ -316,7 +316,7 @@
           }
         },
         {
-          "refId": "Q124",
+          "refId": "Q126",
           "expr": "sum by (task) (increase(schedule_tasks_failed_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "fail {{task}}",
           "datasource": {
@@ -325,7 +325,7 @@
           }
         },
         {
-          "refId": "Q125",
+          "refId": "Q127",
           "expr": "sum by (task) (increase(schedule_tasks_skipped_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "skip {{task}}",
           "datasource": {
@@ -412,7 +412,7 @@
       }
     },
     {
-      "id": 128,
+      "id": 130,
       "type": "timeseries",
       "title": "p95 duration by task",
       "datasource": {
@@ -427,7 +427,7 @@
       },
       "targets": [
         {
-          "refId": "Q127",
+          "refId": "Q129",
           "expr": "histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval])))",
           "legendFormat": "{{task}}",
           "datasource": {
@@ -468,7 +468,7 @@
       }
     },
     {
-      "id": 129,
+      "id": 131,
       "type": "table",
       "title": "Task runs",
       "datasource": {
@@ -508,7 +508,7 @@
       }
     },
     {
-      "id": 130,
+      "id": 132,
       "type": "table",
       "title": "Failed task runs",
       "datasource": {

@@ -112,6 +112,9 @@ everything and a `public` endpoint filtered to a prefix list:
 | Key | Env | Default |
 |---|---|---|
 | `instrument.requests` | `TELEMETRY_INSTRUMENT_REQUESTS` | `true` |
+| `instrument.host_label` | `TELEMETRY_INSTRUMENT_HOST_LABEL` | `true` — `server.address` label on `http.server.*` metrics; routes with a domain pattern report the pattern (`{tenant}.app.example`), keeping wildcard cardinality bounded |
+| `instrument.request_headers` | — | `accept, accept-language, content-type, origin, referer, x-forwarded-for, x-requested-with` — span attrs `http.request.header.*`; credentials/session headers are denylisted and never captured |
+| `instrument.response_headers` | — | `content-type, cache-control` — span attrs `http.response.header.*` |
 | `instrument.jobs` | `TELEMETRY_INSTRUMENT_JOBS` | `true` |
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |

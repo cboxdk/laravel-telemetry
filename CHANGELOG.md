@@ -15,6 +15,14 @@ Initial release.
 
 ### Observability UX
 
+- Request spans carry the full connection picture: `server.address` /
+  `server.port` (the domain — multi-domain and wildcard apps are
+  filterable), `client.address`, `user_agent.original`,
+  `network.protocol.version`, redacted `url.query`, and allowlisted
+  request/response headers (credentials denylisted, always). Metrics gain
+  a `server.address` label (route domain patterns keep wildcard-tenant
+  cardinality bounded; `instrument.host_label`); the Requests dashboard
+  gained a domain filter + rate-by-domain panel.
 - The trace id as a support reference: `X-Trace-Id` on every response
   (`traces.response_header`), `trace_id` published into Laravel `Context`
   at trace start — Sentry (≥ 4.x), Flare and all log channels pick it up

@@ -62,7 +62,7 @@
   ],
   "panels": [
     {
-      "id": 207,
+      "id": 209,
       "type": "logs",
       "title": "All logs \u2014 trace_id links to Tempo",
       "datasource": {
@@ -99,7 +99,7 @@
       }
     },
     {
-      "id": 208,
+      "id": 210,
       "type": "logs",
       "title": "Warnings & errors",
       "datasource": {

@@ -73,7 +73,7 @@
   ],
   "panels": [
     {
-      "id": 144,
+      "id": 146,
       "type": "table",
       "title": "Slowest queries (> $minms ms) \u2014 SQL text on the span",
       "datasource": {
@@ -113,7 +113,7 @@
       }
     },
     {
-      "id": 145,
+      "id": 147,
       "type": "table",
       "title": "N+1 suspects \u2014 requests running \u2265 $minqueries queries",
       "datasource": {
@@ -154,7 +154,7 @@
       "description": "db.query.count/time_ms tallies live on every root span."
     },
     {
-      "id": 146,
+      "id": 148,
       "type": "table",
       "title": "Query-heaviest jobs",
       "datasource": {
@@ -194,7 +194,7 @@
       }
     },
     {
-      "id": 147,
+      "id": 149,
       "type": "text",
       "title": "Tip",
       "gridPos": {

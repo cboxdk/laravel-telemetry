@@ -25,6 +25,11 @@ weight: 5
   exception messages can contain user data, sanitize at the source.
 - **Events** contain exactly the attributes you pass. Treat
   `Telemetry::event()` payloads like log lines: no secrets.
+- **Request spans** capture only allowlisted headers
+  (`instrument.request_headers` / `response_headers`); credential and
+  session headers (`Authorization`, `Cookie`, `X-Api-Key`, …) are
+  denylisted and never captured, even when allowlisted. `url.query`
+  redacts common secret parameters (`token`, `signature`, `code`, …).
 
 ## Incoming trace headers
 

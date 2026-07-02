@@ -143,3 +143,65 @@ it('does not touch Laravel Context when sharing is disabled', function () {
 
     expect(Context::get('trace_id'))->toBeNull();
 });
+
+it('captures domain, client, protocol and query on the request span', function () {
+    $this->get('http://api.acme.test/users/7?page=2&token=supersecret&per_page=50', [
+        'User-Agent' => 'DemoAgent/1.0',
+    ]);
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['server.address'])->toBe('api.acme.test')
+        ->and($attributes['server.port'])->toBe(80)
+        ->and($attributes['client.address'])->toBe('127.0.0.1')
+        ->and($attributes['user_agent.original'])->toBe('DemoAgent/1.0')
+        ->and($attributes['network.protocol.name'])->toBe('http')
+        ->and($attributes['network.protocol.version'])->toBe('1.1')
+        ->and($attributes['url.query'])->toBe('page=2&token=REDACTED&per_page=50');
+});
+
+it('captures allowlisted headers but never credentials or session material', function () {
+    config()->set('telemetry.instrument.request_headers', ['accept', 'authorization', 'cookie', 'x-api-key']);
+    config()->set('telemetry.instrument.response_headers', ['content-type']);
+
+    $this->get('/users/7', [
+        'Accept' => 'application/json',
+        'Authorization' => 'Bearer secret-token',
+        'Cookie' => 'session=abc',
+        'X-Api-Key' => 'k-123',
+    ]);
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['http.request.header.accept'])->toBe('application/json')
+        ->and($attributes['http.response.header.content_type'])->toContain('application/json')
+        ->and($attributes)->not->toHaveKey('http.request.header.authorization')
+        ->and($attributes)->not->toHaveKey('http.request.header.cookie')
+        ->and($attributes)->not->toHaveKey('http.request.header.x_api_key');
+});
+
+it('labels request metrics with the domain, preferring the route domain pattern', function () {
+    Route::get('/tenant-home', fn () => 'ok')->domain('{tenant}.acme.test');
+
+    $this->get('http://api.acme.test/users/7');
+    $this->get('http://alpha.acme.test/tenant-home');
+
+    $samples = collect(Telemetry::collect())
+        ->keyBy(fn ($family) => $family->name())['http.server.request.duration']->samples;
+
+    $byRoute = collect($samples)->keyBy(fn ($sample) => $sample->labels['http.route']);
+
+    expect($byRoute['/users/{id}']->labels['server.address'])->toBe('api.acme.test')
+        ->and($byRoute['/tenant-home']->labels['server.address'])->toBe('{tenant}.acme.test');
+});
+
+it('omits the domain label when disabled', function () {
+    config()->set('telemetry.instrument.host_label', false);
+
+    $this->get('/users/7');
+
+    $sample = collect(Telemetry::collect())
+        ->keyBy(fn ($family) => $family->name())['http.server.request.duration']->samples[0];
+
+    expect($sample->labels)->not->toHaveKey('server.address');
+});

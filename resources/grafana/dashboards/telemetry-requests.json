@@ -36,6 +36,26 @@
         }
       },
       {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, server_address)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
         "name": "route",
         "type": "query",
         "datasource": {
@@ -149,7 +169,7 @@
       "targets": [
         {
           "refId": "Q42",
-          "expr": "sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])) * 60",
+          "expr": "sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -202,7 +222,7 @@
       "targets": [
         {
           "refId": "Q44",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -255,7 +275,7 @@
       "targets": [
         {
           "refId": "Q46",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -316,7 +336,7 @@
       "targets": [
         {
           "refId": "Q48",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -369,7 +389,7 @@
       "targets": [
         {
           "refId": "Q50",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[10m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[10m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -422,7 +442,7 @@
       "targets": [
         {
           "refId": "Q52",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[10m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[10m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -481,14 +501,14 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 5
       },
       "targets": [
         {
           "refId": "Q54",
-          "expr": "sum by (http_route) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])) * 60",
+          "expr": "sum by (http_route) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{http_route}}",
           "datasource": {
             "type": "prometheus",
@@ -528,7 +548,64 @@
       }
     },
     {
-      "id": 58,
+      "id": 57,
+      "type": "timeseries",
+      "title": "Rate by domain",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "Q56",
+          "expr": "sum by (server_address) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{server_address}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Wildcard-tenant routes report the route's domain pattern, so cardinality stays bounded."
+    },
+    {
+      "id": 60,
       "type": "timeseries",
       "title": "Latency percentiles",
       "datasource": {
@@ -537,14 +614,14 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 5
       },
       "targets": [
         {
-          "refId": "Q56",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
+          "refId": "Q58",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -552,8 +629,8 @@
           }
         },
         {
-          "refId": "Q57",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
+          "refId": "Q59",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "datasource": {
             "type": "prometheus",
@@ -655,7 +732,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 61,
       "type": "row",
       "title": "Errors \u2014 4xx & 5xx",
       "collapsed": false,
@@ -668,7 +745,7 @@
       "panels": []
     },
     {
-      "id": 61,
+      "id": 63,
       "type": "timeseries",
       "title": "Responses by status code",
       "datasource": {
@@ -683,8 +760,8 @@
       },
       "targets": [
         {
-          "refId": "Q60",
-          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])) * 60",
+          "refId": "Q62",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",
@@ -786,7 +863,7 @@
       "description": "4xx is client noise worth watching \u2014 auth failures, validation storms, broken API consumers."
     },
     {
-      "id": 62,
+      "id": 64,
       "type": "table",
       "title": "Client errors (4xx) \u2014 click to inspect what the caller sent",
       "datasource": {
@@ -826,7 +903,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 65,
       "type": "row",
       "title": "Resources per route",
       "collapsed": false,
@@ -839,7 +916,7 @@
       "panels": []
     },
     {
-      "id": 65,
+      "id": 67,
       "type": "timeseries",
       "title": "p95 memory by route",
       "datasource": {
@@ -854,8 +931,8 @@
       },
       "targets": [
         {
-          "refId": "Q64",
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
+          "refId": "Q66",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_memory_peak_bytes_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
             "type": "prometheus",
@@ -895,7 +972,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 69,
       "type": "timeseries",
       "title": "p95 CPU by route",
       "datasource": {
@@ -910,8 +987,8 @@
       },
       "targets": [
         {
-          "refId": "Q66",
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\"}[$__rate_interval])))",
+          "refId": "Q68",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_cpu_time_milliseconds_bucket{service_name=~\"$service\",http_route=~\"$route\",http_request_method=~\"$method\",http_response_status_code=~\"$status\",server_address=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{http_route}}",
           "datasource": {
             "type": "prometheus",
@@ -951,7 +1028,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 70,
       "type": "row",
       "title": "Traces & logs",
       "collapsed": false,
@@ -964,7 +1041,7 @@
       "panels": []
     },
     {
-      "id": 69,
+      "id": 71,
       "type": "table",
       "title": "Trace lookup \u2014 paste an id from X-Trace-Id, Sentry or a support case into the \u201ctrace id\u201d box above",
       "datasource": {
@@ -1005,7 +1082,7 @@
       "description": "The id a user quotes from the error page (or the X-Trace-Id response header / the Sentry trace_id tag) resolves straight to its waterfall here."
     },
     {
-      "id": 70,
+      "id": 72,
       "type": "table",
       "title": "Request traces \u2014 click for the waterfall (per-span CPU/memory in attributes)",
       "datasource": {
@@ -1026,7 +1103,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && name=~\"$method $route\" && duration>${minms}ms}",
+          "query": "{resource.service.name=~\"$service\" && kind=server && name=~\"$method $route\" && span.server.address=~\"$host\" && duration>${minms}ms}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -1045,7 +1122,7 @@
       }
     },
     {
-      "id": 71,
+      "id": 73,
       "type": "table",
       "title": "Failing requests",
       "datasource": {
@@ -1085,7 +1162,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 74,
       "type": "logs",
       "title": "Correlated logs \u2014 trace_id links to Tempo",
       "datasource": {

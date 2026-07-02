@@ -71,7 +71,7 @@
   ],
   "panels": [
     {
-      "id": 101,
+      "id": 103,
       "type": "stat",
       "title": "Runs / h",
       "datasource": {
@@ -86,7 +86,7 @@
       },
       "targets": [
         {
-          "refId": "Q102",
+          "refId": "Q104",
           "expr": "sum(increase(commands_completed_total{service_name=~\"$service\",command=~\"$command\"}[1h])) + sum(increase(commands_failed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -124,7 +124,7 @@
       }
     },
     {
-      "id": 103,
+      "id": 105,
       "type": "stat",
       "title": "Failed / h",
       "datasource": {
@@ -139,7 +139,7 @@
       },
       "targets": [
         {
-          "refId": "Q104",
+          "refId": "Q106",
           "expr": "(sum(increase(commands_failed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -181,7 +181,7 @@
       }
     },
     {
-      "id": 105,
+      "id": 107,
       "type": "stat",
       "title": "avg duration",
       "datasource": {
@@ -196,7 +196,7 @@
       },
       "targets": [
         {
-          "refId": "Q106",
+          "refId": "Q108",
           "expr": "sum(rate(command_duration_milliseconds_sum{service_name=~\"$service\",command=~\"$command\"}[1h])) / sum(rate(command_duration_milliseconds_count{service_name=~\"$service\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -234,7 +234,7 @@
       }
     },
     {
-      "id": 107,
+      "id": 109,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -249,7 +249,7 @@
       },
       "targets": [
         {
-          "refId": "Q108",
+          "refId": "Q110",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",command=~\"$command\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -287,7 +287,7 @@
       }
     },
     {
-      "id": 109,
+      "id": 111,
       "type": "table",
       "title": "Runs by command (1h)",
       "datasource": {
@@ -302,7 +302,7 @@
       },
       "targets": [
         {
-          "refId": "Q110",
+          "refId": "Q112",
           "expr": "sum by (command) (increase(commands_completed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -349,7 +349,7 @@
       }
     },
     {
-      "id": 111,
+      "id": 113,
       "type": "table",
       "title": "p95 by command",
       "datasource": {
@@ -364,7 +364,7 @@
       },
       "targets": [
         {
-          "refId": "Q112",
+          "refId": "Q114",
           "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",command=~\"$command\"}[1h]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
@@ -455,7 +455,7 @@
       }
     },
     {
-      "id": 113,
+      "id": 115,
       "type": "table",
       "title": "Command traces",
       "datasource": {
@@ -495,7 +495,7 @@
       }
     },
     {
-      "id": 114,
+      "id": 116,
       "type": "text",
       "title": "Enable",
       "gridPos": {

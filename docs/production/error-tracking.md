@@ -44,8 +44,8 @@ quote this reference id if you contact support”:
 
 ```blade
 {{-- resources/views/errors/500.blade.php --}}
-<p>Vi er automatisk blevet underrettet. Vil du tale med supporten om
-   problemet, så oplys dette reference-id:</p>
+<p>We've been notified automatically. If you contact support about
+   this problem, quote this reference id:</p>
 @if ($traceId = Cbox\Telemetry\Facades\Telemetry::traceId())
     <code>{{ $traceId }}</code>
 @endif
