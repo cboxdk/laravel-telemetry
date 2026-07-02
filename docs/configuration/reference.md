@@ -95,6 +95,18 @@ everything and a `public` endpoint filtered to a prefix list:
 | `traces.details.slow_request_ms` | `TELEMETRY_SLOW_REQUEST_MS` | `1000` |
 | `traces.details.slow_span_ms` | `TELEMETRY_SLOW_SPAN_MS` | `100` |
 
+## Redaction engine
+
+| Key | Env | Default |
+|---|---|---|
+| `redaction.enabled` | `TELEMETRY_REDACTION` | `true` |
+| `redaction.keys` | — | `Redactor::defaultKeys()` — password, secret, token, api_key, authorization, cvv, ssn, … (whole key segments) |
+| `redaction.patterns` | — | `Redactor::defaultPatterns()` — JWTs, Bearer/Basic credentials, url userinfo (regex ⇒ replacement) |
+| `redaction.replacement` | — | `[REDACTED]` |
+
+Applied to span attributes, span events and telemetry events at flush.
+Custom last-pass hook: `Telemetry::redactUsing(fn ($key, $value) => ...)`.
+
 ## Events
 
 | Key | Env | Default |
@@ -119,7 +131,7 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
-| `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` (id only, never PII) |
+| `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` + `enduser.type` (model) + `enduser.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
 | `instrument.cache` | `TELEMETRY_INSTRUMENT_CACHE` | `false` — cache.operations counters (hit/miss/write/forget) |

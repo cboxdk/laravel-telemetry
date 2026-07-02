@@ -35,7 +35,10 @@ use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Tracing\Tracer;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
@@ -48,6 +51,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Laravel\Octane\Events\RequestReceived;
 use Monolog\Level;
 use Monolog\Logger;
@@ -94,6 +98,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
                 slowRequestMs: (float) $app->make('config')->get('telemetry.traces.details.slow_request_ms', 1000),
                 slowSpanMs: (float) $app->make('config')->get('telemetry.traces.details.slow_span_ms', 100),
+                redactor: Redactor::fromConfig((array) $app->make('config')->get('telemetry.redaction', [])),
             );
 
             foreach ($this->buildExporters($app) as $exporter) {
@@ -336,6 +341,31 @@ class TelemetryServiceProvider extends ServiceProvider
                 $kernel->pushMiddleware(TraceRequest::class);
             }
         });
+
+        // The login POST authenticates AFTER the span starts, and logout
+        // empties the guard BEFORE terminate — remember the identity so
+        // both request types still get user attribution.
+        if ($this->app->make('config')->get('telemetry.instrument.user', true)) {
+            $events = $this->app->make(Dispatcher::class);
+
+            $remember = function (object $event): void {
+                FailSafe::guard(function () use ($event) {
+                    /** @var Login|Logout $event */
+                    if ($event->user === null) {
+                        return;
+                    }
+
+                    $this->app->make(TelemetryManager::class)->rememberAuthenticatedUser([
+                        'id' => (string) $event->user->getAuthIdentifier(),
+                        'type' => Str::snake(class_basename($event->user)),
+                        'guard' => $event->guard,
+                    ]);
+                });
+            };
+
+            $events->listen(Login::class, $remember);
+            $events->listen(Logout::class, $remember);
+        }
     }
 
     private function registerQueueInstrumentation(): void

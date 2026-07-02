@@ -12,6 +12,7 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\HeaderBag;
 use Symfony\Component\HttpFoundation\Response;
@@ -135,9 +136,31 @@ final class TraceRequest
 
             // Attribute the request to the authenticated user (resolved by
             // now) — enables per-user trace filtering. Id only, never PII.
-            if (config('telemetry.instrument.user', true) && ($user = $request->user()) !== null) {
-                $span->setAttribute('enduser.id', (string) $user->getAuthIdentifier());
-                $span->setAttributes($this->telemetry->resolveUserAttributes($user));
+            // Multi-guard apps (users/admins/resellers) are disambiguated:
+            // enduser.type carries the model, enduser.guard the guard that
+            // authenticated (Auth::shouldUse() from the route's auth
+            // middleware is reflected here), so admin #7 and user #7 are
+            // never the same identity.
+            if (config('telemetry.instrument.user', true)) {
+                if (($user = $request->user()) !== null) {
+                    $guard = $this->authGuardName();
+
+                    $span->setAttributes(array_filter([
+                        'enduser.id' => (string) $user->getAuthIdentifier(),
+                        'enduser.type' => Str::snake(class_basename($user)),
+                        'enduser.guard' => $guard,
+                    ]));
+                    $span->setAttributes($this->telemetry->resolveUserAttributes($user, $guard));
+                } elseif (($remembered = $this->telemetry->rememberedAuthenticatedUser()) !== null) {
+                    // The login POST (user resolves after span start) and
+                    // logout requests (guard empty by terminate) — the
+                    // Login/Logout events remembered who it was.
+                    $span->setAttributes(array_filter([
+                        'enduser.id' => $remembered['id'],
+                        'enduser.type' => $remembered['type'],
+                        'enduser.guard' => $remembered['guard'],
+                    ]));
+                }
             }
 
             // Body sizes (OTel semconv). Response size is skipped for
@@ -267,6 +290,23 @@ final class TraceRequest
         $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
 
         return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
+    }
+
+    /**
+     * The guard that authenticated this request. The framework's auth
+     * middleware calls Auth::shouldUse($guard), so the auth manager's
+     * default driver reflects the ACTUAL guard — 'admin' on an
+     * auth:admin route, not the config default.
+     */
+    private function authGuardName(): ?string
+    {
+        $guard = FailSafe::guard(static function () {
+            $auth = app('auth');
+
+            return method_exists($auth, 'getDefaultDriver') ? $auth->getDefaultDriver() : null;
+        });
+
+        return is_string($guard) && $guard !== '' ? $guard : null;
     }
 
     /**

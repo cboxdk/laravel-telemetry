@@ -15,6 +15,18 @@ Initial release.
 
 ### Observability UX
 
+- Multi-guard user attribution: request spans carry `enduser.type` (the
+  model: user/admin/reseller) and `enduser.guard` alongside `enduser.id`,
+  so admin #7 and user #7 are distinct identities.
+  `resolveUserUsing()` now receives the guard as a second argument.
+  Login/Logout events are remembered within the request, so the login
+  POST itself and logout requests get user attribution too.
+- Redaction engine (`telemetry.redaction`): every span attribute, span
+  event (exception messages) and telemetry event passes one choke point
+  at flush — key-segment matching (`password`, `api_key`, …) replaces
+  whole values, regex patterns scrub embedded secrets (JWTs,
+  Bearer/Basic credentials, url userinfo), and
+  `Telemetry::redactUsing()` adds a custom last pass.
 - Request spans carry the full connection picture: `server.address` /
   `server.port` (the domain — multi-domain and wildcard apps are
   filterable), `client.address`, `user_agent.original`,

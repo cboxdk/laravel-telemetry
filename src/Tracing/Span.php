@@ -235,6 +235,16 @@ final class Span
         return $this->events;
     }
 
+    /**
+     * @internal used by the redaction engine at flush time
+     *
+     * @param  list<SpanEvent>  $events
+     */
+    public function replaceEvents(array $events): void
+    {
+        $this->events = $events;
+    }
+
     public function status(): SpanStatus
     {
         return $this->status;

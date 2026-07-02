@@ -47,6 +47,17 @@
         "options": []
       },
       {
+        "name": "usertype",
+        "type": "textbox",
+        "label": "user type",
+        "query": ".+",
+        "current": {
+          "text": ".+",
+          "value": ".+"
+        },
+        "options": []
+      },
+      {
         "name": "minmb",
         "type": "textbox",
         "label": "min memory (MB)",
@@ -75,7 +86,7 @@
     {
       "id": 205,
       "type": "table",
-      "title": "Requests for user $user",
+      "title": "Requests for user $user ($usertype)",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -94,10 +105,10 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.enduser.id=~\"$user\"}",
+          "query": "{resource.service.name=~\"$service\" && kind=server && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\"} | select(span.enduser.type, span.enduser.guard)",
           "limit": 20,
           "spss": 3,
-          "tableType": "traces"
+          "tableType": "spans"
         }
       ],
       "fieldConfig": {
@@ -115,7 +126,7 @@
     {
       "id": 206,
       "type": "table",
-      "title": "Errors hit by user $user",
+      "title": "Errors hit by user $user ($usertype)",
       "datasource": {
         "type": "tempo",
         "uid": "tempo"
@@ -134,7 +145,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && span.enduser.id=~\"$user\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -204,7 +215,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Request spans carry `enduser.id` (opt-out: `TELEMETRY_INSTRUMENT_USER=false`). Enrich with names via `Telemetry::resolveUserUsing()` \u2014 explicit PII opt-in."
+        "content": "Request spans carry `enduser.id`, `enduser.type` (the model: user/admin/reseller) and `enduser.guard` \u2014 multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` \u2014 explicit PII opt-in."
       },
       "fieldConfig": {
         "defaults": {},

@@ -57,9 +57,15 @@ sat in the queue between dispatch and the attempt starting — backed by
 the `queue.job.wait_time` histogram and a `queue.jobs.dispatched`
 counter on the producer side.
 
-Request spans carry `enduser.id` (the authenticated user's id — never
-name or email) so traces are filterable per user in TraceQL:
-`{ span.enduser.id = "42" }`. Disable with `instrument.user`.
+Request spans carry `enduser.id`, `enduser.type` (the model:
+`user`/`admin`/`reseller`) and `enduser.guard` (the guard that
+authenticated) — never name or email. Multi-guard apps stay
+disambiguated: admin #7 and user #7 are different identities.
+Filter in TraceQL: `{ span.enduser.id = "42" && span.enduser.type = "admin" }`.
+The login POST itself and logout requests are attributed too (the
+Login/Logout events are remembered within the request). Disable with
+`instrument.user`; enrich (explicit PII opt-in) with
+`Telemetry::resolveUserUsing(fn ($user, ?string $guard) => [...])`.
 
 ## Resource attribution
 

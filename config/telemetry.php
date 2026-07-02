@@ -212,6 +212,33 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Redaction Engine
+    |--------------------------------------------------------------------------
+    |
+    | Every span attribute, span event (exception messages included) and
+    | telemetry event passes through the redaction engine at flush time,
+    | before any exporter sees it.
+    |
+    | `keys` match whole dot/underscore segments of attribute keys — the
+    | value is replaced entirely. `patterns` are regexes scrubbing secrets
+    | embedded in any string value (JWTs, Bearer/Basic credentials, url
+    | userinfo by default). Omit a key to keep the built-in defaults; see
+    | Redactor::defaultKeys() / defaultPatterns(). Add a custom last-pass
+    | hook with Telemetry::redactUsing().
+    |
+    */
+
+    'redaction' => [
+        'enabled' => env('TELEMETRY_REDACTION', true),
+
+        // 'keys' => [...Redactor::defaultKeys(), 'cpr'],
+        // 'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
+
+        'replacement' => '[REDACTED]',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Automatic Instrumentation
     |--------------------------------------------------------------------------
     */

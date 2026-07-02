@@ -15,6 +15,7 @@ use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\Signal;
 use Cbox\Telemetry\Support\TelemetryBatch;
 use Cbox\Telemetry\Support\TraceParent;
@@ -52,6 +53,9 @@ class TelemetryManager
 
     private ?Closure $userAttributeResolver = null;
 
+    /** @var array{id: string, type: string, guard: string|null}|null */
+    private ?array $rememberedUser = null;
+
     /**
      * @param  array<string, scalar>  $resource
      */
@@ -64,6 +68,7 @@ class TelemetryManager
         private readonly bool $tailDetails = false,
         private readonly float $slowRequestMs = 1000.0,
         private readonly float $slowSpanMs = 100.0,
+        private readonly ?Redactor $redactor = null,
     ) {
         // A buffer-cap flush means the trace is pathological — keep every
         // detail for it.
@@ -183,6 +188,31 @@ class TelemetryManager
     public function resetContext(): void
     {
         $this->tracer->resetContext();
+        $this->rememberedUser = null;
+    }
+
+    /**
+     * Remember the identity that authenticated during THIS request — the
+     * Login event fires on the login POST itself, before the request
+     * span's user attribution runs, and Logout empties the guard before
+     * terminate. Without this, exactly those two request types would be
+     * anonymous. (A Nightwatch-agent lesson.)
+     *
+     * @param  array{id: string, type: string, guard: string|null}  $identity
+     */
+    public function rememberAuthenticatedUser(array $identity): void
+    {
+        $this->rememberedUser = $identity;
+    }
+
+    /**
+     * @internal used by the request middleware as a fallback
+     *
+     * @return array{id: string, type: string, guard: string|null}|null
+     */
+    public function rememberedAuthenticatedUser(): ?array
+    {
+        return $this->rememberedUser;
     }
 
     /**
@@ -283,13 +313,15 @@ class TelemetryManager
 
     /**
      * Opt in to richer user attribution on request spans (PII is off by
-     * default — only enduser.id ships out of the box):
+     * default — only enduser.id/type/guard ship out of the box). The
+     * resolver receives the user AND the guard that authenticated, so
+     * multi-guard apps can attribute per model:
      *
-     *     Telemetry::resolveUserUsing(fn ($user) => [
-     *         'enduser.name' => $user->name,
+     *     Telemetry::resolveUserUsing(fn ($user, ?string $guard) => [
+     *         'enduser.plan' => $user->plan,
      *     ]);
      *
-     * @param  (Closure(mixed): array<string, scalar|null>)|null  $resolver
+     * @param  (Closure(mixed, ?string): array<string, scalar|null>)|null  $resolver
      */
     public function resolveUserUsing(?Closure $resolver): void
     {
@@ -297,17 +329,34 @@ class TelemetryManager
     }
 
     /**
+     * Register a custom redaction hook, run after the built-in key and
+     * pattern strategies on every string attribute at flush time:
+     *
+     *     Telemetry::redactUsing(function (string $key, string $value) {
+     *         return str_contains($key, 'cpr') ? '[REDACTED]' : null;
+     *     });
+     *
+     * Return a replacement string, or null to keep the value.
+     *
+     * @param  (Closure(string, string): ?string)|null  $hook
+     */
+    public function redactUsing(?Closure $hook): void
+    {
+        $this->redactor?->redactUsing($hook);
+    }
+
+    /**
      * @internal used by the request middleware
      *
      * @return array<string, scalar|null>
      */
-    public function resolveUserAttributes(mixed $user): array
+    public function resolveUserAttributes(mixed $user, ?string $guard = null): array
     {
         if ($this->userAttributeResolver === null) {
             return [];
         }
 
-        return FailSafe::guard(fn (): array => ($this->userAttributeResolver)($user)) ?? [];
+        return FailSafe::guard(fn (): array => ($this->userAttributeResolver)($user, $guard)) ?? [];
     }
 
     /*
@@ -424,6 +473,13 @@ class TelemetryManager
 
         $events = $this->events;
         $this->events = [];
+
+        // The redaction engine — the last hands on every attribute value
+        // before an exporter sees it.
+        if ($this->redactor !== null) {
+            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? $spans;
+            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? $events;
+        }
 
         if ($spans === [] && $events === []) {
             return;

@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static void context(array<string, scalar|null> $attributes)
  * @method static array<string, scalar|null> contextAttributes()
  * @method static void labelRequestsUsing(\Closure|null $resolver)
+ * @method static void resolveUserUsing(\Closure|null $resolver)
+ * @method static void redactUsing(\Closure|null $hook)
  * @method static void provider(\Cbox\Telemetry\Contracts\TelemetryProvider $provider)
  * @method static void contributes(string $name, \Closure $register)
  * @method static void addExporter(\Cbox\Telemetry\Contracts\Exporter $exporter)

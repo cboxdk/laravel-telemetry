@@ -6,6 +6,8 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Route;
@@ -204,4 +206,48 @@ it('omits the domain label when disabled', function () {
         ->keyBy(fn ($family) => $family->name())['http.server.request.duration']->samples[0];
 
     expect($sample->labels)->not->toHaveKey('server.address');
+});
+
+it('disambiguates users across auth guards', function () {
+    config()->set('auth.guards.admin', ['driver' => 'session', 'provider' => 'users']);
+
+    Telemetry::resolveUserUsing(fn ($user, ?string $guard) => ['enduser.plan' => $guard === 'admin' ? 'staff' : 'pro']);
+
+    $this->actingAs(new GenericUser(['id' => 7]), 'admin')->get('/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['enduser.id'])->toBe('7')
+        ->and($attributes['enduser.type'])->toBe('generic_user')
+        ->and($attributes['enduser.guard'])->toBe('admin')
+        ->and($attributes['enduser.plan'])->toBe('staff');
+});
+
+it('attributes login and logout requests via the remembered identity', function () {
+    Route::post('/login-then-logout', function () {
+        $user = new GenericUser(['id' => 42]);
+
+        event(new Login('web', $user, false));
+        event(new Logout('web', $user));
+
+        return response()->noContent();
+    });
+
+    $this->post('/login-then-logout');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['enduser.id'])->toBe('42')
+        ->and($attributes['enduser.type'])->toBe('generic_user')
+        ->and($attributes['enduser.guard'])->toBe('web');
+});
+
+it('forgets the remembered identity when context resets', function () {
+    event(new Login('web', new GenericUser(['id' => 42]), false));
+
+    Telemetry::resetContext();
+
+    $this->get('/users/7');
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('enduser.id');
 });
