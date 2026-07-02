@@ -111,6 +111,7 @@ everything and a `public` endpoint filtered to a prefix list:
 | `redaction.enabled` | `TELEMETRY_REDACTION` | `true` |
 | `redaction.keys` | — | `Redactor::defaultKeys()` — password, secret, token, api_key, authorization, cvv, ssn, … (whole key segments) |
 | `redaction.patterns` | — | `Redactor::defaultPatterns()` — JWTs, Bearer/Basic credentials, url userinfo (regex ⇒ replacement) |
+| `redaction.safe_keys` | — | `Redactor::defaultSafeKeys()` — exact keys exempt from key-based redaction (`session.driver`, `session.hash`); patterns/hook still apply |
 | `redaction.replacement` | — | `[REDACTED]` |
 
 Applied to span attributes, span events, telemetry events AND log
@@ -145,6 +146,8 @@ with the key `log.message`.
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` + `enduser.type` (model) + `enduser.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
+| `instrument.views` | `TELEMETRY_INSTRUMENT_VIEWS` | `true` — nested render spans per Blade/PHP view/partial/component (detail-marked); `view.render.count` tally on the root span |
+| `instrument.session` | `TELEMETRY_INSTRUMENT_SESSION` | `true` — `session.driver` + `session.hash` (truncated sha256, never the raw id) on request spans; journey queries via TraceQL |
 | `instrument.cache` | `TELEMETRY_INSTRUMENT_CACHE` | `false` — cache.operations counters (hit/miss/write/forget) |
 | `instrument.cache_spans` | `TELEMETRY_INSTRUMENT_CACHE_SPANS` | `false` — timeline spans per cache op with key/store/duration |
 | `instrument.cache_ignore_stores` | — | `[]` — stores never recorded (counters or spans); key-level control via `Telemetry::classifyCacheKeysUsing()` |

@@ -9,6 +9,7 @@ use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Route;
 
@@ -303,4 +304,19 @@ it('omits the trace id header on publicly cacheable responses', function () {
     expect($this->get('/cached-page')->headers->has('X-Trace-Id'))->toBeFalse()
         ->and($this->get('/cdn-page')->headers->has('X-Trace-Id'))->toBeFalse()
         ->and($this->get('/private-page')->headers->get('X-Trace-Id'))->toMatch('/^[0-9a-f]{32}$/');
+});
+
+it('tags request spans with the session driver and a hashed session id', function () {
+    Route::middleware(StartSession::class)
+        ->get('/with-session', fn () => 'ok');
+
+    $this->get('/with-session');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+    $sessionId = app('session')->getId();
+
+    expect($attributes['session.driver'])->toBe('array')
+        ->and($attributes['session.hash'])->toMatch('/^[0-9a-f]{16}$/')
+        ->and($attributes['session.hash'])->not->toBe($sessionId)
+        ->and(str_contains($sessionId, $attributes['session.hash']))->toBeFalse();
 });

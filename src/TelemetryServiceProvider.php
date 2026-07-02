@@ -29,6 +29,7 @@ use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
+use Cbox\Telemetry\Instrumentation\ViewInstrumentation;
 use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ApcuMetricStore;
@@ -486,6 +487,14 @@ class TelemetryServiceProvider extends ServiceProvider
         if ($config->get('telemetry.instrument.mail', true)) {
             $this->app->singleton(MailInstrumentation::class);
             $this->app->make(MailInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.views', true)) {
+            // After boot, so every view service provider has registered
+            // its engines before we wrap them.
+            $this->app->booted(function (Application $app) {
+                (new ViewInstrumentation)->register($app);
+            });
         }
 
         if ($config->get('telemetry.instrument.notifications', true)) {

@@ -244,6 +244,7 @@ return [
 
         // 'keys' => [...Redactor::defaultKeys(), 'cpr'],
         // 'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
+        // 'safe_keys' => [...Redactor::defaultSafeKeys(), 'my.known_safe.token_bucket'],
 
         'replacement' => '[REDACTED]',
     ],
@@ -309,6 +310,17 @@ return [
         // aggregated). Off by default; the span buffer cap bounds
         // pathological requests.
         'cache_spans' => env('TELEMETRY_INSTRUMENT_CACHE_SPANS', false),
+
+        // A span per Blade/PHP view render — templates, partials and
+        // components, naturally nested with real durations. Detail-marked
+        // (tail mode trims them from healthy fast traces). The root span
+        // carries a view.render.count tally regardless.
+        'views' => env('TELEMETRY_INSTRUMENT_VIEWS', true),
+
+        // session.driver + session.hash (sha256-truncated, NEVER the raw
+        // id) on request root spans — one TraceQL query follows a whole
+        // visitor journey across requests.
+        'session' => env('TELEMETRY_INSTRUMENT_SESSION', true),
 
         // Cache stores that are never recorded (neither counters nor
         // spans) — e.g. a store used exclusively by a framework

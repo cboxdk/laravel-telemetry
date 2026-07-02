@@ -22,6 +22,18 @@ Initial release.
 
 ### Observability UX
 
+- View render spans (`instrument.views`, default on): every Blade/PHP
+  view, partial and component in its own span — real durations, natural
+  nesting via engine decoration (rendering always proceeds if telemetry
+  fails; unknown engine methods forward). Detail-marked so tail mode
+  trims healthy traces; `view.render.count` tally on the root span
+  regardless.
+- Session dimension (`instrument.session`, default on): `session.driver`
+  + `session.hash` (truncated sha256 — never the raw id, it is a
+  credential) on request root spans. One TraceQL query follows a whole
+  visitor journey; the Users dashboard gained a session-journey panel.
+  The redaction engine gained `safe_keys` so these exact keys escape
+  key-based redaction while patterns still apply.
 - Extension hooks for packages building on top (CMS integrations):
   `nameRequestsUsing()` names root spans behind catch-all routes (an
   explicit `updateName()` is never clobbered by terminate),

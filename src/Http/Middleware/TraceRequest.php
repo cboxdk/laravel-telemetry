@@ -181,6 +181,17 @@ final class TraceRequest
                 }
             }
 
+            // Session dimension: the driver and a HASH of the id — never
+            // the id itself, it is an authentication credential. The hash
+            // is stable across the visit, so a whole user journey is one
+            // TraceQL query: { span.session.hash = "..." }.
+            if (config('telemetry.instrument.session', true) && $request->hasSession()) {
+                $span->setAttributes([
+                    'session.driver' => (string) config('session.driver', 'unknown'),
+                    'session.hash' => substr(hash('sha256', $request->session()->getId()), 0, 16),
+                ]);
+            }
+
             // App-defined root-span enrichment with the final response in
             // hand (Telemetry::enrichRequestsUsing) — status-dependent
             // attributes work here.

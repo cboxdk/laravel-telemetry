@@ -41,6 +41,7 @@ started while another is active becomes its child.
 | Scheduled tasks | `schedule artisan inspire` | `instrument.scheduled_tasks` |
 | Mail | `mail.send` (client) | `instrument.mail` |
 | Notifications | `notification.send` (client) | `instrument.notifications` |
+| Blade/PHP views | `view components.button` — nested, real durations, detail-marked | `instrument.views` |
 | Cache counters | `cache.operations{operation,store}` | `instrument.cache` (off by default) |
 | Cache timeline spans | `cache.hit`/`miss`/`write`/`forget` with key + duration | `instrument.cache_spans` (off by default) |
 | Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
@@ -62,6 +63,12 @@ Consumer (job) spans carry `messaging.wait_time_ms` — how long the job
 sat in the queue between dispatch and the attempt starting — backed by
 the `queue.job.wait_time` histogram and a `queue.jobs.dispatched`
 counter on the producer side.
+
+Request spans carry `session.driver` and `session.hash` — a truncated
+SHA-256 of the session id (never the id itself; it is an authentication
+credential). The hash is stable across a visit, so one TraceQL query
+follows a whole visitor journey: `{ span.session.hash = "3f2a…" }`.
+Disable with `instrument.session`.
 
 Request spans carry `enduser.id`, `enduser.type` (the model:
 `user`/`admin`/`reseller`) and `enduser.guard` (the guard that

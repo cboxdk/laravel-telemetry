@@ -35,12 +35,14 @@ final class Redactor
     /**
      * @param  list<string>  $keys
      * @param  array<string, string>  $patterns  regex => replacement
+     * @param  list<string>  $safeKeys
      */
     public function __construct(
         private readonly bool $enabled = true,
         private readonly array $keys = [],
         private readonly array $patterns = [],
         private readonly string $replacement = '[REDACTED]',
+        private readonly array $safeKeys = [],
     ) {}
 
     /**
@@ -56,6 +58,9 @@ final class Redactor
             keys: is_array($keys) ? array_values(array_filter($keys, is_string(...))) : self::defaultKeys(),
             patterns: is_array($patterns) ? array_filter($patterns, is_string(...)) : self::defaultPatterns(),
             replacement: is_string($config['replacement'] ?? null) ? $config['replacement'] : '[REDACTED]',
+            safeKeys: is_array($config['safe_keys'] ?? null)
+                ? array_values(array_filter($config['safe_keys'], is_string(...)))
+                : self::defaultSafeKeys(),
         );
     }
 
@@ -84,6 +89,19 @@ final class Redactor
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
         ];
+    }
+
+    /**
+     * Exact attribute keys exempt from KEY-based redaction — the
+     * package's own attributes whose keys contain sensitive-looking
+     * segments but whose values are known-safe by construction.
+     * Pattern scrubbing and the custom hook still apply to them.
+     *
+     * @return list<string>
+     */
+    public static function defaultSafeKeys(): array
+    {
+        return ['session.driver', 'session.hash'];
     }
 
     /**
@@ -224,6 +242,10 @@ final class Redactor
         }
 
         $normalized = strtolower($key);
+
+        if (in_array($normalized, array_map(strtolower(...), $this->safeKeys), true)) {
+            return false;
+        }
 
         foreach ($this->keys as $word) {
             $word = preg_quote(strtolower($word), '/');

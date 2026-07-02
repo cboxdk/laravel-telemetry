@@ -46,6 +46,8 @@ exporter:
   value — JWTs, `Bearer`/`Basic` credentials and url userinfo
   (`redis://user:pass@host`) by default — wherever they appear:
   exception messages, event payloads, log records.
+- **Session correlation** uses a truncated SHA-256 of the session id —
+  the raw id (an authentication credential) never leaves the app.
 - The engine covers **log records** too — the message itself (key
   `log.message`) and its context attributes are scrubbed like everything
   else.

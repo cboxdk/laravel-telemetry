@@ -454,9 +454,12 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
 D["users"] = dashboard("cbox-tel-users", "Telemetry / Users", [
     traces("Requests for user $user ($usertype)", f'{{{TSVC} && kind=server && span.enduser.id=~"$user" && span.enduser.type=~"$usertype"}} | select(span.enduser.type, span.enduser.guard)', 0, 0, table_type="spans"),
     traces("Errors hit by user $user ($usertype)", f'{{{TSVC} && span.enduser.id=~"$user" && span.enduser.type=~"$usertype" && status=error}}', 0, 9),
-    traces("Memory hogs (> $minmb MB)", f'{{{TSVC} && kind=server && span.php.memory.peak_bytes > $minmb000000}}', 0, 18),
-    text("Tip", "Request spans carry `enduser.id`, `enduser.type` (the model: user/admin/reseller) and `enduser.guard` — multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` — explicit PII opt-in.", 0, 27),
-], variables=[textvar("user", ".+", "user id"), textvar("usertype", ".+", "user type"), textvar("minmb", "64", "min memory (MB)")])
+    traces("Session journey — every request in visit $sessionhash",
+           f'{{{TSVC} && kind=server && span.session.hash=~"$sessionhash"}} | select(span.enduser.id, span.session.hash)', 0, 18, table_type="spans",
+           description="session.hash from any request span follows the visitor across requests — the anonymous-user story enduser.id can't tell."),
+    traces("Memory hogs (> $minmb MB)", f'{{{TSVC} && kind=server && span.php.memory.peak_bytes > $minmb000000}}', 0, 27),
+    text("Tip", "Request spans carry `enduser.id`, `enduser.type` (the model: user/admin/reseller) and `enduser.guard` — multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` — explicit PII opt-in.", 0, 36),
+], variables=[textvar("user", ".+", "user id"), textvar("usertype", ".+", "user type"), textvar("sessionhash", ".+", "session hash"), textvar("minmb", "64", "min memory (MB)")])
 
 # ── 13 · Logs ────────────────────────────────────────────────────────
 D["logs"] = dashboard("cbox-tel-logs", "Telemetry / Logs", [
