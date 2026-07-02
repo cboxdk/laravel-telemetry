@@ -42,6 +42,10 @@ started while another is active becomes its child.
 Query spans are only recorded inside an active trace — no orphan roots
 from tinker sessions.
 
+Request spans carry `enduser.id` (the authenticated user's id — never
+name or email) so traces are filterable per user in TraceQL:
+`{ span.enduser.id = "42" }`. Disable with `instrument.user`.
+
 ## Context propagation
 
 Outbound propagation uses the full W3C `traceparent` — trace id **and**

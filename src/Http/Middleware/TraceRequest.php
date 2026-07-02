@@ -74,6 +74,12 @@ final class TraceRequest
                 'http.response.status_code' => $response->getStatusCode(),
             ]);
 
+            // Attribute the request to the authenticated user (resolved by
+            // now) — enables per-user trace filtering. Id only, never PII.
+            if (config('telemetry.instrument.user', true) && ($user = $request->user()) !== null) {
+                $span->setAttribute('enduser.id', (string) $user->getAuthIdentifier());
+            }
+
             if ($response->getStatusCode() >= 500) {
                 $span->setStatus(SpanStatus::Error);
             } elseif ($span->status() === SpanStatus::Unset) {

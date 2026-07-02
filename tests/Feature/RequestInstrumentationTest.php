@@ -6,6 +6,7 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Auth\GenericUser;
 use Illuminate\Support\Facades\Route;
 
 beforeEach(function () {
@@ -72,6 +73,26 @@ it('does not export when the incoming trace is not sampled', function () {
     ]);
 
     expect(requestSpans($this->collector))->toBeEmpty();
+});
+
+it('attributes the request span to the authenticated user', function () {
+    $this->actingAs(new GenericUser(['id' => 42]));
+
+    $this->get('/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['enduser.id'])->toBe('42');
+});
+
+it('omits user attribution when disabled', function () {
+    config()->set('telemetry.instrument.user', false);
+
+    $this->actingAs(new GenericUser(['id' => 42]));
+
+    $this->get('/users/7');
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('enduser.id');
 });
 
 it('marks 5xx responses as errors', function () {

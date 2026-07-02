@@ -13,6 +13,14 @@ Initial release.
   cost one store command, histogram observations flush as pre-aggregated
   buckets. `MetricStore` gained `mergeHistogram()` for this.
 
+### Observability UX
+
+- Request spans carry `enduser.id` (authenticated user id, opt-out via
+  `instrument.user`) for per-user trace filtering.
+- Queue metric label renamed `job` -> `job.name` (`job_name` in
+  Prometheus) — a bare `job` label collides with Prometheus' reserved
+  scrape-job label and was silently overwritten by collectors.
+
 ### Hardening (post-review)
 
 - Redis store: steady-state writes are now a single atomic command

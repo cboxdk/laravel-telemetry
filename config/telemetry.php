@@ -202,6 +202,10 @@ return [
 
         // Artisan command spans.
         'commands' => env('TELEMETRY_INSTRUMENT_COMMANDS', false),
+
+        // Tag request spans with the authenticated user's id (enduser.id)
+        // for per-user trace filtering. Id only — never name/email.
+        'user' => env('TELEMETRY_INSTRUMENT_USER', true),
     ],
 
     /*

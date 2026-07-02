@@ -109,6 +109,7 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
+| `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` (id only, never PII) |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 
 ## Built-in providers
