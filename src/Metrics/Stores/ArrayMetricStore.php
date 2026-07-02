@@ -78,6 +78,31 @@ final class ArrayMetricStore implements MetricStore
         $series['count']++;
     }
 
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    {
+        $key = Labels::encode($labels);
+        $bounds = $definition->buckets ?? [];
+        $this->since[$definition->name] ??= (int) (microtime(true) * 1e9);
+
+        $this->histograms[$definition->name] ??= ['definition' => $definition, 'series' => []];
+        $this->histograms[$definition->name]['series'][$key] ??= [
+            'bucketCounts' => array_fill(0, count($bounds) + 1, 0),
+            'sum' => 0.0,
+            'count' => 0,
+        ];
+
+        $series = &$this->histograms[$definition->name]['series'][$key];
+
+        foreach ($bucketCounts as $index => $bucketCount) {
+            if (isset($series['bucketCounts'][$index])) {
+                $series['bucketCounts'][$index] += $bucketCount;
+            }
+        }
+
+        $series['sum'] += $sum;
+        $series['count'] += $count;
+    }
+
     public function collect(): array
     {
         $families = [];

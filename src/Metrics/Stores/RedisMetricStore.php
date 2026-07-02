@@ -82,6 +82,30 @@ final class RedisMetricStore implements MetricStore
         $connection->hincrby($key, "{$series}:count", 1);
     }
 
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    {
+        $key = $this->familyKey(MetricType::Histogram, $definition->name);
+        $series = base64_encode(Labels::encode($labels));
+
+        $this->initialize($definition, $key);
+
+        $connection = $this->connection();
+
+        foreach ($bucketCounts as $index => $bucketCount) {
+            if ($bucketCount > 0) {
+                $connection->hincrby($key, "{$series}:b{$index}", $bucketCount);
+            }
+        }
+
+        if ($sum !== 0.0) {
+            $connection->hincrbyfloat($key, "{$series}:sum", $sum);
+        }
+
+        if ($count > 0) {
+            $connection->hincrby($key, "{$series}:count", $count);
+        }
+    }
+
     /**
      * Write meta, since-timestamp and index membership once per process
      * and metric. Meta uses HSET (not HSETNX) so a deploy with changed

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
+use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Illuminate\Contracts\Redis\Factory;
 
@@ -105,4 +106,24 @@ it('wipes everything it wrote', function () {
     $this->store->wipe();
 
     expect($this->store->collect())->toBeEmpty();
+});
+
+it('aggregates correctly through the write buffer', function () {
+    $buffered = new BufferedMetricStore($this->store);
+
+    $counter = new MetricDefinition('orders.created', MetricType::Counter);
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    foreach (range(1, 50) as $i) {
+        $buffered->incrementCounter($counter, ['tenant' => 'a'], 1);
+        $buffered->recordHistogram($histogram, [], (float) $i);
+    }
+
+    // collect() flushes the buffer first, then reads Redis.
+    $families = collect($buffered->collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['orders.created']->samples[0]->value)->toBe(50.0)
+        ->and($families['req.duration']->samples[0]->count)->toBe(50)
+        ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([10, 40, 0])
+        ->and($families['req.duration']->samples[0]->sum)->toBe(1275.0);
 });

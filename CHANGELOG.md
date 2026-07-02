@@ -6,6 +6,13 @@ All notable changes to `cboxdk/laravel-telemetry` are documented here.
 
 Initial release.
 
+### Performance
+
+- Write buffering (`buffer_writes`, default on): metric writes aggregate
+  in memory and flush once at request/job terminate — repeated increments
+  cost one store command, histogram observations flush as pre-aggregated
+  buckets. `MetricStore` gained `mergeHistogram()` for this.
+
 ### Hardening (post-review)
 
 - Redis store: steady-state writes are now a single atomic command

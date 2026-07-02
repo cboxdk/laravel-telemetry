@@ -32,6 +32,7 @@ Attached to every exported signal (OTel resource conventions).
 | Key | Env | Default |
 |---|---|---|
 | `store` | `TELEMETRY_STORE` | `redis` |
+| `buffer_writes` | `TELEMETRY_BUFFER_WRITES` | `true` — aggregate writes in memory, flush at terminate |
 | `stores.redis.connection` | `TELEMETRY_REDIS_CONNECTION` | `default` |
 | `stores.redis.prefix` | `TELEMETRY_REDIS_PREFIX` | `telemetry` |
 | `stores.apcu.prefix` | `TELEMETRY_APCU_PREFIX` | `telemetry` |

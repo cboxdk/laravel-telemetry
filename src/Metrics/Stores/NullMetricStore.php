@@ -20,6 +20,8 @@ final class NullMetricStore implements MetricStore
 
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void {}
 
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void {}
+
     public function collect(): array
     {
         return [];

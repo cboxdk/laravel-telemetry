@@ -73,6 +73,28 @@ final class ApcuMetricStore implements MetricStore
         $this->addInt("{$base}:count", 1);
     }
 
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    {
+        $series = Labels::encode($labels);
+        $base = $this->valueKey(MetricType::Histogram, $definition->name, $series);
+
+        $this->index($definition, $series);
+
+        foreach ($bucketCounts as $index => $bucketCount) {
+            if ($bucketCount > 0) {
+                $this->addInt("{$base}:b{$index}", $bucketCount);
+            }
+        }
+
+        if ($sum !== 0.0) {
+            $this->addFloat("{$base}:sum", $sum);
+        }
+
+        if ($count > 0) {
+            $this->addInt("{$base}:count", $count);
+        }
+    }
+
     public function collect(): array
     {
         $families = [];

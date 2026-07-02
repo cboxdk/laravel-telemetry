@@ -13,6 +13,7 @@ use Cbox\Telemetry\Metrics\Instruments\Histogram;
 use Cbox\Telemetry\Metrics\Instruments\ObservableGauge;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\Registry;
+use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Signal;
 use Cbox\Telemetry\Support\TelemetryBatch;
@@ -266,6 +267,15 @@ class TelemetryManager
      */
     public function flush(): void
     {
+        // Buffered stores push their aggregated metric writes at the same
+        // points spans flush — request terminate, after each queue job —
+        // even when no spans or events are pending.
+        $store = $this->registry->store();
+
+        if ($store instanceof BufferedMetricStore) {
+            FailSafe::guard(fn () => $store->flushBuffer());
+        }
+
         $spans = $this->tracer->drain();
         $events = $this->events;
         $this->events = [];

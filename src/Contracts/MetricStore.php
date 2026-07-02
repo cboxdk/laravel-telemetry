@@ -40,6 +40,16 @@ interface MetricStore
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void;
 
     /**
+     * Merge pre-aggregated histogram data (bucket counts, sum, count) in
+     * one operation — the write path for buffered stores flushing many
+     * observations at once.
+     *
+     * @param  array<string, string>  $labels
+     * @param  list<int>  $bucketCounts  One slot per bound plus overflow.
+     */
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void;
+
+    /**
      * Collect every stored metric family (push instruments only —
      * observable gauges are evaluated by the registry, not the store).
      *

@@ -10,8 +10,10 @@ weight: 4
 
 | Operation | Cost |
 |---|---|
-| `counter()->inc()` / `gauge()->set()` | ONE Redis command (bookkeeping runs once per process & metric) or an APCu CAS loop |
-| `histogram()->record()` | three Redis commands |
+| `counter()->inc()` / `gauge()->set()` | in-memory only — write buffering (default on) aggregates and flushes at terminate |
+| `histogram()->record()` | in-memory only; flushes as pre-aggregated buckets |
+| Buffer flush (at terminate) | one store command per touched counter/gauge series; a few per histogram series — regardless of how many times each was hit |
+| With `TELEMETRY_BUFFER_WRITES=false` | one Redis command per inc/set; three per histogram record |
 | `span()` start/end | in-memory only; export batched at terminate |
 | `event()` | in-memory only |
 | Observable gauge | zero until scrape/flush |
@@ -27,6 +29,17 @@ weight: 4
 - **Use a dedicated Redis connection** so telemetry writes never queue
   behind cache/queue traffic (and vice versa).
 - **APCu store** removes the network hop entirely on single-node setups.
+
+## Write buffering
+
+`buffer_writes` (default on for redis/apcu) aggregates metric writes in
+memory and flushes them at request/job terminate — the Laravel Pulse
+model. 100 increments of one counter cost one `HINCRBYFLOAT`; an N+1
+page's 500 query-duration observations flush as one merged histogram
+write. The buffer force-flushes at 1000 pending operations, and
+`collect()`/scrapes always flush first, so nothing is ever invisible.
+Trade-off: a hard crash (kill -9, segfault) loses the unflushed buffer —
+disable buffering if you need write-through semantics.
 
 ## Hot-path guarantees
 

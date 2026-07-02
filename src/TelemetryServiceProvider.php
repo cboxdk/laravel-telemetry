@@ -23,6 +23,7 @@ use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ApcuMetricStore;
 use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
+use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
@@ -192,7 +193,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $driver = (string) $config->get('telemetry.store', 'redis');
 
-        return match ($driver) {
+        $store = match ($driver) {
             'redis' => new RedisMetricStore(
                 redis: $app->make(RedisFactory::class),
                 connection: (string) $config->get('telemetry.stores.redis.connection', 'default'),
@@ -204,6 +205,14 @@ class TelemetryServiceProvider extends ServiceProvider
             'array' => new ArrayMetricStore,
             default => new NullMetricStore,
         };
+
+        // Wrap networked/shared stores in the write buffer; the array and
+        // null stores are in-process already and gain nothing from it.
+        if (in_array($driver, ['redis', 'apcu'], true) && $config->get('telemetry.buffer_writes', true)) {
+            return new BufferedMetricStore($store);
+        }
+
+        return $store;
     }
 
     /**

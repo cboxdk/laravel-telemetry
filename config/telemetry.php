@@ -52,6 +52,11 @@ return [
 
     'store' => env('TELEMETRY_STORE', 'redis'),
 
+    // Buffer metric writes in memory and flush them aggregated at request/
+    // job terminate — 100 increments of one counter cost a single store
+    // command. Trade-off: a hard crash loses the unflushed buffer.
+    'buffer_writes' => env('TELEMETRY_BUFFER_WRITES', true),
+
     'stores' => [
         'redis' => [
             'connection' => env('TELEMETRY_REDIS_CONNECTION', 'default'),
