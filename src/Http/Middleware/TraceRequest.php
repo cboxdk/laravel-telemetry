@@ -61,6 +61,17 @@ final class TraceRequest
 
             $request->attributes->set(self::SPAN_KEY, $span);
 
+            // The framework-boot phase, visible in the waterfall — from
+            // LARAVEL_START (public/index.php) until this middleware ran.
+            if (defined('LARAVEL_START')) {
+                $bootstrapMs = microtime(true) * 1000 - LARAVEL_START * 1000;
+
+                if ($bootstrapMs > 0 && $bootstrapMs < 60_000) {
+                    $this->telemetry->tracer()->recordSpan('laravel.bootstrap', $bootstrapMs);
+                    $span->setAttribute('laravel.bootstrap_ms', round($bootstrapMs, 2));
+                }
+            }
+
             if (config('telemetry.instrument.resources', true)) {
                 $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
             }

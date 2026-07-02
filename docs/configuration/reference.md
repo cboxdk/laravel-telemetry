@@ -87,6 +87,7 @@ everything and a `public` endpoint filtered to a prefix list:
 | `traces.max_buffer` | `TELEMETRY_TRACES_MAX_BUFFER` | `5000` |
 | `traces.continue_incoming` | `TELEMETRY_TRACES_CONTINUE_INCOMING` | `true` |
 | `traces.trust_incoming_sampling` | `TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING` | `true` — disable on public edges so clients can't force sampling |
+| `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
 
 ## Events
 
@@ -112,6 +113,9 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` (id only, never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
+| `instrument.cache` | `TELEMETRY_INSTRUMENT_CACHE` | `false` — cache.operations counters (hit/miss/write/forget) |
+| `instrument.mail` | `TELEMETRY_INSTRUMENT_MAIL` | `true` — mail.send spans + counter |
+| `instrument.notifications` | `TELEMETRY_INSTRUMENT_NOTIFICATIONS` | `true` — notification.send spans + counter |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 
 ## Built-in providers

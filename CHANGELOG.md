@@ -15,6 +15,17 @@ Initial release.
 
 ### Observability UX
 
+- Error spans escape sampling (`traces.always_sample_errors`) — sampled
+  apps still export every failing span.
+- Per-route sampling middleware: `Sample::rate(0.01)` /
+  `Sample::always()` / `Sample::never()`; the re-decision covers the
+  active trace including the open request span, and propagates.
+- Mail and notification instrumentation (client spans + counters) and
+  opt-in cache.operations counters (hit/miss/write/forget, no key
+  labels).
+- Backdated `laravel.bootstrap` span + `laravel.bootstrap_ms` attribute
+  from `LARAVEL_START`, so framework boot shows in the waterfall.
+
 - Per-span resource attribution: every sampled span carries its own
   `php.cpu.time_ms` and `php.memory.delta_bytes`, so trace waterfalls
   show where CPU/memory went (backdated query spans excluded).

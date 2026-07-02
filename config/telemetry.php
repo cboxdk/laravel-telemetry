@@ -146,6 +146,10 @@ return [
         // (protects long-running jobs and Octane workers).
         'max_buffer' => env('TELEMETRY_TRACES_MAX_BUFFER', 5000),
 
+        // Error spans are exported even from unsampled traces — a
+        // 10%-sampled app still surfaces every failing span.
+        'always_sample_errors' => env('TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS', true),
+
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 
@@ -215,6 +219,16 @@ return [
         // Scheduled task spans + schedule.tasks.{processed,failed,skipped}
         // counters and schedule.task.duration histogram.
         'scheduled_tasks' => env('TELEMETRY_INSTRUMENT_SCHEDULED_TASKS', true),
+
+        // cache.operations{operation, store} counters (hit/miss/write/
+        // forget). Off by default — hot caches are chatty.
+        'cache' => env('TELEMETRY_INSTRUMENT_CACHE', false),
+
+        // mail.send spans + mail.sent counter.
+        'mail' => env('TELEMETRY_INSTRUMENT_MAIL', true),
+
+        // notification.send spans + notifications.sent{channel,notification}.
+        'notifications' => env('TELEMETRY_INSTRUMENT_NOTIFICATIONS', true),
     ],
 
     /*

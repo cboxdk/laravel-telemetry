@@ -38,10 +38,42 @@ final class Tracer
 
     private bool $measureSpanResources = false;
 
+    /**
+     * A mid-trace re-decision (per-route Sample middleware). Overrides
+     * the head decision for buffering and propagation.
+     */
+    private ?bool $sampledOverride = null;
+
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
+        private readonly bool $alwaysSampleErrors = true,
     ) {}
+
+    /**
+     * Re-decide sampling for the ACTIVE trace (per-route overrides).
+     * Spans that already finished under the old decision are unaffected;
+     * everything from now on — including the still-open root span —
+     * follows the new one.
+     */
+    public function resample(bool $sampled): void
+    {
+        $this->sampledOverride = $sampled;
+        $this->sampled = $sampled;
+    }
+
+    /**
+     * Re-decide with a rate (0–1), using the same lottery as the head
+     * decision.
+     */
+    public function resampleAt(float $rate): void
+    {
+        $this->resample(match (true) {
+            $rate >= 1.0 => true,
+            $rate <= 0.0 => false,
+            default => (mt_rand() / mt_getrandmax()) < $rate,
+        });
+    }
 
     /**
      * Give every sampled span its own CPU-time and memory-delta
@@ -210,7 +242,11 @@ final class Tracer
     public function currentTraceParent(): ?TraceParent
     {
         if ($current = $this->currentSpan()) {
-            return $current->traceParent();
+            return new TraceParent(
+                $current->traceId,
+                $current->spanId,
+                $this->sampledOverride ?? $current->sampled,
+            );
         }
 
         return $this->remoteParent;
@@ -255,6 +291,7 @@ final class Tracer
         $this->remoteParent = null;
         $this->traceId = null;
         $this->sampled = null;
+        $this->sampledOverride = null;
         $this->contextAttributes = [];
     }
 
@@ -268,8 +305,15 @@ final class Tracer
             array_splice($this->stack, (int) $index, 1);
         }
 
-        if (! $span->sampled) {
-            return;
+        $sampled = $this->sampledOverride ?? $span->sampled;
+
+        if (! $sampled) {
+            // Error spans escape sampling: from a 10%-sampled app you
+            // still get every failing span (its trace may be partial —
+            // siblings were dropped under the head decision).
+            if (! $this->alwaysSampleErrors || $span->status() !== SpanStatus::Error) {
+                return;
+            }
         }
 
         if ($this->contextAttributes !== []) {

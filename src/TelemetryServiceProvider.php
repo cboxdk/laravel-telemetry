@@ -17,7 +17,10 @@ use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Prometheus\PrometheusRenderer;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
+use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
+use Cbox\Telemetry\Instrumentation\MailInstrumentation;
+use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
@@ -66,6 +69,7 @@ class TelemetryServiceProvider extends ServiceProvider
             $tracer = new Tracer(
                 sampleRate: $enabled ? (float) $config->get('telemetry.traces.sample_rate', 1.0) : 0.0,
                 maxBuffer: (int) $config->get('telemetry.traces.max_buffer', 5000),
+                alwaysSampleErrors: $enabled && (bool) $config->get('telemetry.traces.always_sample_errors', true),
             );
 
             if ($enabled && $config->get('telemetry.instrument.resources', true)) {
@@ -116,6 +120,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerQueryInstrumentation();
         $this->registerCommandInstrumentation();
         $this->registerScheduleInstrumentation();
+        $this->registerEventInstrumentations();
         $this->registerSystemMetricsProvider();
         $this->registerOctaneReset();
         $this->registerHttpClientMacro();
@@ -380,6 +385,26 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->make(ScheduleInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
         );
+    }
+
+    private function registerEventInstrumentations(): void
+    {
+        $config = $this->app->make('config');
+        $events = $this->app->make(Dispatcher::class);
+
+        if ($config->get('telemetry.instrument.cache', false)) {
+            $this->app->make(CacheInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.mail', true)) {
+            $this->app->singleton(MailInstrumentation::class);
+            $this->app->make(MailInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.notifications', true)) {
+            $this->app->singleton(NotificationInstrumentation::class);
+            $this->app->make(NotificationInstrumentation::class)->register($events);
+        }
     }
 
     private function registerSystemMetricsProvider(): void

@@ -38,6 +38,10 @@ started while another is active becomes its child.
 | Queue jobs | `App\Jobs\Import process` (consumer) | `instrument.jobs` |
 | DB queries | `db.query` (client, backdated) | `instrument.queries` |
 | Artisan commands | `artisan app:sync` | `instrument.commands` (off by default) |
+| Scheduled tasks | `schedule artisan inspire` | `instrument.scheduled_tasks` |
+| Mail | `mail.send` (client) | `instrument.mail` |
+| Notifications | `notification.send` (client) | `instrument.notifications` |
+| Cache | counters only (`cache.operations`) | `instrument.cache` (off by default) |
 
 Query spans are only recorded inside an active trace — no orphan roots
 from tinker sessions.
@@ -151,6 +155,29 @@ The macro is a no-op when no trace is active.
 inherit the decision; remote callers' decisions are respected via the
 sampled flag. Unsampled spans still exist as context — ids propagate — but
 are never buffered or exported.
+
+**Error spans escape sampling** (`traces.always_sample_errors`, default
+on): a 10%-sampled app still exports every failing span. The escaped
+span's trace may be partial — healthy siblings were dropped under the
+head decision.
+
+**Per-route overrides** via the Sample middleware — the re-decision
+covers the whole active trace, including the still-open request span:
+
+```php
+use Cbox\Telemetry\Http\Middleware\Sample;
+
+Route::get('/health', HealthController::class)->middleware(Sample::never());
+Route::post('/checkout', ...)->middleware(Sample::always());
+Route::get('/feed', ...)->middleware(Sample::rate(0.01));
+```
+
+## Bootstrap visibility
+
+When `LARAVEL_START` is defined (it is, in every standard `public/
+index.php`), the request trace includes a backdated `laravel.bootstrap`
+span covering framework boot up to the middleware stack, and the request
+span carries `laravel.bootstrap_ms`.
 
 ## Buffering
 
