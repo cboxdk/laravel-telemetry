@@ -153,3 +153,45 @@ it('records no cache spans outside a sampled trace', function () {
 
     expect($spans->firstWhere('name', 'cache.miss'))->toBeNull();
 });
+
+it('classifies cache keys into bounded groups and drops null-classified operations', function () {
+    (new CacheInstrumentation(app()))->register(app('events'), counters: true, spans: true);
+
+    Telemetry::classifyCacheKeysUsing(function (string $store, string $key) {
+        if (str_starts_with($key, 'stache::indexes::')) {
+            return 'stache.index';
+        }
+
+        return str_starts_with($key, 'noise:') ? null : 'app';
+    });
+
+    Telemetry::span('request-ish', function () {
+        Cache::get('stache::indexes::collections::blog::slug');
+        Cache::get('users:7');
+        Cache::get('noise:heartbeat');
+    });
+
+    Telemetry::flush();
+
+    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
+
+    expect($spans->firstWhere(fn ($span) => ($span->attributes()['cache.key.group'] ?? null) === 'stache.index'))->not->toBeNull()
+        ->and($spans->firstWhere(fn ($span) => ($span->attributes()['cache.key'] ?? null) === 'noise:heartbeat'))->toBeNull();
+
+    $groups = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name())['cache.operations']->samples;
+
+    expect(collect($groups)->pluck('labels.key_group')->all())->toContain('stache.index', 'app')
+        ->and(collect($groups)->sum('value'))->toBe(2.0);
+});
+
+it('ignores configured cache stores entirely', function () {
+    (new CacheInstrumentation(app()))->register(app('events'), counters: true, spans: true, ignoreStores: ['array']);
+
+    Telemetry::span('request-ish', fn () => Cache::get('anything'));
+    Telemetry::flush();
+
+    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
+
+    expect($spans->firstWhere('name', 'cache.miss'))->toBeNull()
+        ->and(collect(Telemetry::collect())->keyBy(fn ($family) => $family->name()))->not->toHaveKey('cache.operations');
+});

@@ -23,6 +23,8 @@ final class Span
     /** @var list<SpanEvent> */
     private array $events = [];
 
+    private bool $customName = false;
+
     private SpanStatus $status = SpanStatus::Unset;
 
     private ?string $statusDescription = null;
@@ -87,8 +89,20 @@ final class Span
     public function updateName(string $name): self
     {
         $this->name = $name;
+        $this->customName = true;
 
         return $this;
+    }
+
+    /**
+     * Whether the span was explicitly renamed after start — the request
+     * middleware's default route-pattern rename backs off, so packages
+     * with catch-all routes (CMSs, wildcard APIs) can set meaningful
+     * names that survive terminate().
+     */
+    public function hasCustomName(): bool
+    {
+        return $this->customName;
     }
 
     /**

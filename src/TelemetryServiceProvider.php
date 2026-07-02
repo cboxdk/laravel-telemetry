@@ -475,7 +475,12 @@ class TelemetryServiceProvider extends ServiceProvider
 
         if ($cacheCounters || $cacheSpans) {
             $this->app->singleton(CacheInstrumentation::class);
-            $this->app->make(CacheInstrumentation::class)->register($events, $cacheCounters, $cacheSpans);
+            $this->app->make(CacheInstrumentation::class)->register(
+                $events,
+                $cacheCounters,
+                $cacheSpans,
+                array_values(array_filter((array) $config->get('telemetry.instrument.cache_ignore_stores', []), is_string(...))),
+            );
         }
 
         if ($config->get('telemetry.instrument.mail', true)) {

@@ -310,6 +310,12 @@ return [
         // pathological requests.
         'cache_spans' => env('TELEMETRY_INSTRUMENT_CACHE_SPANS', false),
 
+        // Cache stores that are never recorded (neither counters nor
+        // spans) — e.g. a store used exclusively by a framework
+        // subsystem you instrument separately. For key-level control,
+        // see Telemetry::classifyCacheKeysUsing().
+        'cache_ignore_stores' => [],
+
         // mail.send spans + mail.sent counter.
         'mail' => env('TELEMETRY_INSTRUMENT_MAIL', true),
 

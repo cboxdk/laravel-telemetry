@@ -20,7 +20,9 @@ At trace start (request, job, scheduled task) the package:
 2. Sets an explicit **Sentry scope tag** (`trace_id`) when the Sentry SDK
    is installed — visible on the issue page even on older SDK versions.
 3. Exposes **`X-Trace-Id` on every response**
-   (`traces.response_header`, disable with null).
+   (`traces.response_header`, disable with null) — except publicly
+   cacheable ones (`Cache-Control: public`/`s-maxage`), where a CDN or
+   page cache would replay one stale id to every visitor.
 
 Error spans always export — even from sampled-down traces
 (`always_sample_errors`) — so the id on a Sentry issue reliably resolves

@@ -106,12 +106,22 @@ final class TraceRequest
 
         // Expose the trace id to the caller — the support-case reference
         // ("quote id X to support") and the debugging entry point.
+        // Publicly cacheable responses are skipped: a cached copy would
+        // replay one stale trace id to every subsequent visitor (CDNs,
+        // static page caches), which defeats the header's purpose.
         FailSafe::guard(function () use ($response) {
             $header = config('telemetry.traces.response_header', 'X-Trace-Id');
 
-            if (is_string($header) && $header !== '' && ($traceId = $this->telemetry->traceId()) !== null) {
-                $response->headers->set($header, $traceId);
+            if (! is_string($header) || $header === '' || ($traceId = $this->telemetry->traceId()) === null) {
+                return;
             }
+
+            if ($response->headers->hasCacheControlDirective('public')
+                || $response->headers->hasCacheControlDirective('s-maxage')) {
+                return;
+            }
+
+            $response->headers->set($header, $traceId);
         });
 
         return $response;
@@ -128,7 +138,15 @@ final class TraceRequest
         FailSafe::guard(function () use ($request, $response, $span) {
             $route = $this->routePattern($request);
 
-            $span->updateName($request->method().' '.$route);
+            // Naming precedence: an explicit updateName() during the
+            // request wins; then the app's nameRequestsUsing() resolver;
+            // then the default route pattern. Catch-all routes (CMSs)
+            // need the first two — "GET /{slug}" names nothing.
+            if (! $span->hasCustomName()) {
+                $span->updateName($this->telemetry->resolveRequestName($request, $response)
+                    ?? $request->method().' '.$route);
+            }
+
             $span->setAttributes([
                 'http.route' => $route,
                 'http.response.status_code' => $response->getStatusCode(),
@@ -162,6 +180,11 @@ final class TraceRequest
                     ]));
                 }
             }
+
+            // App-defined root-span enrichment with the final response in
+            // hand (Telemetry::enrichRequestsUsing) — status-dependent
+            // attributes work here.
+            $span->setAttributes($this->telemetry->resolveRequestEnrichment($request, $response));
 
             // Body sizes (OTel semconv). Response size is skipped for
             // streamed/binary responses where content isn't a string.

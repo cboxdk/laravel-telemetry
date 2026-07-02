@@ -46,6 +46,12 @@ started while another is active becomes its child.
 | Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
 | Reported exceptions | `exceptions.reported{exception}` counter + span event — includes HANDLED report()s | `instrument.exceptions` |
 
+Request root spans are named `METHOD /route/{pattern}` by default.
+Behind catch-all routes, name them yourself with
+`Telemetry::nameRequestsUsing()` — and add attributes at terminate with
+`enrichRequestsUsing()`; see [Runtime hooks](../extension-points/hooks.md).
+An explicit `updateName()` during the request always survives terminate.
+
 Query spans are only recorded inside an active trace — no orphan roots
 from tinker sessions. The ROOT span additionally carries per-request
 tallies — `db.query.count` and `db.query.time_ms` ("12 queries / 48 ms"

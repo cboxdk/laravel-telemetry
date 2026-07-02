@@ -1,0 +1,86 @@
+---
+title: Runtime hooks
+description: Resolvers that packages and apps register to shape what gets recorded
+weight: 3
+---
+
+# Runtime hooks
+
+Beyond [providers](providers.md) (publish metrics) and
+[exporters](exporters.md) (ship signals), a set of resolver hooks lets an
+app — or a package building on top, like a CMS integration — shape what
+the built-in instrumentation records. All of them are guarded: a throwing
+resolver is reported and ignored, never breaking the request.
+
+## Request span naming — `nameRequestsUsing()`
+
+Essential behind **catch-all routes** (Statamic, wildcard APIs), where the
+route pattern names every request identically:
+
+```php
+Telemetry::nameRequestsUsing(function ($request, $response) {
+    $entry = $request->attributes->get('resolved.entry');
+
+    return $entry ? 'GET entry:'.$entry->collection : null; // null = default name
+});
+```
+
+Keep names **bounded** — collections and types, never ids or slugs.
+Precedence: an explicit `updateName()` on the span during the request
+always wins; then this resolver; then the default `METHOD /route/{pattern}`.
+`http.route` keeps the raw route pattern regardless.
+
+## Root-span enrichment — `enrichRequestsUsing()`
+
+Extra attributes on the request root span at terminate, with the final
+response in hand (status-dependent enrichment works):
+
+```php
+Telemetry::enrichRequestsUsing(fn ($request, $response) => [
+    'app.static_cache' => $response->headers->get('X-Cache', 'miss'),
+]);
+```
+
+Runs before the tail-detail decision and the redaction engine. For
+*metric labels* use `labelRequestsUsing()` instead — attributes are
+per-span (unbounded ok), labels multiply cardinality (bounded only).
+
+## Cache key classification — `classifyCacheKeysUsing()`
+
+Cache-heavy subsystems (a CMS content cache, an ORM cache) produce
+thousands of raw keys. Classify them into bounded groups — or drop them:
+
+```php
+Telemetry::classifyCacheKeysUsing(function (string $store, string $key) {
+    if (str_starts_with($key, 'stache::indexes::')) {
+        return 'stache.index';
+    }
+
+    return str_starts_with($key, 'internal:') ? null : 'app'; // null = drop
+});
+```
+
+With a classifier registered, kept operations carry the group as a
+`key_group` counter label and a `cache.key.group` span attribute (the raw
+key stays on the span). Whole stores can be excluded with
+`instrument.cache_ignore_stores`.
+
+## The full hook surface
+
+| Hook | Shapes | Signature |
+|---|---|---|
+| `nameRequestsUsing()` | root span name | `fn ($request, $response): ?string` |
+| `enrichRequestsUsing()` | root span attributes | `fn ($request, $response): array` |
+| `labelRequestsUsing()` | request metric labels (bounded!) | `fn ($request): array` |
+| `resolveUserUsing()` | user attribution | `fn ($user, ?string $guard): array` |
+| `classifyCacheKeysUsing()` | cache grouping/dropping | `fn (string $store, string $key): ?string` |
+| `redactUsing()` | last-pass redaction | `fn (string $key, string $value): ?string` |
+| `handleExceptionsUsing()` | internal-failure reporting | `fn (Throwable $e): void` |
+| `Telemetry::context()` | ambient dimensions on all signals | — |
+| `Tracer::recordSpan()` / `bumpStat()` / `rootSpan()` | custom spans, backdated spans, root tallies | — |
+| `Telemetry::contributes()` | conditional registration when telemetry exists | — |
+
+A package integration typically combines these: a user resolver, a
+`context()` listener for its ambient dimensions (site, tenant), a request
+namer for its routing model, a cache classifier for its cache traffic,
+and a `TelemetryProvider` for its gauges.

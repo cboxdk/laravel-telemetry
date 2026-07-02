@@ -22,6 +22,16 @@ Initial release.
 
 ### Observability UX
 
+- Extension hooks for packages building on top (CMS integrations):
+  `nameRequestsUsing()` names root spans behind catch-all routes (an
+  explicit `updateName()` is never clobbered by terminate),
+  `enrichRequestsUsing()` adds root-span attributes with the final
+  response in hand, and `classifyCacheKeysUsing()` groups or drops
+  cache keys (`key_group` label / `cache.key.group` attribute) with
+  `instrument.cache_ignore_stores` for whole stores.
+- The `X-Trace-Id` header is skipped on publicly cacheable responses
+  (`Cache-Control: public`/`s-maxage`) — a CDN or static page cache
+  must never replay one stale trace id to every visitor.
 - Multi-guard user attribution: request spans carry `enduser.type` (the
   model: user/admin/reseller) and `enduser.guard` alongside `enduser.id`,
   so admin #7 and user #7 are distinct identities.

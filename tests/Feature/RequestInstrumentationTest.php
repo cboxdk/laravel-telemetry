@@ -251,3 +251,56 @@ it('forgets the remembered identity when context resets', function () {
 
     expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('enduser.id');
 });
+
+it('lets the app name request spans behind catch-all routes', function () {
+    Route::get('/{page}', fn (string $page) => 'cms')->where('page', '.*');
+
+    Telemetry::nameRequestsUsing(function ($request, $response) {
+        return $response->getStatusCode() === 200 ? 'GET entry:blog' : null;
+    });
+
+    $this->get('/some/deep/cms/page');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->name)->toBe('GET entry:blog')
+        ->and($span->attributes()['http.route'])->toBe('/{page}');
+});
+
+it('never clobbers an explicitly renamed request span', function () {
+    Route::get('/renaming', function () {
+        Telemetry::currentSpan()->updateName('GET custom:name');
+
+        return 'ok';
+    });
+
+    Telemetry::nameRequestsUsing(fn () => 'GET resolver:name');
+
+    $this->get('/renaming');
+
+    expect(requestSpans($this->collector)[0]->name)->toBe('GET custom:name');
+});
+
+it('enriches request spans at terminate with the final response in hand', function () {
+    Telemetry::enrichRequestsUsing(fn ($request, $response) => [
+        'app.cache_state' => $response->headers->get('X-Cache-State', 'miss'),
+        'app.tenant' => 'acme',
+    ]);
+
+    $this->get('/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['app.cache_state'])->toBe('miss')
+        ->and($attributes['app.tenant'])->toBe('acme');
+});
+
+it('omits the trace id header on publicly cacheable responses', function () {
+    Route::get('/cached-page', fn () => response('ok')->header('Cache-Control', 'public, max-age=3600'));
+    Route::get('/cdn-page', fn () => response('ok')->header('Cache-Control', 's-maxage=600'));
+    Route::get('/private-page', fn () => response('ok')->header('Cache-Control', 'private, no-store'));
+
+    expect($this->get('/cached-page')->headers->has('X-Trace-Id'))->toBeFalse()
+        ->and($this->get('/cdn-page')->headers->has('X-Trace-Id'))->toBeFalse()
+        ->and($this->get('/private-page')->headers->get('X-Trace-Id'))->toMatch('/^[0-9a-f]{32}$/');
+});

@@ -53,6 +53,12 @@ class TelemetryManager
 
     private ?Closure $userAttributeResolver = null;
 
+    private ?Closure $requestNameResolver = null;
+
+    private ?Closure $requestEnricher = null;
+
+    private ?Closure $cacheKeyClassifier = null;
+
     /** @var array{id: string, type: string, guard: string|null}|null */
     private ?array $rememberedUser = null;
 
@@ -292,6 +298,114 @@ class TelemetryManager
      *
      * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
      */
+    /**
+     * Name request root spans yourself — essential behind catch-all
+     * routes (Statamic, wildcard APIs) where the route pattern names
+     * every request identically. Return null to keep the default
+     * "METHOD /route/{pattern}" name. Keep names BOUNDED — never ids:
+     *
+     *     Telemetry::nameRequestsUsing(function ($request, $response) {
+     *         $entry = $request->attributes->get('statamic.entry');
+     *
+     *         return $entry ? 'GET entry:'.$entry->collectionHandle() : null;
+     *     });
+     *
+     * A span renamed explicitly during the request (updateName) always
+     * wins over both this resolver and the default.
+     *
+     * @param  (Closure(mixed, mixed): ?string)|null  $resolver
+     */
+    public function nameRequestsUsing(?Closure $resolver): void
+    {
+        $this->requestNameResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     */
+    public function resolveRequestName(mixed $request, mixed $response): ?string
+    {
+        if ($this->requestNameResolver === null) {
+            return null;
+        }
+
+        $name = FailSafe::guard(fn () => ($this->requestNameResolver)($request, $response));
+
+        return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /**
+     * Add attributes to the request root span at terminate — the
+     * response is final, so status-dependent enrichment works:
+     *
+     *     Telemetry::enrichRequestsUsing(fn ($request, $response) => [
+     *         'statamic.static_cache' => $response->headers->get('X-Statamic-Cache', 'miss'),
+     *     ]);
+     *
+     * Runs before the tail-detail decision and the redaction engine.
+     *
+     * @param  (Closure(mixed, mixed): array<string, scalar|null>)|null  $resolver
+     */
+    public function enrichRequestsUsing(?Closure $resolver): void
+    {
+        $this->requestEnricher = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     *
+     * @return array<string, scalar|null>
+     */
+    public function resolveRequestEnrichment(mixed $request, mixed $response): array
+    {
+        if ($this->requestEnricher === null) {
+            return [];
+        }
+
+        return FailSafe::guard(fn (): array => ($this->requestEnricher)($request, $response)) ?? [];
+    }
+
+    /**
+     * Classify cache keys into bounded groups — or drop them. With a
+     * classifier registered, every recorded cache operation carries the
+     * returned group (counter label `key_group`, span attribute
+     * `cache.key.group`); returning null drops the operation entirely.
+     * This is how a Stache-heavy CMS turns thousands of raw keys into
+     * "stache.index" instead of flooding the timeline:
+     *
+     *     Telemetry::classifyCacheKeysUsing(function (string $store, string $key) {
+     *         return str_starts_with($key, 'stache::') ? 'stache' : 'app';
+     *     });
+     *
+     * @param  (Closure(string, string): ?string)|null  $classifier
+     */
+    public function classifyCacheKeysUsing(?Closure $classifier): void
+    {
+        $this->cacheKeyClassifier = $classifier;
+    }
+
+    /**
+     * @internal used by the cache instrumentation
+     */
+    public function hasCacheKeyClassifier(): bool
+    {
+        return $this->cacheKeyClassifier !== null;
+    }
+
+    /**
+     * @internal used by the cache instrumentation
+     */
+    public function classifyCacheKey(string $store, string $key): ?string
+    {
+        if ($this->cacheKeyClassifier === null) {
+            return null;
+        }
+
+        $group = FailSafe::guard(fn () => ($this->cacheKeyClassifier)($store, $key));
+
+        return is_string($group) ? $group : null;
+    }
+
     public function labelRequestsUsing(?Closure $resolver): void
     {
         $this->requestLabelResolver = $resolver;

@@ -48,6 +48,9 @@ final class CacheInstrumentation
 
     private bool $spans = false;
 
+    /** @var list<string> */
+    private array $ignoreStores = [];
+
     public function __construct(private readonly Container $container) {}
 
     private function telemetry(): TelemetryManager
@@ -55,10 +58,14 @@ final class CacheInstrumentation
         return $this->container->make(TelemetryManager::class);
     }
 
-    public function register(Dispatcher $events, bool $counters = true, bool $spans = false): void
+    /**
+     * @param  list<string>  $ignoreStores
+     */
+    public function register(Dispatcher $events, bool $counters = true, bool $spans = false, array $ignoreStores = []): void
     {
         $this->counters = $counters;
         $this->spans = $spans;
+        $this->ignoreStores = $ignoreStores;
 
         $events->listen(CacheHit::class, fn (CacheHit $event) => $this->complete('hit', $event->storeName, $event->key));
         $events->listen(CacheMissed::class, fn (CacheMissed $event) => $this->complete('miss', $event->storeName, $event->key));
@@ -86,6 +93,10 @@ final class CacheInstrumentation
 
     private function begin(?string $store, string $key): void
     {
+        if (in_array($store ?? 'default', $this->ignoreStores, true)) {
+            return;
+        }
+
         if (count($this->pending) >= self::MAX_PENDING) {
             $this->pending = [];
         }
@@ -96,11 +107,33 @@ final class CacheInstrumentation
     private function complete(string $operation, ?string $store, string $key): void
     {
         FailSafe::guard(function () use ($operation, $store, $key) {
+            if (in_array($store ?? 'default', $this->ignoreStores, true)) {
+                return;
+            }
+
             $telemetry = $this->telemetry();
+
+            // App-defined key classification (classifyCacheKeysUsing):
+            // group => bounded label/attribute, null => drop the
+            // operation. How a Stache-style subsystem with thousands of
+            // raw keys stays readable.
+            $group = null;
+
+            if ($telemetry->hasCacheKeyClassifier()) {
+                $group = $telemetry->classifyCacheKey($store ?? 'default', $key);
+
+                if ($group === null) {
+                    return;
+                }
+            }
 
             if ($this->counters) {
                 $telemetry->counter('cache.operations', 'Cache operations by outcome')
-                    ->inc(1, ['operation' => $operation, 'store' => $store ?? 'default']);
+                    ->inc(1, array_filter([
+                        'operation' => $operation,
+                        'store' => $store ?? 'default',
+                        'key_group' => $group,
+                    ], static fn ($value) => $value !== null));
             }
 
             if (! $this->spans) {
@@ -129,11 +162,12 @@ final class CacheInstrumentation
             $telemetry->tracer()->recordSpan(
                 "cache.{$operation}",
                 $durationMs,
-                [
+                array_filter([
                     'cache.key' => $key,
                     'cache.store' => $store ?? 'default',
                     'cache.operation' => $operation,
-                ],
+                    'cache.key.group' => $group,
+                ], static fn ($value) => $value !== null),
                 SpanKind::Client,
                 detail: true,
             );
