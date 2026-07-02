@@ -6,6 +6,7 @@ namespace Cbox\Telemetry;
 
 use Cbox\SystemMetrics\SystemMetrics;
 use Cbox\Telemetry\Console\DashboardsCommand;
+use Cbox\Telemetry\Console\DeployCommand;
 use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
 use Cbox\Telemetry\Console\MonitorCommand;
@@ -39,10 +40,13 @@ use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Tracing\Tracer;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
+use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -148,7 +152,8 @@ class TelemetryServiceProvider extends ServiceProvider
                 __DIR__.'/../config/telemetry.php' => config_path('telemetry.php'),
             ], 'telemetry-config');
 
-            $this->commands([FlushCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
+            $this->commands([FlushCommand::class,
+                DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
         }
 
         if (! $this->app->make('config')->get('telemetry.enabled')) {
@@ -283,6 +288,9 @@ class TelemetryServiceProvider extends ServiceProvider
             'host.name' => (string) gethostname(),
             'telemetry.sdk.name' => 'cboxdk/laravel-telemetry',
             'telemetry.sdk.language' => 'php',
+            'process.runtime.name' => 'php',
+            'process.runtime.version' => PHP_VERSION,
+            'laravel.version' => $app->version(),
         ];
 
         if (is_string($namespace = $config->get('telemetry.service.namespace'))) {
@@ -293,7 +301,12 @@ class TelemetryServiceProvider extends ServiceProvider
             $resource['service.version'] = $version;
         }
 
-        if (is_string($deployment = $config->get('telemetry.service.deployment')) && $deployment !== '') {
+        // Deployment marker: explicit config wins; otherwise the current
+        // git commit identifies the deploy (two file reads, no exec).
+        $deployment = $config->get('telemetry.service.deployment');
+        $deployment = is_string($deployment) && $deployment !== '' ? $deployment : GitVersion::detect($app->basePath());
+
+        if ($deployment !== null) {
             $resource['deployment.id'] = $deployment;
         }
 
@@ -487,6 +500,31 @@ class TelemetryServiceProvider extends ServiceProvider
         if ($config->get('telemetry.instrument.mail', true)) {
             $this->app->singleton(MailInstrumentation::class);
             $this->app->make(MailInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.gates', true)) {
+            $this->app->booted(function (Application $app) {
+                FailSafe::guard(function () use ($app) {
+                    $app->make(Gate::class)
+                        ->after(function ($user, string $ability, $result) use ($app): void {
+                            FailSafe::guard(function () use ($app, $ability, $result) {
+                                $allowed = $result instanceof Response ? $result->allowed() : (bool) $result;
+                                $telemetry = $app->make(TelemetryManager::class);
+
+                                // Ability names are code identifiers —
+                                // bounded, safe as a label.
+                                $telemetry->counter('authorization.checks', 'Gate/policy checks by outcome')
+                                    ->inc(1, ['ability' => $ability, 'result' => $allowed ? 'allowed' : 'denied']);
+
+                                $telemetry->tracer()->bumpStat('gate.check.count', 1);
+
+                                if (! $allowed) {
+                                    $telemetry->tracer()->bumpStat('gate.denied.count', 1);
+                                }
+                            });
+                        });
+                });
+            });
         }
 
         if ($config->get('telemetry.instrument.views', true)) {

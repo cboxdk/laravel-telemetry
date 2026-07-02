@@ -13,6 +13,22 @@
     "from": "now-1h",
     "to": "now"
   },
+  "annotations": {
+    "list": [
+      {
+        "name": "Deploys",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "enable": true,
+        "hide": false,
+        "iconColor": "purple",
+        "expr": "{service_name=~\"$service\"} |= `app.deployment`",
+        "titleFormat": "Deploy"
+      }
+    ]
+  },
   "templating": {
     "list": [
       {

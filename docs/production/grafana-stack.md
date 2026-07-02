@@ -145,3 +145,14 @@ Anything with an OTLP HTTP receiver works unchanged: Honeycomb, Datadog,
 New Relic, Jaeger (traces), SigNoz, an OpenTelemetry Collector. The
 Prometheus endpoint likewise feeds VictoriaMetrics or vanilla Prometheus.
 Our dashboards and examples, however, assume the Grafana stack.
+
+## Deploy annotations
+
+Run `php artisan telemetry:deploy` from your deploy pipeline (Forge,
+Envoyer, GitHub Actions) right after a release goes live. The emitted
+`app.deployment` event lands in Loki, and every bundled dashboard
+renders it as a purple vertical line — regressions map to deploys at a
+glance. `--id=v1.2.3 --notes="hotfix"` overrides the auto-detected git
+sha and adds a note. Every signal also carries `deployment.id` as a
+resource attribute, so "which deploy is this trace from" is always
+answerable.

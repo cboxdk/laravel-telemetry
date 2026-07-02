@@ -311,6 +311,11 @@ return [
         // pathological requests.
         'cache_spans' => env('TELEMETRY_INSTRUMENT_CACHE_SPANS', false),
 
+        // Gate/policy checks: authorization.checks{ability, result}
+        // counter + gate.check.count / gate.denied.count root-span
+        // tallies. Ability names are code identifiers (bounded).
+        'gates' => env('TELEMETRY_INSTRUMENT_GATES', true),
+
         // A span per Blade/PHP view render — templates, partials and
         // components, naturally nested with real durations. Detail-marked
         // (tail mode trims them from healthy fast traces). The root span

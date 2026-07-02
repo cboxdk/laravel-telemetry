@@ -221,6 +221,15 @@ def dashboard(uid, title, panels, variables=None):
         "timezone": "browser", "schemaVersion": 39, "refresh": "30s",
         "graphTooltip": 1,  # shared crosshair across panels
         "time": {"from": "now-1h", "to": "now"},
+        # Deploy markers: `telemetry:deploy` emits an app.deployment event
+        # (an OTLP log record) — rendered as a vertical line on every panel,
+        # so regressions map to deploys at a glance.
+        "annotations": {"list": [{
+            "name": "Deploys", "datasource": LOKI, "enable": True, "hide": False,
+            "iconColor": "purple",
+            "expr": '{service_name=~"$service"} |= `app.deployment`',
+            "titleFormat": "Deploy",
+        }]},
         "templating": {"list": [qvar("service", f"{REQ}_count", "service_name"), *(variables or [])]},
         # The Nightwatch nav: every telemetry-tagged dashboard as a tab.
         "links": [{"type": "dashboards", "tags": ["telemetry"], "asDropdown": False,

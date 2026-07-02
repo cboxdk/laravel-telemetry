@@ -22,6 +22,16 @@ Initial release.
 
 ### Observability UX
 
+- Deploys are first-class: `service.deployment` auto-detects the git
+  sha from `.git/HEAD` when unset (no exec), `telemetry:deploy` emits
+  an `app.deployment` marker event from the deploy pipeline, and every
+  bundled dashboard renders deploys as annotation lines. Resource
+  attributes gained `process.runtime.name/version` and
+  `laravel.version`.
+- Gate/policy instrumentation (`instrument.gates`, default on):
+  `authorization.checks{ability, result}` counter plus
+  `gate.check.count`/`gate.denied.count` tallies on the request root
+  span — authorization denials become visible without any code changes.
 - View render spans (`instrument.views`, default on): every Blade/PHP
   view, partial and component in its own span — real durations, natural
   nesting via engine decoration (rendering always proceeds if telemetry

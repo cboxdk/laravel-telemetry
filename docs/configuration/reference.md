@@ -26,7 +26,7 @@ Attached to every exported signal (OTel resource conventions).
 | `service.namespace` | `TELEMETRY_SERVICE_NAMESPACE` | — |
 | `service.version` | `TELEMETRY_SERVICE_VERSION` | — |
 | `service.environment` | `TELEMETRY_ENVIRONMENT` | `APP_ENV` |
-| `service.deployment` | `TELEMETRY_DEPLOYMENT` | — (git sha/release tag → `deployment.id` resource attribute) |
+| `service.deployment` | `TELEMETRY_DEPLOYMENT` | auto — explicit value wins; otherwise the current git sha is detected from `.git/HEAD` (no exec). Becomes `deployment.id` on every signal |
 
 ## Metric store
 
@@ -143,6 +143,7 @@ with the key `log.message`.
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
+| `instrument.gates` | `TELEMETRY_INSTRUMENT_GATES` | `true` — `authorization.checks{ability,result}` counter + `gate.check.count`/`gate.denied.count` root-span tallies |
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` + `enduser.type` (model) + `enduser.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
