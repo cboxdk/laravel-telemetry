@@ -15,6 +15,10 @@ Initial release.
 
 ### Observability UX
 
+- Cache timeline spans (`instrument.cache_spans`): every cache
+  hit/miss/write/forget as a span with key, store and duration measured
+  via Laravel's before/after cache events — the Nightwatch-style
+  request timeline; root spans carry cache.event.count/time_ms tallies.
 - Outgoing HTTP auto-instrumentation: client spans (host + path, never
   the query string) with a duration histogram by host/method/status and
   a connection-failure counter.

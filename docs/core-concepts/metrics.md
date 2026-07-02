@@ -68,6 +68,12 @@ ids.
 Metadata (description, unit, buckets) is written idempotently with the
 first sample, so scrapes are self-describing.
 
+**Cache visibility** is two independent switches: `instrument.cache`
+(aggregate counters, no keys) and `instrument.cache_spans` — the
+Nightwatch-style timeline where every hit/miss/write/forget appears as a
+span with its key, store and measured duration. Keys are safe on spans
+(per-occurrence); they are never metric labels.
+
 **Changing histogram buckets** requires a store wipe
 (`php artisan telemetry:flush --wipe`) — old bucket counts cannot be
 re-binned into new boundaries. Metadata itself refreshes automatically on

@@ -41,7 +41,8 @@ started while another is active becomes its child.
 | Scheduled tasks | `schedule artisan inspire` | `instrument.scheduled_tasks` |
 | Mail | `mail.send` (client) | `instrument.mail` |
 | Notifications | `notification.send` (client) | `instrument.notifications` |
-| Cache | counters only (`cache.operations`) | `instrument.cache` (off by default) |
+| Cache counters | `cache.operations{operation,store}` | `instrument.cache` (off by default) |
+| Cache timeline spans | `cache.hit`/`miss`/`write`/`forget` with key + duration | `instrument.cache_spans` (off by default) |
 | Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
 | Reported exceptions | `exceptions.reported{exception}` counter + span event — includes HANDLED report()s | `instrument.exceptions` |
 

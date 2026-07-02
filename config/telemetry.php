@@ -228,6 +228,13 @@ return [
         // forget). Off by default — hot caches are chatty.
         'cache' => env('TELEMETRY_INSTRUMENT_CACHE', false),
 
+        // Nightwatch-style timeline spans per cache operation — key,
+        // store and duration on every hit/miss/write/forget in the
+        // trace waterfall. Keys are safe on spans (per-occurrence, not
+        // aggregated). Off by default; the span buffer cap bounds
+        // pathological requests.
+        'cache_spans' => env('TELEMETRY_INSTRUMENT_CACHE_SPANS', false),
+
         // mail.send spans + mail.sent counter.
         'mail' => env('TELEMETRY_INSTRUMENT_MAIL', true),
 

@@ -103,3 +103,53 @@ it('records the bootstrap phase when LARAVEL_START is defined', function () {
 
     expect($spans->firstWhere('name', 'laravel.bootstrap'))->not->toBeNull();
 });
+
+it('records nightwatch-style cache spans with key, store and duration', function () {
+    config()->set('telemetry.instrument.cache_spans', true);
+
+    (new CacheInstrumentation(app()))->register(app('events'), counters: false, spans: true);
+
+    Telemetry::span('request-ish', function () {
+        Cache::put('request_count:117797', 42, 60);
+        Cache::get('request_count:117797');
+        Cache::get('missing:key');
+        Cache::forget('request_count:117797');
+    });
+
+    Telemetry::flush();
+
+    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
+
+    $hit = $spans->firstWhere('name', 'cache.hit');
+    $miss = $spans->firstWhere('name', 'cache.miss');
+    $write = $spans->firstWhere('name', 'cache.write');
+    $forget = $spans->firstWhere('name', 'cache.forget');
+
+    expect($hit->attributes()['cache.key'])->toBe('request_count:117797')
+        ->and($hit->attributes())->toHaveKey('cache.store')
+        ->and($hit->durationMs())->toBeGreaterThanOrEqual(0)
+        ->and($miss->attributes()['cache.key'])->toBe('missing:key')
+        ->and($write)->not->toBeNull()
+        ->and($forget)->not->toBeNull();
+
+    // All parented into the surrounding trace.
+    $root = $spans->firstWhere('name', 'request-ish');
+
+    expect($hit->traceId)->toBe($root->traceId)
+        ->and($hit->parentSpanId)->toBe($root->spanId);
+
+    // Tallies on the root span.
+    expect($root->attributes()['cache.event.count'])->toBe(4);
+});
+
+it('records no cache spans outside a sampled trace', function () {
+    (new CacheInstrumentation(app()))->register(app('events'), counters: false, spans: true);
+
+    Cache::get('orphan-key');
+
+    Telemetry::flush();
+
+    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
+
+    expect($spans->firstWhere('name', 'cache.miss'))->toBeNull();
+});

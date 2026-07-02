@@ -400,8 +400,12 @@ class TelemetryServiceProvider extends ServiceProvider
         $config = $this->app->make('config');
         $events = $this->app->make(Dispatcher::class);
 
-        if ($config->get('telemetry.instrument.cache', false)) {
-            $this->app->make(CacheInstrumentation::class)->register($events);
+        $cacheCounters = (bool) $config->get('telemetry.instrument.cache', false);
+        $cacheSpans = (bool) $config->get('telemetry.instrument.cache_spans', false);
+
+        if ($cacheCounters || $cacheSpans) {
+            $this->app->singleton(CacheInstrumentation::class);
+            $this->app->make(CacheInstrumentation::class)->register($events, $cacheCounters, $cacheSpans);
         }
 
         if ($config->get('telemetry.instrument.mail', true)) {
