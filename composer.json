@@ -1,0 +1,92 @@
+{
+    "name": "cboxdk/laravel-telemetry",
+    "description": "Collector-free telemetry for Laravel: Prometheus metrics, OTLP traces and events. No C extension, no protobuf, no sidecar — metrics that actually work under FPM.",
+    "keywords": [
+        "cbox",
+        "laravel",
+        "telemetry",
+        "observability",
+        "metrics",
+        "tracing",
+        "prometheus",
+        "opentelemetry",
+        "otlp"
+    ],
+    "homepage": "https://github.com/cboxdk/laravel-telemetry",
+    "license": "MIT",
+    "support": {
+        "issues": "https://github.com/cboxdk/laravel-telemetry/issues",
+        "source": "https://github.com/cboxdk/laravel-telemetry"
+    },
+    "authors": [
+        {
+            "name": "Sylvester Damgaard",
+            "email": "sn@cbox.dk",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3|^8.4|^8.5",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "cboxdk/system-metrics": "^3.0",
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.14",
+        "nunomaduro/collision": "^8.8",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-arch": "^4.0",
+        "pestphp/pest-plugin-laravel": "^4.0",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0"
+    },
+    "suggest": {
+        "ext-apcu": "Required when using the apcu metric store.",
+        "ext-redis": "Recommended when using the redis metric store (phpredis).",
+        "cboxdk/system-metrics": "Publishes host CPU, memory and load metrics through the built-in system telemetry provider."
+    },
+    "autoload": {
+        "psr-4": {
+            "Cbox\\Telemetry\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Cbox\\Telemetry\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Cbox\\Telemetry\\TelemetryServiceProvider"
+            ],
+            "aliases": {
+                "Telemetry": "Cbox\\Telemetry\\Facades\\Telemetry"
+            }
+        }
+    },
+    "scripts": {
+        "analyse": "vendor/bin/phpstan analyse",
+        "format": "vendor/bin/pint",
+        "format:check": "vendor/bin/pint --test",
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage",
+        "check": [
+            "@format:check",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

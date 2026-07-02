@@ -1,0 +1,72 @@
+---
+title: Installation
+description: Install and configure cboxdk/laravel-telemetry
+weight: 1
+---
+
+# Installation
+
+```bash
+composer require cboxdk/laravel-telemetry
+```
+
+The service provider and the `Telemetry` facade are auto-discovered.
+
+Publish the config when you need to change defaults:
+
+```bash
+php artisan vendor:publish --tag=telemetry-config
+```
+
+## Choose a metric store
+
+Push instruments (counters, push gauges, histograms) need shared storage so
+values survive requests and aggregate across processes:
+
+| Store   | When                                            |
+|---------|-------------------------------------------------|
+| `redis` | Default. Multi-node, web + queue workers.       |
+| `apcu`  | Single node without Redis (`ext-apcu` required; `apc.enable_cli=1` for workers). |
+| `array` | Tests and local experiments (per-process only). |
+
+```dotenv
+TELEMETRY_STORE=redis
+TELEMETRY_REDIS_CONNECTION=default
+```
+
+We recommend pointing telemetry at a Redis connection separate from your
+queue connection. Observable gauges (callback-based) never touch the store.
+
+## Enable an exporter
+
+Prometheus is on by default — `/telemetry/metrics` renders the store at
+scrape time. For OTLP:
+
+```dotenv
+TELEMETRY_EXPORTERS=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com:4318
+```
+
+Spans and events export at request/job terminate. OTLP **metrics** are
+pushed by the scheduler — add to `routes/console.php`:
+
+```php
+Schedule::command('telemetry:flush')->everyMinute();
+```
+
+## System metrics (optional)
+
+```bash
+composer require cboxdk/system-metrics
+```
+
+That's it — host memory, CPU and load metrics (`system.*`) appear on the
+next scrape. No agent, no node_exporter.
+
+## Disable everything
+
+```dotenv
+TELEMETRY_ENABLED=false
+```
+
+Instruments become no-ops, no listeners are registered, routes disappear.
