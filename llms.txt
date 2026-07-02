@@ -1,0 +1,49 @@
+# cboxdk/laravel-telemetry
+
+> Collector-free telemetry for Laravel: Prometheus metrics, OTLP traces,
+> events and logs. No C extension, no protobuf, no sidecar. Metrics
+> aggregate in Redis/APCu so they are correct under PHP's shared-nothing
+> FPM model. Facade: Cbox\Telemetry\Facades\Telemetry.
+
+Key facts: metric names are lowercase dot-namespaced OTel style; push and
+pull instruments are distinct API shapes; telemetry never throws into the
+app; Telemetry::fake() provides in-memory test assertions; packages
+integrate via the TelemetryProvider contract guarded by class_exists.
+
+## Getting started
+
+- [Installation](docs/getting-started/installation.md): composer require, store choice (redis/apcu/array), exporter setup, scheduler
+- [Quickstart](docs/getting-started/quickstart.md): counters, gauges, histograms, spans, events
+- [API reference](docs/getting-started/api-reference.md): the whole facade on one page — read this first
+- [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions
+
+## Core concepts
+
+- [Architecture](docs/core-concepts/architecture.md): signal flow, push vs pull, export timing, failure policy
+- [Metrics](docs/core-concepts/metrics.md): counters, gauges, histograms, the shared store, cardinality
+- [Traces](docs/core-concepts/traces.md): spans, W3C context propagation, sampling, buffering
+- [Events](docs/core-concepts/events.md): structured events vs span events vs metrics
+- [Logs](docs/core-concepts/logs.md): the telemetry log channel, severity mapping, trace correlation
+- [Naming](docs/core-concepts/naming.md): OTel semantic conventions, rules
+
+## Cookbook
+
+- [Multi-tenant SaaS](docs/cookbook/multi-tenant-saas.md): tenant labels, cardinality budget, fleet gauges
+- [Queue monitoring](docs/cookbook/queue-monitoring.md): depth, in-flight, oldest-job age, alerts
+- [External services](docs/cookbook/external-services.md): outbound API instrumentation, distributed traces
+
+## Reference
+
+- [Configuration](docs/configuration/reference.md): every config key
+- [Providers](docs/extension-points/providers.md): publish telemetry from your package
+- [Custom exporters](docs/extension-points/exporters.md): the Exporter contract
+- [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
+- [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget
+- [Grafana stack](docs/production/grafana-stack.md): recommended backend routing (Tempo/Mimir/Loki), correlation, query starters
+- [Performance](docs/production/performance.md): per-operation cost, tuning
+- [Security](docs/production/security.md): endpoint protection, data leakage
+
+## Optional
+
+- [ADRs](docs/adr/0001-runtime-model.md): why no collector, why own core, why Redis
+- [Prior art](docs/research/prior-art.md): survey of the PHP telemetry ecosystem

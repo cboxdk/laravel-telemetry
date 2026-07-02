@@ -43,6 +43,9 @@ spec-stable HTTP JSON.
 - ✅ Provider contract so packages publish telemetry without coupling
 - ✅ Host CPU/memory/load via [`cboxdk/system-metrics`](https://github.com/cboxdk/system-metrics) — just install it
 - ✅ Zero cost when disabled; telemetry never throws into your app
+- ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
+  guidelines, `llms.txt` and an agent guide — your AI assistant follows the
+  conventions out of the box
 
 ## Installation
 
@@ -69,7 +72,8 @@ Full documentation lives in [`docs/`](docs/index.md):
 - [Getting started](docs/getting-started/installation.md) —
   [quickstart](docs/getting-started/quickstart.md),
   [testing](docs/getting-started/testing.md),
-  [API reference](docs/getting-started/api-reference.md)
+  [API reference](docs/getting-started/api-reference.md),
+  [AI assistants](docs/getting-started/ai-assistants.md)
 - [Core concepts](docs/core-concepts/architecture.md) —
   [metrics](docs/core-concepts/metrics.md),
   [traces](docs/core-concepts/traces.md),

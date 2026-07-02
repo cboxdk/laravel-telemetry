@@ -26,3 +26,6 @@ Initial release.
   log records with Monolog severity mapping and feedback-loop protection.
 - `php artisan about` section showing store, exporters, endpoints and
   sample rate.
+- AI surface: Laravel Boost package guidelines (`.ai/guidelines/`),
+  `llms.txt` documentation index, and an `AGENTS.md`/`CLAUDE.md` agent
+  guide for contributors.

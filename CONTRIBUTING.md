@@ -17,7 +17,9 @@ Thanks for considering a contribution!
 ## Ground rules
 
 - New behaviour needs tests; bug fixes need a regression test.
-- Public API changes need docs (`docs/`) in the same PR.
+- Public API changes need docs (`docs/`) in the same PR — and an update to
+  the AI surface (`.ai/guidelines/telemetry.blade.php`, `llms.txt`) when
+  usage guidance changes.
 - Architectural changes should reference (or add) an ADR in `docs/adr/` —
   the existing ADRs record decisions that are deliberate, including what we
   chose *not* to do (no OTel SDK dependency, no summary instrument, no
