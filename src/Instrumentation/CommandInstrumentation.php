@@ -60,6 +60,16 @@ final class CommandInstrumentation
             $span->setAttribute('laravel.command.exit_code', $event->exitCode);
             $span->setStatus($event->exitCode === 0 ? SpanStatus::Ok : SpanStatus::Error);
             $span->end();
+
+            $labels = ['command' => $event->command ?? 'unknown'];
+
+            $this->telemetry()
+                ->histogram('command.duration', description: 'Artisan command duration', unit: 'ms')
+                ->record($span->durationMs(), $labels);
+
+            $this->telemetry()
+                ->counter($event->exitCode === 0 ? 'commands.completed' : 'commands.failed', 'Artisan command runs by outcome')
+                ->inc(1, $labels);
         });
 
         if ($this->stack === []) {

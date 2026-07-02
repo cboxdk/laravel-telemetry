@@ -101,6 +101,7 @@ final class TraceRequest
             // now) — enables per-user trace filtering. Id only, never PII.
             if (config('telemetry.instrument.user', true) && ($user = $request->user()) !== null) {
                 $span->setAttribute('enduser.id', (string) $user->getAuthIdentifier());
+                $span->setAttributes($this->telemetry->resolveUserAttributes($user));
             }
 
             // Body sizes (OTel semconv). Response size is skipped for

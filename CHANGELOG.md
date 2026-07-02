@@ -15,6 +15,23 @@ Initial release.
 
 ### Observability UX
 
+- Outgoing HTTP auto-instrumentation: client spans (host + path, never
+  the query string) with a duration histogram by host/method/status and
+  a connection-failure counter.
+- Queue dispatch tracking: `queue.jobs.dispatched` counter and
+  `queue.job.wait_time` histogram (dispatch -> attempt lag) with
+  `messaging.wait_time_ms` on consumer spans.
+- Reported-exception tracking: `exceptions.reported{exception}` counter
+  via the exception handler's reportable hook — HANDLED report()s
+  included — plus a non-failing span event on the active span.
+- Command metrics (`command.duration`, `commands.{completed,failed}`)
+  alongside command spans.
+- Per-request query tallies on the root span (`db.query.count`,
+  `db.query.time_ms`) via a generic per-trace stat mechanism.
+- `Telemetry::resolveUserUsing()` opt-in for richer user attribution
+  (name/username) beyond the default PII-free `enduser.id`.
+- `deployment.id` resource attribute from `TELEMETRY_DEPLOYMENT`.
+
 - Error spans escape sampling (`traces.always_sample_errors`) — sampled
   apps still export every failing span.
 - Per-route sampling middleware: `Sample::rate(0.01)` /

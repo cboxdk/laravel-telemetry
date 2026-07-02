@@ -33,6 +33,10 @@ return [
         'namespace' => env('TELEMETRY_SERVICE_NAMESPACE'),
         'version' => env('TELEMETRY_SERVICE_VERSION'),
         'environment' => env('TELEMETRY_ENVIRONMENT', env('APP_ENV', 'production')),
+
+        // Deployment marker (git sha, release tag) — shows on every
+        // signal so regressions map to deploys.
+        'deployment' => env('TELEMETRY_DEPLOYMENT'),
     ],
 
     /*
@@ -229,6 +233,14 @@ return [
 
         // notification.send spans + notifications.sent{channel,notification}.
         'notifications' => env('TELEMETRY_INSTRUMENT_NOTIFICATIONS', true),
+
+        // Outgoing Http-client spans + http.client.request.duration
+        // histogram by host/method/status.
+        'http_client' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT', true),
+
+        // exceptions.reported counter — includes HANDLED exceptions that
+        // report() swallows.
+        'exceptions' => env('TELEMETRY_INSTRUMENT_EXCEPTIONS', true),
     ],
 
     /*

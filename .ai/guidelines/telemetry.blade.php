@@ -22,7 +22,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - Declare units in the instrument (`unit: 'ms'`, `'By'`, `'1'`), never in the name.
 - Label values must be bounded: route patterns, status codes, queue names, plans. NEVER user ids, emails, URLs or UUIDs as label values — put those on span attributes or events instead.
 - Do not wrap telemetry calls in try/catch and do not check `Telemetry::enabled()` — recording never throws and no-ops when disabled.
-- HTTP requests, queue jobs, DB queries, scheduled tasks, mail and notifications are auto-instrumented; do not add manual spans for those.
+- HTTP requests, queue jobs (incl. dispatch counts + wait time), DB queries, scheduled tasks, mail, notifications, outgoing Http-client calls and reported exceptions are auto-instrumented; do not add manual spans/counters for those.
 - Per-route sampling: `->middleware(Sample::never())` on health checks, `Sample::rate(0.01)` on noisy feeds (Cbox\Telemetry\Http\Middleware\Sample). Error spans always export regardless of sampling.
 - For outbound HTTP to services you own, use `Http::withTraceparent()->post(...)` so the trace continues across services. Do not add the header for third-party APIs.
 - Queue jobs automatically continue the dispatcher's trace — never propagate trace ids through job properties manually.

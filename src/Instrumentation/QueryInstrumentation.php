@@ -38,9 +38,18 @@ final class QueryInstrumentation
 
         $current = $telemetry->currentSpan();
 
-        // Only record inside a *sampled* trace — unsampled traces must not
-        // pay per-query span cost on N+1-heavy requests.
-        if ($current === null || ! $current->sampled) {
+        if ($current === null) {
+            return;
+        }
+
+        // Tallies are cheap and land on the root span ("12 queries /
+        // 48 ms"), regardless of span-level noise floors.
+        $telemetry->tracer()->bumpStat('db.query.count', 1);
+        $telemetry->tracer()->bumpStat('db.query.time_ms', (float) $event->time);
+
+        // Only record spans inside a *sampled* trace — unsampled traces
+        // must not pay per-query span cost on N+1-heavy requests.
+        if (! $current->sampled) {
             return;
         }
 

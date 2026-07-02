@@ -38,6 +38,9 @@ final class Tracer
 
     private bool $measureSpanResources = false;
 
+    /** @var array<string, float> tallies attached to the root span when it ends */
+    private array $traceStats = [];
+
     /**
      * A mid-trace re-decision (per-route Sample middleware). Overrides
      * the head decision for buffering and propagation.
@@ -293,6 +296,17 @@ final class Tracer
         $this->sampled = null;
         $this->sampledOverride = null;
         $this->contextAttributes = [];
+        $this->traceStats = [];
+    }
+
+    /**
+     * Accumulate a per-trace tally (query count, query time, …). The
+     * totals land as attributes on the ROOT span when it ends — Nightwatch
+     * shows "4 queries / 24.5 ms" per request; so do we.
+     */
+    public function bumpStat(string $attribute, float $delta): void
+    {
+        $this->traceStats[$attribute] = ($this->traceStats[$attribute] ?? 0.0) + $delta;
     }
 
     private function finish(Span $span): void
@@ -318,6 +332,18 @@ final class Tracer
 
         if ($this->contextAttributes !== []) {
             $span->mergeMissingAttributes($this->contextAttributes);
+        }
+
+        // The root just ended: attach the per-trace tallies.
+        if ($this->stack === [] && $this->traceStats !== []) {
+            $stats = [];
+
+            foreach ($this->traceStats as $key => $value) {
+                $stats[$key] = fmod($value, 1.0) === 0.0 ? (int) $value : round($value, 2);
+            }
+
+            $span->mergeMissingAttributes($stats);
+            $this->traceStats = [];
         }
 
         $this->finished[] = $span;

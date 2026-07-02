@@ -19,6 +19,7 @@ use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
+use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
@@ -32,13 +33,16 @@ use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Tracing\Tracer;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Http\Client\Events\RequestSending;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\QueueManager;
@@ -252,6 +256,10 @@ class TelemetryServiceProvider extends ServiceProvider
             $resource['service.version'] = $version;
         }
 
+        if (is_string($deployment = $config->get('telemetry.service.deployment')) && $deployment !== '') {
+            $resource['deployment.id'] = $deployment;
+        }
+
         return $resource;
     }
 
@@ -405,6 +413,48 @@ class TelemetryServiceProvider extends ServiceProvider
             $this->app->singleton(NotificationInstrumentation::class);
             $this->app->make(NotificationInstrumentation::class)->register($events);
         }
+
+        if ($config->get('telemetry.instrument.http_client', true) && class_exists(RequestSending::class)) {
+            $this->app->singleton(HttpClientInstrumentation::class);
+            $this->app->make(HttpClientInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.exceptions', true)) {
+            $this->registerExceptionReporting();
+        }
+    }
+
+    /**
+     * Count every reported exception — including HANDLED ones that
+     * report() swallows, which span instrumentation alone never sees —
+     * and annotate the active span without failing it.
+     */
+    private function registerExceptionReporting(): void
+    {
+        $this->callAfterResolving(
+            ExceptionHandler::class,
+            function (object $handler) {
+                if (! method_exists($handler, 'reportable')) {
+                    return;
+                }
+
+                $app = $this->app;
+
+                $handler->reportable(static function (\Throwable $e) use ($app): void {
+                    FailSafe::guard(function () use ($app, $e) {
+                        $telemetry = $app->make(TelemetryManager::class);
+
+                        $telemetry->counter('exceptions.reported', 'Exceptions passed to report()')
+                            ->inc(1, ['exception' => $e::class]);
+
+                        $telemetry->currentSpan()?->addEvent('exception', [
+                            'exception.type' => $e::class,
+                            'exception.message' => $e->getMessage(),
+                        ]);
+                    });
+                });
+            },
+        );
     }
 
     private function registerSystemMetricsProvider(): void

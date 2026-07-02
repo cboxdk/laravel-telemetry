@@ -42,9 +42,19 @@ started while another is active becomes its child.
 | Mail | `mail.send` (client) | `instrument.mail` |
 | Notifications | `notification.send` (client) | `instrument.notifications` |
 | Cache | counters only (`cache.operations`) | `instrument.cache` (off by default) |
+| Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
+| Reported exceptions | `exceptions.reported{exception}` counter + span event — includes HANDLED report()s | `instrument.exceptions` |
 
 Query spans are only recorded inside an active trace — no orphan roots
-from tinker sessions.
+from tinker sessions. The ROOT span additionally carries per-request
+tallies — `db.query.count` and `db.query.time_ms` ("12 queries / 48 ms"
+at a glance, even when individual query spans are filtered by the noise
+floor).
+
+Consumer (job) spans carry `messaging.wait_time_ms` — how long the job
+sat in the queue between dispatch and the attempt starting — backed by
+the `queue.job.wait_time` histogram and a `queue.jobs.dispatched`
+counter on the producer side.
 
 Request spans carry `enduser.id` (the authenticated user's id — never
 name or email) so traces are filterable per user in TraceQL:

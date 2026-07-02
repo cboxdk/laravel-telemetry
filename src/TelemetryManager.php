@@ -48,6 +48,8 @@ class TelemetryManager
 
     private ?Closure $requestLabelResolver = null;
 
+    private ?Closure $userAttributeResolver = null;
+
     /**
      * @param  array<string, scalar>  $resource
      */
@@ -232,6 +234,35 @@ class TelemetryManager
         }
 
         return FailSafe::guard(fn (): array => ($this->requestLabelResolver)($request)) ?? [];
+    }
+
+    /**
+     * Opt in to richer user attribution on request spans (PII is off by
+     * default — only enduser.id ships out of the box):
+     *
+     *     Telemetry::resolveUserUsing(fn ($user) => [
+     *         'enduser.name' => $user->name,
+     *     ]);
+     *
+     * @param  (Closure(mixed): array<string, scalar|null>)|null  $resolver
+     */
+    public function resolveUserUsing(?Closure $resolver): void
+    {
+        $this->userAttributeResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     *
+     * @return array<string, scalar|null>
+     */
+    public function resolveUserAttributes(mixed $user): array
+    {
+        if ($this->userAttributeResolver === null) {
+            return [];
+        }
+
+        return FailSafe::guard(fn (): array => ($this->userAttributeResolver)($user)) ?? [];
     }
 
     /*

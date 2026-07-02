@@ -52,21 +52,24 @@ final class QueueInstrumentation
     public function register(QueueManager $queue, Dispatcher $events, bool $propagate, bool $instrument): void
     {
         if ($propagate) {
-            $queue->createPayloadUsing(function () {
+            $queue->createPayloadUsing(function (?string $connection = null, ?string $queueName = null, array $payload = []) {
                 $telemetry = $this->telemetry();
-                $traceparent = $telemetry->traceparent();
 
-                if ($traceparent === null) {
-                    return [];
-                }
+                FailSafe::guard(fn () => $telemetry
+                    ->counter('queue.jobs.dispatched', 'Jobs pushed onto the queue')
+                    ->inc(1, [
+                        'job.name' => is_string($payload['displayName'] ?? null) ? $payload['displayName'] : 'unknown',
+                        'queue' => $queueName ?? 'default',
+                    ]));
 
                 // Carry the full context: trace position, ambient custom
-                // dimensions (team, plan, …) and where this dispatch came
-                // from — the worker restores all of it.
+                // dimensions (team, plan, …), the dispatch origin AND the
+                // dispatch time — the worker restores/derives all of it.
                 return ['telemetry' => array_filter([
-                    'traceparent' => $traceparent,
+                    'traceparent' => $telemetry->traceparent(),
                     'context' => $telemetry->contextAttributes() ?: null,
                     'origin' => $telemetry->tracer()->rootSpan()?->name,
+                    'dispatched_at' => microtime(true),
                 ])];
             });
         }
@@ -117,6 +120,21 @@ final class QueueInstrumentation
                 $attributes['messaging.origin.name'] = $carried['origin'];
             } elseif ($event->connectionName === 'sync' && ($root = $this->telemetry()->tracer()->rootSpan()) !== null) {
                 $attributes['messaging.origin.name'] = $root->name;
+            }
+
+            // Queue lag: how long the job waited from dispatch until this
+            // attempt started.
+            if (is_numeric($carried['dispatched_at'] ?? null) && $event->connectionName !== 'sync') {
+                $waitMs = max(0.0, (microtime(true) - (float) $carried['dispatched_at']) * 1000);
+
+                $attributes['messaging.wait_time_ms'] = round($waitMs, 2);
+
+                $this->telemetry()
+                    ->histogram('queue.job.wait_time', description: 'Time from dispatch until the attempt started', unit: 'ms')
+                    ->record($waitMs, [
+                        'job.name' => $event->job->resolveName(),
+                        'queue' => $event->job->getQueue() ?? 'default',
+                    ]);
             }
 
             $span = $this->telemetry()->tracer()->startSpan(

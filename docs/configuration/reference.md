@@ -26,6 +26,7 @@ Attached to every exported signal (OTel resource conventions).
 | `service.namespace` | `TELEMETRY_SERVICE_NAMESPACE` | — |
 | `service.version` | `TELEMETRY_SERVICE_VERSION` | — |
 | `service.environment` | `TELEMETRY_ENVIRONMENT` | `APP_ENV` |
+| `service.deployment` | `TELEMETRY_DEPLOYMENT` | — (git sha/release tag → `deployment.id` resource attribute) |
 
 ## Metric store
 
@@ -116,6 +117,8 @@ everything and a `public` endpoint filtered to a prefix list:
 | `instrument.cache` | `TELEMETRY_INSTRUMENT_CACHE` | `false` — cache.operations counters (hit/miss/write/forget) |
 | `instrument.mail` | `TELEMETRY_INSTRUMENT_MAIL` | `true` — mail.send spans + counter |
 | `instrument.notifications` | `TELEMETRY_INSTRUMENT_NOTIFICATIONS` | `true` — notification.send spans + counter |
+| `instrument.http_client` | `TELEMETRY_INSTRUMENT_HTTP_CLIENT` | `true` — outgoing Http-client spans + duration by host/method/status |
+| `instrument.exceptions` | `TELEMETRY_INSTRUMENT_EXCEPTIONS` | `true` — exceptions.reported counter incl. handled report()s |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 
 ## Built-in providers
