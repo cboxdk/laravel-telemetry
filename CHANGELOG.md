@@ -15,12 +15,21 @@ Initial release.
 
 ### Observability UX
 
-- Per-request and per-job resource attribution: `php.memory.peak_bytes`
-  and `php.cpu.time_ms` span attributes plus `http.server.memory.peak`,
-  `http.server.cpu.time`, `queue.job.memory.peak` and
-  `queue.job.cpu.time` histograms (getrusage +
-  memory_reset_peak_usage — dependency-free, worker-safe). Opt out via
-  `instrument.resources`.
+- Per-request/job/task resource attribution: `php.memory.peak_bytes` and
+  `php.cpu.time_ms` span attributes plus memory/CPU histograms
+  (getrusage + memory_reset_peak_usage — worker-safe). With
+  `cboxdk/system-metrics` installed, spans also carry the real process
+  footprint: `process.memory.rss_peak_bytes` and
+  `process.cpu.utilization` via a ProcessMetrics tracker per unit of
+  work. Opt out via `instrument.resources`.
+- Scheduled task monitoring: spans with cron/timezone/overlap attributes,
+  `schedule.task.duration` histogram and
+  `schedule.tasks.{processed,failed,skipped}` counters — including the
+  skipped outcome; background tasks excluded to avoid double collection;
+  per-task state isolation in `schedule:run`.
+- OTLP serialization survives invalid UTF-8 (substitution instead of
+  dropping the batch) and request spans carry
+  `http.request.body.size`/`http.response.body.size`.
 
 - `Telemetry::context([...])`: custom dimensions (team, tenant, plan)
   merged into every span, event and log record — inherited by dispatched

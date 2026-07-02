@@ -48,13 +48,20 @@ name or email) so traces are filterable per user in TraceQL:
 
 ## Resource attribution
 
-Request and worker-job spans carry `php.memory.peak_bytes` and
-`php.cpu.time_ms` — the peak memory and CPU time of THAT unit of work
-(the process-global peak counter is reset per request/job, so long-lived
-workers report honestly). Matching histograms
-(`http.server.memory.peak`, `http.server.cpu.time`, `queue.job.*`) give
-p95 memory/CPU per route, per job — and per custom label dimension.
-Disable with `instrument.resources`.
+Request, worker-job and scheduled-task spans carry
+`php.memory.peak_bytes` and `php.cpu.time_ms` — the peak memory and CPU
+time of THAT unit of work (the process-global peak counter is reset per
+request/job/task, so long-lived workers report honestly). Matching
+histograms (`http.server.memory.peak`, `http.server.cpu.time`,
+`queue.job.*`, `schedule.task.duration`) give p95 memory/CPU per route,
+per job — and per custom label dimension. Disable with
+`instrument.resources`.
+
+With `cboxdk/system-metrics` installed, spans additionally carry the
+process' **real OS footprint** via a ProcessMetrics tracker around each
+unit of work: `process.memory.rss_peak_bytes` (sees non-PHP allocations
+the PHP allocator misses) and `process.cpu.utilization` — the same
+mechanism `cboxdk/laravel-queue-metrics` uses for per-job metrics.
 
 ```traceql
 { kind = server && span.php.memory.peak_bytes > 134217728 }  # requests over 128 MB

@@ -46,7 +46,7 @@
     "suggest": {
         "ext-apcu": "Required when using the apcu metric store.",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
-        "cboxdk/system-metrics": "Publishes host CPU, memory and load metrics through the built-in system telemetry provider."
+        "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans."
     },
     "autoload": {
         "psr-4": {

@@ -37,7 +37,9 @@ class OtlpTransport
         $url = rtrim($this->endpoint, '/').$path;
 
         try {
-            $body = json_encode($payload, JSON_THROW_ON_ERROR);
+            // INVALID_UTF8_SUBSTITUTE: one bad byte in a SQL string or
+            // header must never cost the whole batch.
+            $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } catch (\JsonException $e) {
             return ExportResult::failed('payload serialization failed: '.$e->getMessage());
         }

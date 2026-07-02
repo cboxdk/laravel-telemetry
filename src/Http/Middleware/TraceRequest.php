@@ -12,7 +12,9 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Closure;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Automatic HTTP server instrumentation.
@@ -90,6 +92,22 @@ final class TraceRequest
                 $span->setAttribute('enduser.id', (string) $user->getAuthIdentifier());
             }
 
+            // Body sizes (OTel semconv). Response size is skipped for
+            // streamed/binary responses where content isn't a string.
+            $requestSize = $request->headers->get('Content-Length');
+            $span->setAttribute('http.request.body.size', $requestSize !== null ? (int) $requestSize : strlen((string) $request->getContent()));
+
+            $responseSize = $response->headers->get('Content-Length');
+
+            if ($responseSize === null && ! $response instanceof StreamedResponse && ! $response instanceof BinaryFileResponse) {
+                $content = $response->getContent();
+                $responseSize = is_string($content) ? strlen($content) : null;
+            }
+
+            if ($responseSize !== null) {
+                $span->setAttribute('http.response.body.size', (int) $responseSize);
+            }
+
             if ($response->getStatusCode() >= 500) {
                 $span->setStatus(SpanStatus::Error);
             } elseif ($span->status() === SpanStatus::Unset) {
@@ -111,10 +129,13 @@ final class TraceRequest
             $measured = $usage instanceof ResourceUsage ? $usage->measure() : null;
 
             if ($measured !== null) {
-                $span->setAttributes([
+                $span->setAttributes(array_filter([
                     'php.memory.peak_bytes' => $measured['memoryPeakBytes'],
                     'php.cpu.time_ms' => $measured['cpuTimeMs'],
-                ]);
+                    // Real OS footprint via cboxdk/system-metrics, when installed:
+                    'process.memory.rss_peak_bytes' => $measured['rssPeakBytes'],
+                    'process.cpu.utilization' => $measured['cpuUtilization'],
+                ], static fn ($value) => $value !== null));
             }
 
             $span->end();

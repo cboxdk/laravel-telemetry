@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cbox\SystemMetrics\ProcessMetrics;
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -96,4 +97,21 @@ it('records job resource usage on worker jobs', function () {
 
     expect($families)->toHaveKeys(['queue.job.memory.peak', 'queue.job.cpu.time'])
         ->and($families['queue.job.memory.peak']->samples[0]->labels['job_name'] ?? $families['queue.job.memory.peak']->samples[0]->labels['job.name'])->toBe('App\Jobs\HeavyJob');
+});
+
+it('captures real process RSS and cpu utilization via cboxdk/system-metrics', function () {
+    $pid = getmypid();
+
+    if (! ProcessMetrics::snapshot($pid)->isSuccess()) {
+        $this->markTestSkipped('ProcessMetrics has no source for this platform.');
+    }
+
+    Route::get('/rss', fn () => str_repeat('z', 500_000));
+
+    $this->get('/rss')->assertOk();
+
+    $span = serverSpan($this->collector);
+
+    expect($span->attributes()['process.memory.rss_peak_bytes'])->toBeGreaterThan(1_000_000)
+        ->and($span->attributes())->toHaveKey('process.cpu.utilization');
 });

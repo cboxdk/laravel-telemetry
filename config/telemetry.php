@@ -211,6 +211,10 @@ return [
         // attributes (php.memory.peak_bytes, php.cpu.time_ms) and
         // histograms (http.server.memory.peak / cpu.time, queue.job.*).
         'resources' => env('TELEMETRY_INSTRUMENT_RESOURCES', true),
+
+        // Scheduled task spans + schedule.tasks.{processed,failed,skipped}
+        // counters and schedule.task.duration histogram.
+        'scheduled_tasks' => env('TELEMETRY_INSTRUMENT_SCHEDULED_TASKS', true),
     ],
 
     /*

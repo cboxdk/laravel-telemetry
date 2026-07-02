@@ -193,10 +193,12 @@ final class QueueInstrumentation
                 if ($usage !== null) {
                     $measured = $usage->measure();
 
-                    $span->setAttributes([
+                    $span->setAttributes(array_filter([
                         'php.memory.peak_bytes' => $measured['memoryPeakBytes'],
                         'php.cpu.time_ms' => $measured['cpuTimeMs'],
-                    ]);
+                        'process.memory.rss_peak_bytes' => $measured['rssPeakBytes'],
+                        'process.cpu.utilization' => $measured['cpuUtilization'],
+                    ], static fn ($value) => $value !== null));
 
                     $this->telemetry()
                         ->histogram('queue.job.memory.peak', buckets: [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824], description: 'Peak memory per job', unit: 'By')

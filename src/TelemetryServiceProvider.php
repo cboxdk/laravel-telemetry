@@ -19,6 +19,7 @@ use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
+use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
 use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ApcuMetricStore;
@@ -107,6 +108,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerQueueInstrumentation();
         $this->registerQueryInstrumentation();
         $this->registerCommandInstrumentation();
+        $this->registerScheduleInstrumentation();
         $this->registerSystemMetricsProvider();
         $this->registerOctaneReset();
         $this->registerHttpClientMacro();
@@ -356,6 +358,19 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->singleton(CommandInstrumentation::class);
 
         $this->app->make(CommandInstrumentation::class)->register(
+            $this->app->make(Dispatcher::class),
+        );
+    }
+
+    private function registerScheduleInstrumentation(): void
+    {
+        if (! $this->app->runningInConsole() || ! $this->app->make('config')->get('telemetry.instrument.scheduled_tasks', true)) {
+            return;
+        }
+
+        $this->app->singleton(ScheduleInstrumentation::class);
+
+        $this->app->make(ScheduleInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
         );
     }
