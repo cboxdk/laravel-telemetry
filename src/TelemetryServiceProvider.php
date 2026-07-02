@@ -11,6 +11,7 @@ use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
 use Cbox\Telemetry\Console\MonitorCommand;
 use Cbox\Telemetry\Contracts\Exporter;
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
@@ -67,6 +68,7 @@ use Illuminate\Queue\QueueManager;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Octane\Events\RequestReceived;
+use Laravel\Octane\Events\TickReceived;
 use Monolog\Level;
 use Monolog\Logger;
 
@@ -642,9 +644,50 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->make(Dispatcher::class)->listen(
-            RequestReceived::class,
-            fn () => $this->app->make(TelemetryManager::class)->resetContext(),
-        );
+        // On a fresh Octane request, drop any trace context AND any
+        // half-open instrumentation state a prior request left behind
+        // (a request that died mid-HTTP-call or mid-transaction). Without
+        // this the singleton instrumentations leak worker memory and can
+        // mis-parent the next request's spans.
+        $reset = function (): void {
+            FailSafe::guard(function () {
+                $this->app->make(TelemetryManager::class)->resetContext();
+
+                foreach ($this->statefulInstrumentations() as $abstract) {
+                    if ($this->app->resolved($abstract)) {
+                        $instance = $this->app->make($abstract);
+
+                        if ($instance instanceof ManagesRequestState) {
+                            $instance->flushRequestState();
+                        }
+                    }
+                }
+            });
+        };
+
+        $dispatcher = $this->app->make(Dispatcher::class);
+        $dispatcher->listen(RequestReceived::class, $reset);
+
+        // RoadRunner/FrankenPHP/Swoole all surface as Octane; the tick
+        // worker (queue-less scheduling) resets on the same signal.
+        if (class_exists(TickReceived::class)) {
+            $dispatcher->listen(TickReceived::class, $reset);
+        }
+    }
+
+    /**
+     * @return list<class-string>
+     */
+    private function statefulInstrumentations(): array
+    {
+        return [
+            CacheInstrumentation::class,
+            HttpClientInstrumentation::class,
+            MailInstrumentation::class,
+            NotificationInstrumentation::class,
+            TransactionInstrumentation::class,
+            CommandInstrumentation::class,
+            QueueInstrumentation::class,
+        ];
     }
 }

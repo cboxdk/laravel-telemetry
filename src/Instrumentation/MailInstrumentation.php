@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -18,7 +19,7 @@ use Illuminate\Mail\Events\MessageSent;
  * Mail instrumentation: a client span per sent message (transport time
  * is often the slowest part of a request) plus a mail.sent counter.
  */
-final class MailInstrumentation
+final class MailInstrumentation implements ManagesRequestState
 {
     /** @var array<int, Span> keyed by message object id */
     private array $sending = [];
@@ -65,5 +66,10 @@ final class MailInstrumentation
                 ->counter('mail.sent', 'Mail messages sent')
                 ->inc();
         });
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->sending = [];
     }
 }

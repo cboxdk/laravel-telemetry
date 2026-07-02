@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -20,7 +21,7 @@ use Illuminate\Database\Events\TransactionRolledBack;
  * sampled trace; unmatched events (transaction opened before the trace
  * started) are ignored.
  */
-final class TransactionInstrumentation
+final class TransactionInstrumentation implements ManagesRequestState
 {
     /** @var array<string, list<Span|null>> per-connection span stacks */
     private array $stacks = [];
@@ -76,5 +77,10 @@ final class TransactionInstrumentation
                     ->inc(1, ['connection' => $connection]);
             }
         });
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->stacks = [];
     }
 }

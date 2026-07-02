@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -17,7 +18,7 @@ use Illuminate\Contracts\Events\Dispatcher;
  * Wraps Artisan commands in spans (opt-in via config, since schedulers
  * can be chatty).
  */
-final class CommandInstrumentation
+final class CommandInstrumentation implements ManagesRequestState
 {
     /** @var list<Span> */
     private array $stack = [];
@@ -76,5 +77,10 @@ final class CommandInstrumentation
             $this->telemetry()->flush();
             $this->telemetry()->resetContext();
         }
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->stack = [];
     }
 }

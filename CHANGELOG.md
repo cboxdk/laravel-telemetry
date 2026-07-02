@@ -8,6 +8,12 @@ Initial release.
 
 ### Performance
 
+- Octane hardening (Swoole/RoadRunner/FrankenPHP): half-open
+  instrumentation state (in-flight HTTP calls, open transactions,
+  pending cache reads) is now flushed on the `RequestReceived`/
+  `TickReceived` boundary via the new `ManagesRequestState` contract —
+  previously a request that died mid-operation could leak worker memory
+  and mis-parent the next request's spans across the long-lived worker.
 - OTLP spool + flush daemon for high traffic
   (`TELEMETRY_OTLP_SPOOL=true` + `telemetry:flush --daemon`): requests
   push serialized spans/events to a capped Redis list (one RPUSH, no

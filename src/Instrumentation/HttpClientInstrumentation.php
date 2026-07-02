@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -21,7 +22,7 @@ use Illuminate\Http\Client\Events\ResponseReceived;
  * failure counter. Attributes carry host + path — never the query string
  * (tokens live there).
  */
-final class HttpClientInstrumentation
+final class HttpClientInstrumentation implements ManagesRequestState
 {
     /** @var array<int, Span> keyed by request object id */
     private array $inFlight = [];
@@ -103,5 +104,10 @@ final class HttpClientInstrumentation
         unset($this->inFlight[$key]);
 
         return $span;
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->inFlight = [];
     }
 }

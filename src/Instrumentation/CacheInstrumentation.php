@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -38,7 +39,7 @@ use Illuminate\Contracts\Events\Dispatcher;
  * Spans are only recorded inside a sampled active trace; the tracer's
  * buffer cap bounds pathological requests.
  */
-final class CacheInstrumentation
+final class CacheInstrumentation implements ManagesRequestState
 {
     private const MAX_PENDING = 1000;
 
@@ -181,5 +182,10 @@ final class CacheInstrumentation
             $telemetry->tracer()->bumpStat('cache.event.count', 1);
             $telemetry->tracer()->bumpStat('cache.event.time_ms', $durationMs);
         });
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->pending = [];
     }
 }

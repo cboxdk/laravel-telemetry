@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
@@ -33,7 +34,7 @@ use Illuminate\Queue\QueueManager;
  * invisible. Spans are kept on a stack so nested sync dispatches can't
  * clobber the outer job's span.
  */
-final class QueueInstrumentation
+final class QueueInstrumentation implements ManagesRequestState
 {
     /** @var list<Span> */
     private array $jobSpans = [];
@@ -285,5 +286,11 @@ final class QueueInstrumentation
     private function currentJobSpan(): ?Span
     {
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->jobSpans = [];
+        $this->jobUsage = [];
     }
 }

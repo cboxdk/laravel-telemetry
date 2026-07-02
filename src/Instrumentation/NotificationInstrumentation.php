@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -20,7 +21,7 @@ use Illuminate\Notifications\Events\NotificationSent;
  * notifications.sent{channel, notification} counter — channel and class
  * are bounded, so they're safe labels.
  */
-final class NotificationInstrumentation
+final class NotificationInstrumentation implements ManagesRequestState
 {
     /** @var array<string, Span> keyed by notification object id + channel */
     private array $sending = [];
@@ -81,5 +82,10 @@ final class NotificationInstrumentation
     private function key(object $notification, string $channel): string
     {
         return spl_object_id($notification).':'.$channel;
+    }
+
+    public function flushRequestState(): void
+    {
+        $this->sending = [];
     }
 }

@@ -58,7 +58,28 @@ circuit breaker so subsequent requests skip the export entirely for 30 s
 (or the server's `Retry-After`). Worst case is one timeout per worker per
 cooldown window — not per request.
 
-## Octane
+## Octane (Swoole, RoadRunner, FrankenPHP)
 
-Supported out of the box: trace context resets on `RequestReceived`, and
-the shared store makes worker reuse a non-issue for metrics.
+All three servers use Octane's long-lived worker model, so one story
+covers them:
+
+- **Metrics** are a non-issue by design — state lives in the shared
+  store, never in the worker process, so worker reuse changes nothing.
+- **Trace context** resets on every `RequestReceived` (and `TickReceived`
+  for the tick worker): trace id, sample decision, context dimensions
+  and per-trace tallies are cleared, so no request inherits the previous
+  one's trace.
+- **Half-open instrumentation state** is flushed on the same boundary. A
+  request that dies between a "before" and "after" event (an in-flight
+  HTTP call whose response never arrives, an open transaction, a pending
+  cache read) would otherwise leave a stale entry in the long-lived
+  instrumentation singleton — a slow worker-memory leak and a
+  mis-parenting risk. `ManagesRequestState::flushRequestState()` drops
+  it; the cache/HTTP/mail/notification/transaction/command/queue
+  instrumentations all implement it.
+- **The OTLP circuit breaker** is intentionally a per-worker static — a
+  dead collector costs each worker one timeout, not one per request.
+
+Nothing to configure; detection is automatic (the Octane event classes'
+presence). Under FPM none of this runs — the process ends after each
+request anyway.
