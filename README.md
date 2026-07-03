@@ -1,4 +1,4 @@
-# Laravel Telemetry
+# Telemetry for Laravel
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/cboxdk/laravel-telemetry.svg?style=flat-square)](https://packagist.org/packages/cboxdk/laravel-telemetry)
 [![Tests](https://img.shields.io/github/actions/workflow/status/cboxdk/laravel-telemetry/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/cboxdk/laravel-telemetry/actions/workflows/run-tests.yml)

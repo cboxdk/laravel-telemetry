@@ -1,10 +1,10 @@
 ---
-title: Laravel Telemetry
-description: Documentation for the Cbox collector-free Laravel telemetry package
+title: Telemetry for Laravel
+description: Documentation for Cbox's collector-free telemetry package for Laravel
 weight: 1
 ---
 
-# Laravel Telemetry
+# Telemetry for Laravel
 
 `cboxdk/laravel-telemetry` is collector-free telemetry for Laravel: Prometheus
 metrics, OTLP traces and structured events from a plain Composer package.
