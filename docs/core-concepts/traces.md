@@ -225,9 +225,9 @@ Route::get('/feed', ...)->middleware(Sample::rate(0.01));
 MANY details when it hurts, a lean skeleton when all is well:
 
 ```dotenv
-TELEMETRY_TRACE_DETAILS=tail
-TELEMETRY_SLOW_REQUEST_MS=1000
-TELEMETRY_SLOW_SPAN_MS=100
+TELEMETRY_TRACES_DETAILS=tail
+TELEMETRY_TRACES_SLOW_REQUEST_MS=1000
+TELEMETRY_TRACES_SLOW_SPAN_MS=100
 ```
 
 In `tail` mode, detail spans (cache operations, queries) are kept only

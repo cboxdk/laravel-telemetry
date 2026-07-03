@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-07-03
+
+Env-var naming standardization and first-class OTLP auth. Breaking vs
+alpha.1 (expected during alpha) — update `.env` keys per below.
+
+### Added
+
+- **`TELEMETRY_OTLP_TOKEN`** — first-class bearer token for an auth-gated
+  OTLP endpoint (e.g. a shared collector), sent as
+  `Authorization: Bearer <token>`. No more hand-wiring the `otlp.headers`
+  array. Arbitrary headers can also come from the OTel-standard
+  `OTEL_EXPORTER_OTLP_HEADERS` (`k1=v1,k2=v2`).
+
+### Changed
+
+- **Env vars standardized**: every variable is now `TELEMETRY_`-prefixed
+  and mirrors its config path. Renames:
+  `TELEMETRY_ENVIRONMENT` → `TELEMETRY_SERVICE_ENVIRONMENT`,
+  `TELEMETRY_DEPLOYMENT` → `TELEMETRY_SERVICE_DEPLOYMENT`,
+  `TELEMETRY_TRACE_DETAILS` → `TELEMETRY_TRACES_DETAILS`,
+  `TELEMETRY_TRACE_RESPONSE_HEADER` → `TELEMETRY_TRACES_RESPONSE_HEADER`,
+  `TELEMETRY_SLOW_REQUEST_MS` → `TELEMETRY_TRACES_SLOW_REQUEST_MS`,
+  `TELEMETRY_SLOW_SPAN_MS` → `TELEMETRY_TRACES_SLOW_SPAN_MS`,
+  `TELEMETRY_SPOOL_{CONNECTION,KEY,MAX_ITEMS}` → `TELEMETRY_OTLP_SPOOL_*`,
+  `TELEMETRY_QUERIES_MIN_DURATION` → `TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION`.
+  The OTLP endpoint's primary variable is now `TELEMETRY_OTLP_ENDPOINT`.
+- OpenTelemetry-standard variables are honored as fallbacks for interop —
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
+  `OTEL_SERVICE_NAME` (and the already-supported `OTEL_RESOURCE_ATTRIBUTES`).
+  `TELEMETRY_*` wins when both are set.
+
 ## [0.1.0-alpha.1] - 2026-07-03
 
 First public release. **Alpha** — the public API may still change before the
@@ -274,5 +305,6 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cboxdk/laravel-telemetry/releases/tag/v0.1.0-alpha.1

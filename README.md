@@ -45,8 +45,9 @@ spec-stable HTTP JSON.
 - ✅ Zero cost when disabled; telemetry never throws into your app
 - ✅ Resource attribution: peak memory + CPU per request/job/task, per-span
   CPU & memory deltas, real RSS via `cboxdk/system-metrics`
-- ✅ Ships four Grafana dashboards (`telemetry:dashboards`) — overview,
-  requests, queue & schedule, drill-down — service-scoped, LGTM-ready
+- ✅ Ships 13 Grafana dashboards (`telemetry:dashboards`) — an APM-style
+  suite (requests, jobs, queries, cache, exceptions, system, users …) —
+  service-scoped, LGTM-ready
 - ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
   guidelines, `llms.txt` and an agent guide — your AI assistant follows the
   conventions out of the box
@@ -60,7 +61,7 @@ composer require cboxdk/laravel-telemetry
 ```dotenv
 TELEMETRY_STORE=redis            # redis | apcu | array
 TELEMETRY_EXPORTERS=otlp         # optional; Prometheus endpoint is on by default
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com:4318
+TELEMETRY_OTLP_ENDPOINT=https://otlp.example.com:4318
 ```
 
 Scrape `GET /telemetry/metrics`, and for OTLP metrics schedule the flush:

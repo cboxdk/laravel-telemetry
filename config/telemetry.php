@@ -3,6 +3,21 @@
 declare(strict_types=1);
 use Cbox\Telemetry\Http\Middleware\AllowIps;
 
+// Honor the OpenTelemetry-standard OTEL_EXPORTER_OTLP_HEADERS
+// ("key1=val1,key2=val2") for interop. TELEMETRY_* values win over these.
+$otelHeaders = [];
+if (is_string($rawOtelHeaders = env('OTEL_EXPORTER_OTLP_HEADERS')) && $rawOtelHeaders !== '') {
+    foreach (explode(',', $rawOtelHeaders) as $pair) {
+        if (str_contains($pair, '=')) {
+            [$hk, $hv] = explode('=', $pair, 2);
+
+            if (($hk = trim($hk)) !== '') {
+                $otelHeaders[$hk] = trim($hv);
+            }
+        }
+    }
+}
+
 return [
 
     /*
@@ -29,14 +44,14 @@ return [
     */
 
     'service' => [
-        'name' => env('TELEMETRY_SERVICE_NAME', env('APP_NAME', 'laravel')),
+        'name' => env('TELEMETRY_SERVICE_NAME', env('OTEL_SERVICE_NAME', env('APP_NAME', 'laravel'))),
         'namespace' => env('TELEMETRY_SERVICE_NAMESPACE'),
         'version' => env('TELEMETRY_SERVICE_VERSION'),
-        'environment' => env('TELEMETRY_ENVIRONMENT', env('APP_ENV', 'production')),
+        'environment' => env('TELEMETRY_SERVICE_ENVIRONMENT', env('APP_ENV', 'production')),
 
         // Deployment marker (git sha, release tag) — shows on every
         // signal so regressions map to deploys.
-        'deployment' => env('TELEMETRY_DEPLOYMENT'),
+        'deployment' => env('TELEMETRY_SERVICE_DEPLOYMENT'),
     ],
 
     // Auto-detect container/k8s/cloud resource attributes (container.id,
@@ -99,10 +114,13 @@ return [
         : explode(',', (string) env('TELEMETRY_EXPORTERS')),
 
     'otlp' => [
-        'endpoint' => env('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318'),
-        'headers' => [
-            // 'Authorization' => 'Bearer ...',
-        ],
+        'endpoint' => env('TELEMETRY_OTLP_ENDPOINT', env('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4318')),
+        // Bearer token for an auth-gated OTLP endpoint (e.g. a shared
+        // collector). Sent as `Authorization: Bearer <token>`. Additional
+        // headers can come from the OTel-standard OTEL_EXPORTER_OTLP_HEADERS.
+        'headers' => array_filter([
+            'Authorization' => env('TELEMETRY_OTLP_TOKEN') ? 'Bearer '.env('TELEMETRY_OTLP_TOKEN') : null,
+        ]) + $otelHeaders,
         'timeout' => env('TELEMETRY_OTLP_TIMEOUT', 3.0),
         'connect_timeout' => env('TELEMETRY_OTLP_CONNECT_TIMEOUT', 1.0),
 
@@ -115,9 +133,9 @@ return [
         // batches every --interval seconds. Drop-oldest above max_items.
         'spool' => [
             'enabled' => env('TELEMETRY_OTLP_SPOOL', false),
-            'connection' => env('TELEMETRY_SPOOL_CONNECTION', 'default'),
-            'key' => env('TELEMETRY_SPOOL_KEY', 'telemetry:spool'),
-            'max_items' => env('TELEMETRY_SPOOL_MAX_ITEMS', 20000),
+            'connection' => env('TELEMETRY_OTLP_SPOOL_CONNECTION', 'default'),
+            'key' => env('TELEMETRY_OTLP_SPOOL_KEY', 'telemetry:spool'),
+            'max_items' => env('TELEMETRY_OTLP_SPOOL_MAX_ITEMS', 20000),
         ],
     ],
 
@@ -186,7 +204,7 @@ return [
         // Expose the trace id on every response — the support-case
         // reference ("quote id X to support") and the Tempo lookup key.
         // Set to null/empty to disable.
-        'response_header' => env('TELEMETRY_TRACE_RESPONSE_HEADER', 'X-Trace-Id'),
+        'response_header' => env('TELEMETRY_TRACES_RESPONSE_HEADER', 'X-Trace-Id'),
 
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
@@ -196,9 +214,9 @@ return [
         // hurts, a lean skeleton + aggregates when all is well. The
         // decision is made at flush, when the whole trace is in memory.
         'details' => [
-            'mode' => env('TELEMETRY_TRACE_DETAILS', 'always'), // always | tail
-            'slow_request_ms' => env('TELEMETRY_SLOW_REQUEST_MS', 1000),
-            'slow_span_ms' => env('TELEMETRY_SLOW_SPAN_MS', 100),
+            'mode' => env('TELEMETRY_TRACES_DETAILS', 'always'), // always | tail
+            'slow_request_ms' => env('TELEMETRY_TRACES_SLOW_REQUEST_MS', 1000),
+            'slow_span_ms' => env('TELEMETRY_TRACES_SLOW_SPAN_MS', 100),
         ],
 
         // Also trust the caller's SAMPLING decision. Disable on public
@@ -293,7 +311,7 @@ return [
 
         // Skip query spans faster than this (ms) — a noise floor for
         // N+1-heavy codepaths. 0 records everything.
-        'queries_min_duration' => env('TELEMETRY_QUERIES_MIN_DURATION', 0),
+        'queries_min_duration' => env('TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION', 0),
 
         // Artisan command spans.
         'commands' => env('TELEMETRY_INSTRUMENT_COMMANDS', false),

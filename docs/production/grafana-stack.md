@@ -36,7 +36,7 @@ listening on 4318 and routing by signal:
 
 ```dotenv
 TELEMETRY_EXPORTERS=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.internal:4318
+TELEMETRY_OTLP_ENDPOINT=http://alloy.internal:4318
 ```
 
 Prometheus scrapes each app node (or the VIP) per

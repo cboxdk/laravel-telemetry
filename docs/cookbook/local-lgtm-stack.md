@@ -28,10 +28,10 @@ and running` in the logs, then point your app at it:
 TELEMETRY_ENABLED=true
 TELEMETRY_STORE=redis              # or "apcu" / "array" for a quick local run
 TELEMETRY_EXPORTERS=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+TELEMETRY_OTLP_ENDPOINT=http://localhost:4318
 
 # See detail spans (queries, cache, views) on every request while developing:
-TELEMETRY_TRACE_DETAILS=always
+TELEMETRY_TRACES_DETAILS=always
 ```
 
 Hit any route, then open Grafana → **Explore** → **Tempo** → *Search*.

@@ -8,6 +8,13 @@ weight: 1
 
 Publish with `php artisan vendor:publish --tag=telemetry-config`.
 
+**Env-var convention:** every variable is prefixed `TELEMETRY_` and mirrors
+its config path (`otlp.spool.key` → `TELEMETRY_OTLP_SPOOL_KEY`). The
+package additionally honors the OpenTelemetry-standard variables
+(`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`) as fallbacks for interop —
+`TELEMETRY_*` wins when both are set.
+
 ## Master switch
 
 | Key | Env | Default |
@@ -25,8 +32,8 @@ Attached to every exported signal (OTel resource conventions).
 | `service.name` | `TELEMETRY_SERVICE_NAME` | `APP_NAME` |
 | `service.namespace` | `TELEMETRY_SERVICE_NAMESPACE` | — |
 | `service.version` | `TELEMETRY_SERVICE_VERSION` | — |
-| `service.environment` | `TELEMETRY_ENVIRONMENT` | `APP_ENV` |
-| `service.deployment` | `TELEMETRY_DEPLOYMENT` | auto — explicit value wins; otherwise the current git sha is detected from `.git/HEAD` (no exec). Becomes `deployment.id` on every signal |
+| `service.environment` | `TELEMETRY_SERVICE_ENVIRONMENT` | `APP_ENV` |
+| `service.deployment` | `TELEMETRY_SERVICE_DEPLOYMENT` | auto — explicit value wins; otherwise the current git sha is detected from `.git/HEAD` (no exec). Becomes `deployment.id` on every signal |
 | `resource_detection` | `TELEMETRY_RESOURCE_DETECTION` | `true` — auto-detect container/k8s/cloud attributes (`container.id`, `k8s.pod.name`, `k8s.namespace.name`, `cloud.region`, …) from cgroup facts, downward-API env vars and `OTEL_RESOURCE_ATTRIBUTES`. Config `service.*` keys always win |
 | `self_metrics` | `TELEMETRY_SELF_METRICS` | `true` — emit the package's own health as metrics (`telemetry.export.*`, `telemetry.spool.depth`) |
 
@@ -88,16 +95,16 @@ Valid entries: `otlp`, `null`, or a fully-qualified class name implementing
 
 | Key | Env | Default |
 |---|---|---|
-| `otlp.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` |
-| `otlp.headers` | — | `[]` |
+| `otlp.endpoint` | `TELEMETRY_OTLP_ENDPOINT` | `http://localhost:4318` — also honors the OTel-standard `OTEL_EXPORTER_OTLP_ENDPOINT` as a fallback |
+| `otlp.headers` | `TELEMETRY_OTLP_TOKEN` | sent as `Authorization: Bearer <token>` for an auth-gated endpoint; extra headers via the OTel-standard `OTEL_EXPORTER_OTLP_HEADERS` (`k1=v1,k2=v2`) |
 | `otlp.timeout` | `TELEMETRY_OTLP_TIMEOUT` | `3.0` s |
 | `otlp.connect_timeout` | `TELEMETRY_OTLP_CONNECT_TIMEOUT` | `1.0` s |
 | `otlp.compression` | `TELEMETRY_OTLP_COMPRESSION` | `true` (gzip bodies > 1 KB) |
 
 | `otlp.spool.enabled` | `TELEMETRY_OTLP_SPOOL` | `false` — spans/events go to a Redis list instead of POSTing at terminate; `telemetry:flush` (cron or `--daemon`) ships merged batches |
-| `otlp.spool.connection` | `TELEMETRY_SPOOL_CONNECTION` | `default` |
-| `otlp.spool.key` | `TELEMETRY_SPOOL_KEY` | `telemetry:spool` |
-| `otlp.spool.max_items` | `TELEMETRY_SPOOL_MAX_ITEMS` | `20000` (drop-oldest above) |
+| `otlp.spool.connection` | `TELEMETRY_OTLP_SPOOL_CONNECTION` | `default` |
+| `otlp.spool.key` | `TELEMETRY_OTLP_SPOOL_KEY` | `telemetry:spool` |
+| `otlp.spool.max_items` | `TELEMETRY_OTLP_SPOOL_MAX_ITEMS` | `20000` (drop-oldest above) |
 
 Daemon mode for high traffic:
 `telemetry:flush --daemon --interval=1 --metrics-interval=15 --max-batch=200`
@@ -137,9 +144,9 @@ everything and a `public` endpoint filtered to a prefix list:
 | `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
 | `traces.share_context` | `TELEMETRY_TRACES_SHARE_CONTEXT` | `true` — publishes `trace_id` into Laravel `Context` (Sentry/Flare/logs pick it up) + a Sentry scope tag |
 | `traces.response_header` | `TELEMETRY_TRACES_RESPONSE_HEADER` | `X-Trace-Id` — the support reference id on every response; `null` disables. Skipped on publicly cacheable responses (`Cache-Control: public`/`s-maxage`) so caches never replay a stale id |
-| `traces.details.mode` | `TELEMETRY_TRACE_DETAILS` | `always` — `tail` keeps cache/query detail spans only for failing or slow traces |
-| `traces.details.slow_request_ms` | `TELEMETRY_SLOW_REQUEST_MS` | `1000` |
-| `traces.details.slow_span_ms` | `TELEMETRY_SLOW_SPAN_MS` | `100` |
+| `traces.details.mode` | `TELEMETRY_TRACES_DETAILS` | `always` — `tail` keeps cache/query detail spans only for failing or slow traces |
+| `traces.details.slow_request_ms` | `TELEMETRY_TRACES_SLOW_REQUEST_MS` | `1000` |
+| `traces.details.slow_span_ms` | `TELEMETRY_TRACES_SLOW_SPAN_MS` | `100` |
 
 ## Redaction engine
 
@@ -178,7 +185,7 @@ with the key `log.message`.
 | `instrument.response_headers` | — | `content-type, cache-control` — span attrs `http.response.header.*` |
 | `instrument.jobs` | `TELEMETRY_INSTRUMENT_JOBS` | `true` |
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
-| `instrument.queries_min_duration` | `TELEMETRY_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
+| `instrument.queries_min_duration` | `TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
 | `instrument.gates` | `TELEMETRY_INSTRUMENT_GATES` | `true` — `authorization.checks{ability,result}` counter (gates AND policies) + `gate.check.count`/`gate.denied.count` root-span tallies |
 | `instrument.auth` | `TELEMETRY_INSTRUMENT_AUTH` | `true` — `auth.events{event,guard}` (login/logout/failed/lockout/password_reset/registered/verified) |

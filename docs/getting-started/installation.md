@@ -44,7 +44,7 @@ scrape time. For OTLP:
 
 ```dotenv
 TELEMETRY_EXPORTERS=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com:4318
+TELEMETRY_OTLP_ENDPOINT=https://otel.example.com:4318
 ```
 
 Spans and events export at request/job terminate. OTLP **metrics** are

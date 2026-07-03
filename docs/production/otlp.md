@@ -13,7 +13,7 @@ default.
 
 ```dotenv
 TELEMETRY_EXPORTERS=otlp
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com:4318
+TELEMETRY_OTLP_ENDPOINT=https://otlp.example.com:4318
 ```
 
 Authenticated backends:

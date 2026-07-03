@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
@@ -63,4 +64,15 @@ it('is a no-op when disabled', function () {
 
     expect($manager->collect())->toBeEmpty()
         ->and($manager->tracer()->drain())->toBeEmpty();
+});
+
+it('sends the OTLP bearer token as an Authorization header when configured', function () {
+    config()->set('telemetry.otlp.headers', ['Authorization' => 'Bearer demo-token']);
+
+    $transport = app(OtlpTransport::class);
+
+    $headers = (fn () => $this->headers)->call($transport);
+
+    expect($headers)->toHaveKey('Authorization')
+        ->and($headers['Authorization'])->toBe('Bearer demo-token');
 });
