@@ -41,6 +41,13 @@ final class CommandInstrumentation implements ManagesRequestState
 
     private function commandStarting(CommandStarting $event): void
     {
+        // Never trace the package's own plumbing — telemetry:flush would
+        // spool a span for itself on every run (self-perpetuating), and
+        // telemetry:monitor is a long-lived daemon.
+        if (str_starts_with($event->command ?? '', 'telemetry:')) {
+            return;
+        }
+
         FailSafe::guard(function () use ($event) {
             $this->stack[] = $this->telemetry()->tracer()->startSpan(
                 'artisan '.($event->command ?? 'unknown'),

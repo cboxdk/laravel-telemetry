@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Logging\TelemetryLogHandler;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
@@ -10,6 +11,8 @@ use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Notifications\Events\NotificationFailed;
 use Illuminate\Notifications\Events\NotificationSent;
@@ -17,6 +20,8 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Monolog\Logger;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\NullOutput;
 
 beforeEach(function () {
     $this->collector = new CollectingExporter;
@@ -142,4 +147,22 @@ it('uses the class basename consistently on sent and failed notification counter
     // Both are the SAME shape (basename), joinable in dashboards, and never a FQCN.
     expect($sentLabel)->toBe($failedLabel)
         ->and($sentLabel)->not->toContain('\\');
+});
+
+it('does not trace the packages own telemetry commands', function () {
+    (new CommandInstrumentation(app()))->register(app('events'));
+
+    Telemetry::span('outer', function () {
+        event(new CommandStarting('telemetry:flush', new ArrayInput([]), new NullOutput));
+        event(new CommandFinished('telemetry:flush', new ArrayInput([]), new NullOutput, 0));
+        event(new CommandStarting('app:real', new ArrayInput([]), new NullOutput));
+        event(new CommandFinished('app:real', new ArrayInput([]), new NullOutput, 0));
+    });
+
+    Telemetry::flush();
+
+    $names = collect($this->collector->batches())->flatMap(fn ($b) => $b->spans)->pluck('name');
+
+    expect($names)->toContain('artisan app:real')
+        ->and($names)->not->toContain('artisan telemetry:flush');
 });
