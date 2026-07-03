@@ -6,6 +6,10 @@ weight: 2
 
 # Quickstart
 
+> Want to *see* the output, not just record it? Spin up a local
+> Grafana+Tempo+Loki+Prometheus stack in one container and watch your
+> first trace land — [Local LGTM stack](../cookbook/local-lgtm-stack.md).
+
 ## Count things
 
 ```php

@@ -28,6 +28,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 
 ## Cookbook
 
+- [Local LGTM stack](docs/cookbook/local-lgtm-stack.md): one-container Grafana+Tempo+Loki+Prometheus for dev/test/CI, first trace in a minute
 - [Multi-tenant SaaS](docs/cookbook/multi-tenant-saas.md): tenant labels, cardinality budget, fleet gauges
 - [Queue monitoring](docs/cookbook/queue-monitoring.md): depth, in-flight, oldest-job age, alerts
 - [External services](docs/cookbook/external-services.md): outbound API instrumentation, distributed traces

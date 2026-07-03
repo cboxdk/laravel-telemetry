@@ -56,7 +56,7 @@ Log::info('Import done', ['rows' => 5021]); // → trace-correlated OTLP log
 - Getting started: install, first metrics and spans, testing with the fake,
   and the one-page API reference.
 - Core concepts: architecture, metrics, traces, events, logs, naming.
-- Cookbook: multi-tenant SaaS, queue monitoring, external services.
+- Cookbook: local LGTM stack (dev/test/CI), multi-tenant SaaS, queue monitoring, external services.
 - Configuration: every config key explained.
 - Extension points: telemetry providers and custom exporters.
 - Production: Prometheus setup, OTLP setup, the recommended Grafana stack,

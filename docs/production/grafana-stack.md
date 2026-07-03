@@ -11,6 +11,10 @@ This package is backend-agnostic, but we have an opinion. The LGTM stack
 OTLP-capable, self-hostable or managed (Grafana Cloud), and the trace/log/
 metric correlation story is best in class.
 
+> Just want it running locally for dev, test or CI? Skip to the
+> [Local LGTM stack](../cookbook/local-lgtm-stack.md) cookbook — one
+> container, first trace in a minute. This page is the production story.
+
 ## Signal routing
 
 | Signal | Backend | Transport |
