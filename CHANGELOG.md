@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-07-03
+
+Dashboard fixes: the logs panels returned HTTP 400, and the suite gained
+environment/host filters. Also makes the Prometheus scrape endpoint
+self-identifying.
+
 ### Fixed
 
 - Logs dashboards returned HTTP 400 — Loki rejects a stream selector that
@@ -326,6 +332,7 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cboxdk/laravel-telemetry/releases/tag/v0.1.0-alpha.1
