@@ -55,6 +55,6 @@ structural changes; ADR conclusions are not to be silently reversed.
 - New behaviour ships with tests; public API changes ship with docs
   (`docs/`) and, when user-visible, a `CHANGELOG.md` entry and an update to
   `.ai/guidelines/telemetry.blade.php` + `llms.txt`.
-- Sibling packages (`~/Projects/laravel-queue-metrics`, `system-metrics`,
-  `laravel-ai-assistant`) define the org conventions — check them before
-  inventing new structure.
+- Sibling packages (`cboxdk/system-metrics`, `cboxdk/laravel-queue-metrics`)
+  define the org conventions — follow their structure before inventing new
+  patterns.

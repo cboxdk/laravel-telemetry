@@ -156,6 +156,6 @@ docker compose down -v         # wipe metrics/traces/logs/dashboards too
 
 - Production backends (self-hosted, Grafana Cloud, scrape vs push):
   [The Grafana stack](../production/grafana-stack.md).
-- The full end-to-end kitchen-sink app that drives every signal type
-  lives in the sibling `laravel-telemetry-demo` repository, which wires
-  this same stack to a real Laravel app.
+- Wire it into your own app with the [quickstart](../getting-started/quickstart.md),
+  then drive traffic through your routes, queues and commands to see every
+  signal type land.

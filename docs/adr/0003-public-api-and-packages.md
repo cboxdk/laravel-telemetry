@@ -103,7 +103,7 @@ flush-time filter closure for spans (Telescope's `filter()` precedent).
 
 ## Package layout
 
-Single repo, **one package for v1**: `cbox/laravel-telemetry`
+Single repo, **one package for v1**: `cboxdk/laravel-telemetry`
 (core + Laravel integration + redis/apcu/array stores + prometheus &
 otlp-http exporters + null/fake).
 
