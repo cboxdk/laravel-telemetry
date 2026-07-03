@@ -171,11 +171,20 @@ final class Redactor
         }
 
         foreach ($attributes as $key => $value) {
-            if (! is_string($value) || $value === '') {
+            if ($value === null) {
                 continue;
             }
 
-            $attributes[$key] = $this->value($key, $value);
+            // Key-based redaction applies regardless of value TYPE — a
+            // sensitive key holding an int PIN, an OTP token or a bool
+            // must not slip past the string-only pattern scrubbing.
+            if (is_string($value)) {
+                if ($value !== '') {
+                    $attributes[$key] = $this->value($key, $value);
+                }
+            } elseif ($this->keyIsSensitive($key)) {
+                $attributes[$key] = $this->replacement;
+            }
         }
 
         return $attributes;

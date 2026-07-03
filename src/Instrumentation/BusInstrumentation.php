@@ -42,9 +42,13 @@ final class BusInstrumentation
                     /** @var Batch $batch */
                     $batch = $event->batch; // @phpstan-ignore property.notFound
 
+                    // No batch NAME label: apps name batches dynamically
+                    // ("import-user-{id}"), which would be unbounded
+                    // cardinality. The name rides on the batch's job spans
+                    // instead; the counter stays bounded by outcome.
                     $this->container->make(TelemetryManager::class)
                         ->counter('bus.batches', 'Job batch lifecycle events')
-                        ->inc(1, ['event' => $outcome, 'name' => $batch->name !== '' ? $batch->name : 'unnamed']);
+                        ->inc(1, ['event' => $outcome]);
                 });
             });
         }

@@ -67,9 +67,10 @@ final class FlushCommand extends Command
             $result = $shipper->ship((int) $this->option('max-batch'));
 
             $this->components->info(sprintf(
-                'Shipped %d spooled payload(s).%s',
+                'Shipped %d spooled payload(s).%s%s',
                 $result['shipped'],
                 $result['requeued'] > 0 ? " {$result['requeued']} requeued — endpoint unreachable." : '',
+                $result['dropped'] > 0 ? " {$result['dropped']} dropped — permanently rejected." : '',
             ));
         }
 
@@ -114,8 +115,9 @@ final class FlushCommand extends Command
             sleep($interval);
         }
 
-        // Drain what arrived during shutdown before handing back to
-        // supervisor — nothing sits in the spool across restarts.
+        // One last drain of what arrived during shutdown. Anything the
+        // endpoint still rejects stays durably in Redis and the next
+        // daemon start picks it up — the spool survives restarts.
         if ($shipper !== null) {
             FailSafe::guard(fn () => $shipper->ship($maxBatch));
         }
@@ -134,7 +136,7 @@ final class FlushCommand extends Command
         $spool = $this->laravel->make(Spool::class);
         $transport = $this->laravel->make(OtlpTransport::class);
 
-        return new SpoolShipper($spool, fn (string $path, array $payload): bool => $transport->post($path, $payload)->success);
+        return new SpoolShipper($spool, fn (string $path, array $payload) => $transport->post($path, $payload));
     }
 
     private function trapSignals(): void

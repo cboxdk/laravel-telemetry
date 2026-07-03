@@ -74,7 +74,7 @@ final class NotificationInstrumentation implements ManagesRequestState
                 ->counter('notifications.sent', 'Notifications sent by channel')
                 ->inc(1, [
                     'channel' => $event->channel,
-                    'notification' => $event->notification::class,
+                    'notification' => class_basename($event->notification),
                 ]);
         });
     }

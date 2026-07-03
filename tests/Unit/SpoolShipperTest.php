@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Exporters\Spool\ArraySpool;
 use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
+use Cbox\Telemetry\Support\ExportResult;
 
 it('merges spooled payloads per signal into single posts', function () {
     $spool = new ArraySpool;
@@ -12,15 +13,15 @@ it('merges spooled payloads per signal into single posts', function () {
     $spool->push(['signal' => 'logs', 'payload' => ['resourceLogs' => [['b' => 1]]]]);
 
     $posts = [];
-    $shipper = new SpoolShipper($spool, function (string $path, array $payload) use (&$posts): bool {
+    $shipper = new SpoolShipper($spool, function (string $path, array $payload) use (&$posts) {
         $posts[] = [$path, $payload];
 
-        return true;
+        return ExportResult::ok();
     });
 
     $result = $shipper->ship(maxBatch: 10);
 
-    expect($result)->toBe(['shipped' => 3, 'requeued' => 0])
+    expect($result)->toBe(['shipped' => 3, 'requeued' => 0, 'dropped' => 0])
         ->and($spool->size())->toBe(0)
         ->and($posts)->toHaveCount(2)
         ->and($posts[0][0])->toBe('/v1/traces')
@@ -37,13 +38,13 @@ it('chunks by max batch and keeps draining until empty', function () {
     }
 
     $posts = 0;
-    $shipper = new SpoolShipper($spool, function () use (&$posts): bool {
+    $shipper = new SpoolShipper($spool, function () use (&$posts) {
         $posts++;
 
-        return true;
+        return ExportResult::ok();
     });
 
-    expect($shipper->ship(maxBatch: 2))->toBe(['shipped' => 5, 'requeued' => 0])
+    expect($shipper->ship(maxBatch: 2))->toBe(['shipped' => 5, 'requeued' => 0, 'dropped' => 0])
         ->and($posts)->toBe(3)
         ->and($spool->size())->toBe(0);
 });
@@ -53,9 +54,9 @@ it('requeues the chunk in order when the endpoint is down', function () {
     $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['i' => 1]]]]);
     $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['i' => 2]]]]);
 
-    $shipper = new SpoolShipper($spool, fn (): bool => false);
+    $shipper = new SpoolShipper($spool, fn () => ExportResult::retryable('down'));
 
-    expect($shipper->ship(maxBatch: 10))->toBe(['shipped' => 0, 'requeued' => 2])
+    expect($shipper->ship(maxBatch: 10))->toBe(['shipped' => 0, 'requeued' => 2, 'dropped' => 0])
         ->and($spool->size())->toBe(2)
         ->and($spool->pop(1)[0]['payload']['resourceSpans'][0]['i'])->toBe(1);
 });
@@ -71,4 +72,35 @@ it('caps the spool with drop-oldest semantics', function () {
 
     expect($entries)->toHaveCount(2)
         ->and($entries[0]['payload']['resourceSpans'][0]['i'])->toBe(3);
+});
+
+it('requeues only the failed signal and never re-ships delivered ones', function () {
+    $spool = new ArraySpool;
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['t' => 1]]]]);
+    $spool->push(['signal' => 'logs', 'payload' => ['resourceLogs' => [['l' => 1]]]]);
+
+    // traces succeed, logs are down.
+    $shipper = new SpoolShipper($spool, fn (string $path) => str_contains($path, 'traces')
+        ? ExportResult::ok()
+        : ExportResult::retryable('down'));
+
+    $result = $shipper->ship();
+
+    expect($result)->toBe(['shipped' => 1, 'requeued' => 1, 'dropped' => 0]);
+
+    // Only the log entry remains — the delivered trace is gone, so a
+    // second drain cannot duplicate it.
+    $remaining = $spool->pop(10);
+    expect($remaining)->toHaveCount(1)
+        ->and($remaining[0]['signal'])->toBe('logs');
+});
+
+it('drops permanently rejected entries instead of looping forever', function () {
+    $spool = new ArraySpool;
+    $spool->push(['signal' => 'logs', 'payload' => ['resourceLogs' => [['poison' => 1]]]]);
+
+    $shipper = new SpoolShipper($spool, fn () => ExportResult::failed('400 malformed'));
+
+    expect($shipper->ship())->toBe(['shipped' => 0, 'requeued' => 0, 'dropped' => 1])
+        ->and($spool->size())->toBe(0);
 });

@@ -99,3 +99,23 @@ it('applies the custom hook to log messages', function () {
     expect($log[0]->name)->toBe('SENSITIVE LINE')
         ->and($event[0]->name)->toBe('order.placed');
 });
+
+it('redacts sensitive keys regardless of value type', function () {
+    $redactor = redactor();
+
+    $out = $redactor->attributes([
+        'user.password' => 12345678,          // int
+        'auth' => true,                        // bool
+        'card_number' => 4111111111111111,     // int
+        'cvv' => 123,                          // int
+        'order.total' => 999,                  // safe int, kept
+        'http.status' => 200,                  // kept
+    ]);
+
+    expect($out['user.password'])->toBe('[REDACTED]')
+        ->and($out['auth'])->toBe('[REDACTED]')
+        ->and($out['card_number'])->toBe('[REDACTED]')
+        ->and($out['cvv'])->toBe('[REDACTED]')
+        ->and($out['order.total'])->toBe(999)
+        ->and($out['http.status'])->toBe(200);
+});

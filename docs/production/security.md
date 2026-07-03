@@ -86,3 +86,22 @@ TELEMETRY_TRACES_CONTINUE_INCOMING=false
 
 OTLP export honours HTTPS endpoints and custom auth headers. Credentials
 live in env/config — never in metric names or attributes.
+
+## Metric label cardinality
+
+Metric labels are NOT run through the redaction engine — they are
+bounded dimensions by contract and must never carry user data or
+unbounded values. The bundled instrumentation keeps labels bounded
+(route patterns, class basenames, ability names, outcomes). Two labels
+are bounded-but-churning and worth knowing about on large fleets:
+
+- `worker.memory.*{pid}` mints a new series per worker process; workers
+  recycled often (Horizon `--max-jobs`, deploys) leave stale gauges in
+  the store until swept. Aggregate per queue if that matters.
+- `queue.jobs.dispatched{job.name}` uses the queued job's display name.
+  Standard job classes and closures are bounded; a custom
+  `displayName()` that embeds an id would not be. Keep display names
+  static.
+
+When you add your own labels (`labelRequestsUsing`, cache classifier,
+custom counters), the same rule applies: bounded values only.

@@ -6,6 +6,32 @@ All notable changes to `cboxdk/laravel-telemetry` are documented here.
 
 Initial release.
 
+### Hardening (pre-alpha self-review)
+
+- **Octane**: the gate/policy hook was bound once to the boot-time Gate
+  instance, which Octane flushes per request — so `authorization.checks`
+  silently died after the first request on every worker. Now re-armed
+  via a container `afterResolving` callback (WeakMap-guarded against
+  double-counting). Queue instrumentation removed from the request/tick
+  reset list — a job's lifecycle is bounded by its own events, not the
+  HTTP boundary.
+- **Redaction**: a sensitive key holding a non-string value (an int PIN,
+  an OTP token, a bool) escaped key-based redaction — the string guard
+  ran before the key check. Key redaction now applies regardless of
+  value type.
+- **Spool**: on a partial ship failure (traces delivered, logs down) the
+  whole chunk was requeued, re-shipping the delivered traces as
+  duplicates. Now per-signal: only the failed signal requeues.
+  Permanently rejected batches (4xx) are dropped instead of wedging the
+  spool behind a head-of-line block. Unencodable entries are skipped
+  rather than silently poisoning the list.
+- **Cardinality**: `notifications.sent` used the FQCN while
+  `notifications.failed` used the basename — unified to the basename.
+  `bus.batches` dropped its `name` label (apps name batches with ids —
+  unbounded). Explicit `redis_ignore_connections` is now unioned with
+  the telemetry store/spool connections instead of replacing them, so
+  the self-instrumentation guarantee holds.
+
 ### Performance
 
 - Octane hardening (Swoole/RoadRunner/FrankenPHP): half-open

@@ -527,13 +527,16 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         if ($config->get('telemetry.instrument.redis', false)) {
-            $ignored = $config->get('telemetry.instrument.redis_ignore_connections');
-
-            // Default: the package's own connections — self-instrumentation
-            // would loop (telemetry writes generating telemetry).
-            $ignored = is_array($ignored) ? array_values(array_filter($ignored, is_string(...))) : array_values(array_unique([
+            // The package's own connections are ALWAYS ignored — self-
+            // instrumentation would loop (telemetry writes generating
+            // spans generating writes). An explicit ignore list is
+            // UNIONED with these, never replaces them, so the documented
+            // guarantee holds even when an operator adds their own.
+            $ignored = (array) $config->get('telemetry.instrument.redis_ignore_connections', []);
+            $ignored = array_values(array_unique([
                 (string) $config->get('telemetry.stores.redis.connection', 'default'),
                 (string) $config->get('telemetry.otlp.spool.connection', 'default'),
+                ...array_filter($ignored, is_string(...)),
             ]));
 
             $this->app->singleton(RedisInstrumentation::class);
@@ -541,28 +544,45 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         if ($config->get('telemetry.instrument.gates', true)) {
-            $this->app->booted(function (Application $app) {
-                FailSafe::guard(function () use ($app) {
-                    $app->make(Gate::class)
-                        ->after(function ($user, string $ability, $result) use ($app): void {
-                            FailSafe::guard(function () use ($app, $ability, $result) {
-                                $allowed = $result instanceof Response ? $result->allowed() : (bool) $result;
-                                $telemetry = $app->make(TelemetryManager::class);
+            // afterResolving, NOT booted(): the Gate is in Octane's flush
+            // list, so a hook bound once to the boot-time instance is lost
+            // after request #1. A resolving callback lives on the
+            // container and re-arms every fresh Gate the worker resolves.
+            // The WeakMap guards against arming the same instance twice
+            // (afterResolving AND the boot-time arm can both see it).
+            $armed = new \WeakMap;
 
-                                // Ability names are code identifiers —
-                                // bounded, safe as a label.
-                                $telemetry->counter('authorization.checks', 'Gate/policy checks by outcome')
-                                    ->inc(1, ['ability' => $ability, 'result' => $allowed ? 'allowed' : 'denied']);
+            $arm = function (object $gate) use (&$armed): void {
+                if (! method_exists($gate, 'after') || isset($armed[$gate])) {
+                    return;
+                }
 
-                                $telemetry->tracer()->bumpStat('gate.check.count', 1);
+                $armed[$gate] = true;
+                $app = $this->app;
 
-                                if (! $allowed) {
-                                    $telemetry->tracer()->bumpStat('gate.denied.count', 1);
-                                }
-                            });
-                        });
+                $gate->after(function ($user, string $ability, $result) use ($app): void {
+                    FailSafe::guard(function () use ($app, $ability, $result) {
+                        $allowed = $result instanceof Response ? $result->allowed() : (bool) $result;
+                        $telemetry = $app->make(TelemetryManager::class);
+
+                        // Ability names are code identifiers — bounded.
+                        $telemetry->counter('authorization.checks', 'Gate/policy checks by outcome')
+                            ->inc(1, ['ability' => $ability, 'result' => $allowed ? 'allowed' : 'denied']);
+
+                        $telemetry->tracer()->bumpStat('gate.check.count', 1);
+
+                        if (! $allowed) {
+                            $telemetry->tracer()->bumpStat('gate.denied.count', 1);
+                        }
+                    });
                 });
-            });
+            };
+
+            $this->app->afterResolving(Gate::class, fn (object $gate) => FailSafe::guard(fn () => $arm($gate)));
+
+            // Arm the instance that already exists at boot (FPM path, and
+            // any Gate resolved before this callback registered).
+            $this->app->booted(fn (Application $app) => FailSafe::guard(fn () => $app->resolved(Gate::class) ? $arm($app->make(Gate::class)) : null));
         }
 
         if ($config->get('telemetry.instrument.views', true)) {
@@ -680,6 +700,11 @@ class TelemetryServiceProvider extends ServiceProvider
      */
     private function statefulInstrumentations(): array
     {
+        // Deliberately NOT QueueInstrumentation: a job's lifecycle is
+        // bounded by JobProcessed/JobFailed, not the HTTP request/tick
+        // boundary. Resetting it here would wipe an in-flight job span
+        // when a job runs inside an Octane worker (dispatchSync, task
+        // workers). It self-cleans on job-completion events.
         return [
             CacheInstrumentation::class,
             HttpClientInstrumentation::class,
@@ -687,7 +712,6 @@ class TelemetryServiceProvider extends ServiceProvider
             NotificationInstrumentation::class,
             TransactionInstrumentation::class,
             CommandInstrumentation::class,
-            QueueInstrumentation::class,
         ];
     }
 }

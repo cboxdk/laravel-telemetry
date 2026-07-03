@@ -12,6 +12,7 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Notifications\Events\NotificationFailed;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -126,4 +127,19 @@ it('counts deprecations logged through the telemetry channel', function () {
     $logger->warning('str_contains(): Passing null to parameter #1 is deprecated');
 
     expect(families()['php.deprecations']->samples[0]->value)->toBe(1.0);
+});
+
+it('uses the class basename consistently on sent and failed notification counters', function () {
+    $notification = new class extends Notification {};
+
+    event(new NotificationSent(new GenericUser(['id' => 1]), $notification, 'mail'));
+    event(new NotificationFailed(new GenericUser(['id' => 1]), $notification, 'mail'));
+
+    $fams = families();
+    $sentLabel = $fams['notifications.sent']->samples[0]->labels['notification'];
+    $failedLabel = $fams['notifications.failed']->samples[0]->labels['notification'];
+
+    // Both are the SAME shape (basename), joinable in dashboards, and never a FQCN.
+    expect($sentLabel)->toBe($failedLabel)
+        ->and($sentLabel)->not->toContain('\\');
 });

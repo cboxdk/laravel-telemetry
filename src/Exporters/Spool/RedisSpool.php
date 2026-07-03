@@ -23,9 +23,15 @@ final class RedisSpool implements Spool
 
     public function push(array $entry): void
     {
+        $encoded = json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE);
+
+        if (! is_string($encoded)) {
+            return; // unencodable payload — drop rather than poison the list
+        }
+
         $connection = $this->redis->connection($this->connection);
 
-        $connection->rpush($this->key, json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE));
+        $connection->rpush($this->key, $encoded);
 
         // Keep the newest $maxItems — backpressure by dropping the oldest.
         $connection->ltrim($this->key, -$this->maxItems, -1);
@@ -59,7 +65,11 @@ final class RedisSpool implements Spool
 
         // lpush reversed keeps the original order at the front.
         foreach (array_reverse($entries) as $entry) {
-            $connection->lpush($this->key, json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE));
+            $encoded = json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE);
+
+            if (is_string($encoded)) {
+                $connection->lpush($this->key, $encoded);
+            }
         }
     }
 
