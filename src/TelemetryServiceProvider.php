@@ -48,6 +48,7 @@ use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
+use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\Tracing\Tracer;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Auth\Events\Login;
@@ -138,6 +139,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 slowRequestMs: (float) $app->make('config')->get('telemetry.traces.details.slow_request_ms', 1000),
                 slowSpanMs: (float) $app->make('config')->get('telemetry.traces.details.slow_span_ms', 100),
                 redactor: Redactor::fromConfig((array) $app->make('config')->get('telemetry.redaction', [])),
+                selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
             );
 
             foreach ($this->buildExporters($app) as $exporter) {
@@ -175,10 +177,50 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerScheduleInstrumentation();
         $this->registerEventInstrumentations();
         $this->registerSystemMetricsProvider();
+        $this->registerSelfMetrics();
         $this->registerOctaneReset();
         $this->registerHttpClientMacro();
         $this->registerAboutCommand();
         $this->registerLogDriver();
+    }
+
+    /**
+     * The package's own health as pull gauges — who watches the watcher.
+     * Export duration/outcome counters are recorded inline on the export
+     * path; these two are point-in-time state read at scrape/flush.
+     */
+    private function registerSelfMetrics(): void
+    {
+        if (! $this->app->make('config')->get('telemetry.self_metrics', true)) {
+            return;
+        }
+
+        $config = $this->app->make('config');
+        $registry = $this->app->make(Registry::class);
+
+        // Only meaningful when OTLP is actually in use — the breaker is an
+        // OtlpExporter concern, and an unused gauge is just scrape noise.
+        if (in_array('otlp', (array) $config->get('telemetry.exporters', []), true)) {
+            // 1 while the per-process OTLP circuit breaker is open (recent
+            // transport failure), 0 otherwise — alert on sustained 1.
+            $registry->gauge(
+                'telemetry.export.circuit_open',
+                fn (): float => OtlpExporter::circuitOpen() ? 1.0 : 0.0,
+                description: 'OTLP export circuit breaker state (1 = open)',
+                unit: '1',
+            );
+        }
+
+        // Spool backlog — a climbing depth means the daemon isn't keeping
+        // up (or is down). Only meaningful when the spool is enabled.
+        if ($config->get('telemetry.otlp.spool.enabled', false)) {
+            $registry->gauge(
+                'telemetry.spool.depth',
+                fn (): float => (float) (FailSafe::guard(fn () => $this->app->make(Spool::class)->size()) ?? 0),
+                description: 'Pending payloads in the OTLP spool',
+                unit: '',
+            );
+        }
     }
 
     /**
@@ -315,6 +357,13 @@ class TelemetryServiceProvider extends ServiceProvider
 
         if ($deployment !== null) {
             $resource['deployment.id'] = $deployment;
+        }
+
+        // Container/k8s/cloud attributes fill in around the config-derived
+        // keys above — detected keys never overwrite explicit config, so
+        // service.name and friends stay authoritative.
+        if ($config->get('telemetry.resource_detection', true)) {
+            $resource += ResourceDetector::detect();
         }
 
         return $resource;

@@ -14,6 +14,7 @@ use Cbox\Telemetry\Metrics\Instruments\ObservableGauge;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
+use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\Signal;
@@ -75,6 +76,7 @@ class TelemetryManager
         private readonly float $slowRequestMs = 1000.0,
         private readonly float $slowSpanMs = 100.0,
         private readonly ?Redactor $redactor = null,
+        private readonly bool $selfMetrics = true,
     ) {
         // A buffer-cap flush means the trace is pathological — keep every
         // detail for it.
@@ -761,8 +763,48 @@ class TelemetryManager
             $narrowed = $batch->only($supports);
 
             if (! $narrowed->isEmpty()) {
-                FailSafe::guard(fn () => $exporter->export($narrowed));
+                $startedAt = microtime(true);
+                $result = FailSafe::guard(fn () => $exporter->export($narrowed));
+                $this->recordExportMetrics($exporter->name(), $signals, $startedAt, $result);
             }
         }
+    }
+
+    /**
+     * Self-observability: how the exporters themselves are doing. These
+     * are plain store writes (no export inline), so there is no feedback
+     * loop — they ship on the next metrics flush like any counter.
+     *
+     * @param  array<Signal>  $signals
+     */
+    private function recordExportMetrics(string $exporter, array $signals, float $startedAt, ?ExportResult $result): void
+    {
+        if (! $this->selfMetrics) {
+            return;
+        }
+
+        FailSafe::guard(function () use ($exporter, $signals, $startedAt, $result) {
+            $kind = in_array(Signal::Metrics, $signals, true) ? 'metrics' : 'traces_logs';
+            $labels = ['exporter' => $exporter, 'signal' => $kind];
+
+            $outcome = match (true) {
+                $result === null => 'error',           // exporter threw
+                $result->rejected > 0 => 'partial',
+                $result->success => 'ok',
+                $result->retryable => 'retryable',
+                default => 'failed',
+            };
+
+            $this->registry->histogram('telemetry.export.duration', description: 'Telemetry export duration', unit: 'ms')
+                ->record((microtime(true) - $startedAt) * 1000, $labels);
+
+            $this->registry->counter('telemetry.export.count', 'Telemetry export attempts by outcome')
+                ->inc(1, $labels + ['outcome' => $outcome]);
+
+            if ($result !== null && $result->rejected > 0) {
+                $this->registry->counter('telemetry.export.rejected', 'Data points the backend rejected (OTLP partial success)')
+                    ->inc($result->rejected, $labels);
+            }
+        });
     }
 }

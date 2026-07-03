@@ -457,6 +457,15 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
                 description="telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."),
     row("Workers", 21),
     timeseries("Worker leak curves — one line per worker process", [target(f'worker_memory_rss_bytes{{{SVC}}}', 'pid {{pid}}')], 0, 22, w=24, unit="bytes"),
+    row("Telemetry health (self-observability)", 30),
+    timeseries("Export outcomes / min", [target(f'sum by (outcome) (rate(telemetry_export_count_total{{{SVC}}}[$__rate_interval])) * 60', '{{outcome}}')],
+               0, 31, w=8, unit="opm", regex_colors={"ok": "green", "partial": "orange", "retryable": "orange", "failed": "red", "error": "red"},
+               description="The package reporting on itself. Sustained retryable/failed means the backend is unreachable."),
+    timeseries("Export p95 duration", [target(f'histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_milliseconds_bucket{{{SVC}}}[$__rate_interval])))', '{{signal}}')], 8, 31, w=8, unit="ms"),
+    stat("Circuit breaker", f'max(telemetry_export_circuit_open_ratio{{{SVC}}}) or vector(0)', 16, 31, w=4, decimals=0, thresholds=ok_at([{"color": "red", "value": 1}]),
+         description="1 = OTLP circuit open (recent transport failure). Alert on sustained 1."),
+    stat("Spool depth", f'max(telemetry_spool_depth{{{SVC}}}) or vector(0)', 20, 31, w=4, decimals=0, thresholds=ok_at([{"color": "orange", "value": 1000}, {"color": "red", "value": 15000}]),
+         description="Pending OTLP payloads. Climbing = the flush daemon isn't keeping up. 0/absent when the spool is disabled."),
 ])
 
 # ── 12 · Users ───────────────────────────────────────────────────────

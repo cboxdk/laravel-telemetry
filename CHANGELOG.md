@@ -54,6 +54,19 @@ Initial release.
 
 ### Observability UX
 
+- Resource detection (`resource_detection`, default on): every signal
+  now carries where it ran — `container.id`/`container.runtime` from
+  cgroups (via cboxdk/system-metrics), `k8s.pod.name`,
+  `k8s.namespace.name`, `k8s.node.name`, `cloud.region` from downward-API
+  env vars, and anything in `OTEL_RESOURCE_ATTRIBUTES` (the OTel
+  standard). Config `service.*` stays authoritative. Fills the biggest
+  gap for containerized fleets, where `host.name` is a random pod hash.
+- Self-observability (`self_metrics`, default on): the package reports
+  on itself — `telemetry.export.{duration,count,rejected}`,
+  `telemetry.export.circuit_open` (when OTLP is used) and
+  `telemetry.spool.depth` (when the spool is enabled). Recorded inline on
+  the export path (no feedback loop). New "Telemetry health" row on the
+  System dashboard — alert on a stuck circuit or a backing-up spool.
 - Broader core-event coverage: authentication lifecycle
   (`auth.events{event,guard}` — login/logout/failed/lockout/…, the
   credential-attack signal), DB transaction spans

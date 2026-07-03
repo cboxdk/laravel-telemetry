@@ -27,6 +27,43 @@ Attached to every exported signal (OTel resource conventions).
 | `service.version` | `TELEMETRY_SERVICE_VERSION` | — |
 | `service.environment` | `TELEMETRY_ENVIRONMENT` | `APP_ENV` |
 | `service.deployment` | `TELEMETRY_DEPLOYMENT` | auto — explicit value wins; otherwise the current git sha is detected from `.git/HEAD` (no exec). Becomes `deployment.id` on every signal |
+| `resource_detection` | `TELEMETRY_RESOURCE_DETECTION` | `true` — auto-detect container/k8s/cloud attributes (`container.id`, `k8s.pod.name`, `k8s.namespace.name`, `cloud.region`, …) from cgroup facts, downward-API env vars and `OTEL_RESOURCE_ATTRIBUTES`. Config `service.*` keys always win |
+| `self_metrics` | `TELEMETRY_SELF_METRICS` | `true` — emit the package's own health as metrics (`telemetry.export.*`, `telemetry.spool.depth`) |
+
+### Container / Kubernetes / cloud detection
+
+With `resource_detection` on, every signal carries where it ran:
+
+- **From cgroups** (via `cboxdk/system-metrics`): `container.id`,
+  `container.runtime`.
+- **From env vars** (the common downward-API injections):
+  `k8s.pod.name` (`K8S_POD_NAME`/`POD_NAME`, or the pod's `HOSTNAME`),
+  `k8s.namespace.name`, `k8s.node.name`, `cloud.region`
+  (`AWS_REGION`/`GOOGLE_CLOUD_REGION`/…), and more.
+- **From `OTEL_RESOURCE_ATTRIBUTES`** — the OpenTelemetry standard
+  (`key1=val1,key2=val2`, percent-decoded). Operator-explicit, overrides
+  the env-var conventions. This is the cleanest way to inject arbitrary
+  attributes; k8s operators set it automatically.
+
+Precedence: the package's own `service.*` config is authoritative;
+`OTEL_RESOURCE_ATTRIBUTES` beats the env-var conventions; both fill in
+around the config. Filter any of these in Tempo:
+`{ resource.k8s.namespace.name = "production" }`.
+
+### Self-observability metrics
+
+With `self_metrics` on, the package reports on itself (bounded labels):
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `telemetry.export.duration` | histogram (ms) | exporter, signal | how long exports take |
+| `telemetry.export.count` | counter | exporter, signal, outcome | export attempts by outcome (ok/partial/retryable/failed/error) |
+| `telemetry.export.rejected` | counter | exporter, signal | data points the backend rejected (OTLP partial success) |
+| `telemetry.export.circuit_open` | gauge (0/1) | — | OTLP breaker open (only when OTLP is a configured exporter) |
+| `telemetry.spool.depth` | gauge | — | pending OTLP spool payloads (only when the spool is enabled) |
+
+The bundled **System** dashboard renders these under a "Telemetry
+health" row — alert on a sustained open circuit or a climbing spool.
 
 ## Metric store
 

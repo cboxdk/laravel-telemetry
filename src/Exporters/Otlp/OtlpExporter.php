@@ -44,6 +44,15 @@ final class OtlpExporter implements Exporter
         return SignalSet::all();
     }
 
+    /**
+     * Whether the per-process circuit breaker is currently open — surfaced
+     * as the telemetry.export.circuit_open self-metric.
+     */
+    public static function circuitOpen(): bool
+    {
+        return time() < self::$openUntil;
+    }
+
     public function export(TelemetryBatch $batch): ExportResult
     {
         if (time() < self::$openUntil) {
