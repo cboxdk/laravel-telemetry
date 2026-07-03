@@ -13,9 +13,16 @@ it('serves the scrape endpoint', function () {
     $response->assertOk();
     $response->assertHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
 
+    // Every series is stamped with the resource identity (service_name,
+    // deployment_environment_name, host_name) so a shared Prometheus can
+    // tell apps/hosts apart — alongside the metric's own labels.
     expect($response->getContent())
-        ->toContain('orders_created_total{tenant="acme"} 3')
-        ->toContain('queue_depth 42');
+        ->toContain('orders_created_total{')
+        ->toContain('service_name="laravel"')
+        ->toContain('tenant="acme"')
+        ->toContain('queue_depth{')
+        ->toMatch('/orders_created_total\{[^}]*\} 3/')
+        ->toMatch('/queue_depth\{[^}]*\} 42/');
 });
 
 it('respects the endpoint metric filter', function () {
