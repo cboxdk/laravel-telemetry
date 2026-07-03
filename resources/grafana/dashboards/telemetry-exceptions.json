@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -67,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 133,
+      "id": 138,
       "type": "stat",
       "title": "Reported / h",
       "datasource": {
@@ -82,8 +122,8 @@
       },
       "targets": [
         {
-          "refId": "Q134",
-          "expr": "(sum(increase(exceptions_reported_total{service_name=~\"$service\"}[1h]))) or vector(0)",
+          "refId": "Q139",
+          "expr": "(sum(increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -125,7 +165,7 @@
       "description": "Everything passed to report() \u2014 handled exceptions included."
     },
     {
-      "id": 135,
+      "id": 140,
       "type": "stat",
       "title": "5xx responses / h",
       "datasource": {
@@ -140,8 +180,8 @@
       },
       "targets": [
         {
-          "refId": "Q136",
-          "expr": "(sum(increase(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[1h]))) or vector(0)",
+          "refId": "Q141",
+          "expr": "(sum(increase(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"5..\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -182,7 +222,7 @@
       }
     },
     {
-      "id": 137,
+      "id": 142,
       "type": "stat",
       "title": "Failed jobs+tasks / h",
       "datasource": {
@@ -197,8 +237,8 @@
       },
       "targets": [
         {
-          "refId": "Q138",
-          "expr": "(sum(increase(queue_jobs_failed_total{service_name=~\"$service\"}[1h])) or vector(0)) + (sum(increase(schedule_tasks_failed_total{service_name=~\"$service\"}[1h])) or vector(0))",
+          "refId": "Q143",
+          "expr": "(sum(increase(queue_jobs_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h])) or vector(0)) + (sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h])) or vector(0))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -239,7 +279,7 @@
       }
     },
     {
-      "id": 140,
+      "id": 145,
       "type": "timeseries",
       "title": "Exceptions by class",
       "datasource": {
@@ -254,8 +294,8 @@
       },
       "targets": [
         {
-          "refId": "Q139",
-          "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\"}[$__rate_interval]))",
+          "refId": "Q144",
+          "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "{{exception}}",
           "datasource": {
             "type": "prometheus",
@@ -295,7 +335,7 @@
       }
     },
     {
-      "id": 141,
+      "id": 146,
       "type": "table",
       "title": "Total by class (1h)",
       "datasource": {
@@ -310,8 +350,8 @@
       },
       "targets": [
         {
-          "refId": "Q142",
-          "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\"}[1h]))",
+          "refId": "Q147",
+          "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -357,7 +397,7 @@
       }
     },
     {
-      "id": 143,
+      "id": 148,
       "type": "table",
       "title": "Failing requests \u2014 full detail retained even in tail mode",
       "datasource": {
@@ -378,7 +418,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -397,7 +437,7 @@
       }
     },
     {
-      "id": 144,
+      "id": 149,
       "type": "table",
       "title": "Failing jobs & tasks",
       "datasource": {
@@ -418,7 +458,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind!=server && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind!=server && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -437,7 +477,7 @@
       }
     },
     {
-      "id": 145,
+      "id": 150,
       "type": "logs",
       "title": "Error logs",
       "datasource": {

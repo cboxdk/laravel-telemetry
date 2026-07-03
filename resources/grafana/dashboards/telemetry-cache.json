@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -67,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 150,
+      "id": 155,
       "type": "stat",
       "title": "Hit ratio",
       "datasource": {
@@ -82,8 +122,8 @@
       },
       "targets": [
         {
-          "refId": "Q151",
-          "expr": "100 * sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"hit\"}[10m])) / sum(rate(cache_operations_total{service_name=~\"$service\",operation=~\"hit|miss\"}[10m]))",
+          "refId": "Q156",
+          "expr": "100 * sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"hit\"}[10m])) / sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=~\"hit|miss\"}[10m]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -128,7 +168,7 @@
       }
     },
     {
-      "id": 152,
+      "id": 157,
       "type": "stat",
       "title": "Ops / min",
       "datasource": {
@@ -143,8 +183,8 @@
       },
       "targets": [
         {
-          "refId": "Q153",
-          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\"}[5m])) * 60",
+          "refId": "Q158",
+          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -181,7 +221,7 @@
       }
     },
     {
-      "id": 154,
+      "id": 159,
       "type": "stat",
       "title": "Writes / min",
       "datasource": {
@@ -196,8 +236,8 @@
       },
       "targets": [
         {
-          "refId": "Q155",
-          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"write\"}[5m])) * 60",
+          "refId": "Q160",
+          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"write\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -234,7 +274,7 @@
       }
     },
     {
-      "id": 158,
+      "id": 163,
       "type": "timeseries",
       "title": "Hits vs misses",
       "datasource": {
@@ -249,8 +289,8 @@
       },
       "targets": [
         {
-          "refId": "Q156",
-          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"hit\"}[$__rate_interval])) * 60",
+          "refId": "Q161",
+          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"hit\"}[$__rate_interval])) * 60",
           "legendFormat": "hits",
           "datasource": {
             "type": "prometheus",
@@ -258,8 +298,8 @@
           }
         },
         {
-          "refId": "Q157",
-          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",operation=\"miss\"}[$__rate_interval])) * 60",
+          "refId": "Q162",
+          "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"miss\"}[$__rate_interval])) * 60",
           "legendFormat": "misses",
           "datasource": {
             "type": "prometheus",
@@ -435,7 +475,7 @@
       }
     },
     {
-      "id": 160,
+      "id": 165,
       "type": "timeseries",
       "title": "Operations by store",
       "datasource": {
@@ -450,8 +490,8 @@
       },
       "targets": [
         {
-          "refId": "Q159",
-          "expr": "sum by (store, operation) (rate(cache_operations_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "refId": "Q164",
+          "expr": "sum by (store, operation) (rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{store}} {{operation}}",
           "datasource": {
             "type": "prometheus",
@@ -491,7 +531,7 @@
       }
     },
     {
-      "id": 161,
+      "id": 166,
       "type": "table",
       "title": "Slowest cache operations \u2014 key on the span",
       "datasource": {
@@ -512,7 +552,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=~\"cache\\\\..*\" && duration>1ms} | select(span.cache.key, span.cache.store)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=~\"cache\\\\..*\" && duration>1ms} | select(span.cache.key, span.cache.store)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -531,7 +571,7 @@
       }
     },
     {
-      "id": 162,
+      "id": 167,
       "type": "text",
       "title": "Enable",
       "gridPos": {

@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -67,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 176,
+      "id": 181,
       "type": "stat",
       "title": "Mail sent / h",
       "datasource": {
@@ -82,8 +122,8 @@
       },
       "targets": [
         {
-          "refId": "Q177",
-          "expr": "sum(increase(mail_sent_total{service_name=~\"$service\"}[1h]))",
+          "refId": "Q182",
+          "expr": "sum(increase(mail_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -120,7 +160,7 @@
       }
     },
     {
-      "id": 178,
+      "id": 183,
       "type": "stat",
       "title": "Notifications / h",
       "datasource": {
@@ -135,8 +175,8 @@
       },
       "targets": [
         {
-          "refId": "Q179",
-          "expr": "sum(increase(notifications_sent_total{service_name=~\"$service\"}[1h]))",
+          "refId": "Q184",
+          "expr": "sum(increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -173,7 +213,7 @@
       }
     },
     {
-      "id": 181,
+      "id": 186,
       "type": "timeseries",
       "title": "Notifications by channel",
       "datasource": {
@@ -188,8 +228,8 @@
       },
       "targets": [
         {
-          "refId": "Q180",
-          "expr": "sum by (channel) (increase(notifications_sent_total{service_name=~\"$service\"}[$__rate_interval]))",
+          "refId": "Q185",
+          "expr": "sum by (channel) (increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "{{channel}}",
           "datasource": {
             "type": "prometheus",
@@ -229,7 +269,7 @@
       }
     },
     {
-      "id": 182,
+      "id": 187,
       "type": "table",
       "title": "By notification class (1h)",
       "datasource": {
@@ -244,8 +284,8 @@
       },
       "targets": [
         {
-          "refId": "Q183",
-          "expr": "sum by (notification) (increase(notifications_sent_total{service_name=~\"$service\"}[1h]))",
+          "refId": "Q188",
+          "expr": "sum by (notification) (increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -291,7 +331,7 @@
       }
     },
     {
-      "id": 184,
+      "id": 189,
       "type": "table",
       "title": "Send spans (mail + notifications)",
       "datasource": {
@@ -312,7 +352,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && (name=\"mail.send\" || name=\"notification.send\")}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && (name=\"mail.send\" || name=\"notification.send\")}",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"

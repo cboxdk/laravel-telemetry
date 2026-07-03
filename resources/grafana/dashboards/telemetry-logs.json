@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -78,7 +118,7 @@
   ],
   "panels": [
     {
-      "id": 219,
+      "id": 224,
       "type": "logs",
       "title": "All logs \u2014 trace_id links to Tempo",
       "datasource": {
@@ -115,7 +155,7 @@
       }
     },
     {
-      "id": 220,
+      "id": 225,
       "type": "logs",
       "title": "Warnings & errors",
       "datasource": {

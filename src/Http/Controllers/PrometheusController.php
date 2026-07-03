@@ -34,9 +34,39 @@ final class PrometheusController
             ));
         }
 
-        return new Response($renderer->render($families), 200, [
+        return new Response($renderer->render($families, $this->resourceLabels($telemetry)), 200, [
             'Content-Type' => PrometheusRenderer::MIME_TYPE,
         ]);
+    }
+
+    /**
+     * The stable resource identity, as Prometheus labels stamped on every
+     * scraped series — so a single Prometheus scraping many apps (or many
+     * hosts of one app) can filter by service/environment/host, matching
+     * what OTLP push carries. Churny attrs (deploy id, version) are left
+     * off to avoid per-deploy series turnover.
+     *
+     * @return array<string, string>
+     */
+    private function resourceLabels(TelemetryManager $telemetry): array
+    {
+        $resource = $telemetry->resource();
+        $map = [
+            'service.name' => 'service_name',
+            'service.namespace' => 'service_namespace',
+            'deployment.environment.name' => 'deployment_environment_name',
+            'host.name' => 'host_name',
+        ];
+
+        $labels = [];
+
+        foreach ($map as $key => $label) {
+            if (isset($resource[$key]) && is_scalar($resource[$key]) && (string) $resource[$key] !== '') {
+                $labels[$label] = (string) $resource[$key];
+            }
+        }
+
+        return $labels;
     }
 
     /**

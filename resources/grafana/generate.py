@@ -24,8 +24,8 @@ LOKI = {"type": "loki", "uid": "loki"}
 REQ = "http_server_request_duration_milliseconds"
 MEM = "http_server_memory_peak_bytes"
 CPU = "http_server_cpu_time_milliseconds"
-SVC = 'service_name=~"$service"'
-TSVC = 'resource.service.name=~"$service"'
+SVC = 'service_name=~"$service",deployment_environment_name=~"$environment",host_name=~"$host"'
+TSVC = 'resource.service.name=~"$service" && resource.deployment.environment.name=~"$environment" && resource.host.name=~"$host"'
 
 _id = 0
 
@@ -206,7 +206,7 @@ def text(title, content, x, y, w=24, h=3):
 def qvar(name, metric, label):
     return {"name": name, "type": "query", "datasource": PROM,
             "query": {"query": f"label_values({metric}, {label})", "refId": name},
-            "includeAll": True, "allValue": ".*", "multi": False, "refresh": 2,
+            "includeAll": True, "allValue": ".+", "multi": False, "refresh": 2,
             "current": {"text": "All", "value": "$__all"}}
 
 
@@ -230,7 +230,11 @@ def dashboard(uid, title, panels, variables=None):
             "expr": '{service_name=~"$service"} |= `app.deployment`',
             "titleFormat": "Deploy",
         }]},
-        "templating": {"list": [qvar("service", f"{REQ}_count", "service_name"), *(variables or [])]},
+        "templating": {"list": [
+            qvar("service", f"{REQ}_count", "service_name"),
+            qvar("environment", f"{REQ}_count", "deployment_environment_name"),
+            qvar("host", f"{REQ}_count", "host_name"),
+            *(variables or [])]},
         # The Nightwatch nav: every telemetry-tagged dashboard as a tab.
         "links": [{"type": "dashboards", "tags": ["telemetry"], "asDropdown": False,
                    "includeVars": True, "keepTime": True, "title": ""}],
@@ -284,10 +288,15 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
     table("Jobs by p95 — click a job to drill down", f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{{{SVC}}}[10m]))) > 0', 12, 23, unit="ms",
           field_link=("job_name", LINK_JOB, "Open in Jobs"), gauge_max=5000),
     traces("Latest failing traces — requests, jobs and tasks", f'{{{TSVC} && status=error}}', 0, 31),
+    row("Fleet — environments & hosts", 40),
+    timeseries("Requests by environment", [target(f'sum by (deployment_environment_name) (rate({REQ}_count{{{SVC}}}[$__rate_interval])) * 60', '{{deployment_environment_name}}')], 0, 41, w=12, unit="reqpm", stacked=True,
+               description="Same service across prod/staging/… — filter with the $environment dropdown above."),
+    timeseries("Requests by host", [target(f'sum by (host_name) (rate({REQ}_count{{{SVC}}}[$__rate_interval])) * 60', '{{host_name}}')], 12, 41, w=12, unit="reqpm", stacked=True,
+               description="Per-host/pod breakdown of the otherwise-aggregated fleet. Filter with $host."),
 ])
 
 # ── 2 · Requests ─────────────────────────────────────────────────────
-RF = f'{SVC},http_route=~"$route",http_request_method=~"$method",http_response_status_code=~"$status",server_address=~"$host"'
+RF = f'{SVC},http_route=~"$route",http_request_method=~"$method",http_response_status_code=~"$status",server_address=~"$domain"'
 D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     stat("Requests / min", f'sum(rate({REQ}_count{{{RF}}}[5m])) * 60', 0, 0, unit="reqpm", decimals=0),
     stat("p50", f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 4, 0, unit="ms"),
@@ -317,10 +326,10 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
            '{trace:id = "$traceid"}', 0, 32, h=5,
            description="The id a user quotes from the error page (or the X-Trace-Id response header / the Sentry trace_id tag) resolves straight to its waterfall here."),
     traces("Request traces — click for the waterfall (per-span CPU/memory in attributes)",
-           f'{{{TSVC} && kind=server && name=~"$method $route" && span.server.address=~"$host" && duration>${{minms}}ms}}', 0, 37),
+           f'{{{TSVC} && kind=server && name=~"$method $route" && span.server.address=~"$domain" && duration>${{minms}}ms}}', 0, 37),
     traces("Failing requests", f'{{{TSVC} && kind=server && status=error}}', 0, 46),
     logs("Correlated logs — trace_id links to Tempo", '{service_name=~"$service"}', 0, 55),
-], variables=[qvar("host", f"{REQ}_count", "server_address"), qvar("route", f"{REQ}_count", "http_route"),
+], variables=[qvar("domain", f"{REQ}_count", "server_address"), qvar("route", f"{REQ}_count", "http_route"),
               qvar("method", f"{REQ}_count", "http_request_method"), qvar("status", f"{REQ}_count", "http_response_status_code"),
               textvar("minms", "0", "min duration (ms)"), textvar("traceid", "", "trace id")])
 

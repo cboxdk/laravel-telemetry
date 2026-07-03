@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -96,7 +136,7 @@
       "targets": [
         {
           "refId": "Q3",
-          "expr": "sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\"}[5m])) * 60",
+          "expr": "sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -149,7 +189,7 @@
       "targets": [
         {
           "refId": "Q5",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -210,7 +250,7 @@
       "targets": [
         {
           "refId": "Q7",
-          "expr": "100 * sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\"}[5m]))",
+          "expr": "100 * sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -271,7 +311,7 @@
       "targets": [
         {
           "refId": "Q9",
-          "expr": "(sum(increase(exceptions_reported_total{service_name=~\"$service\"}[1h]))) or vector(0)",
+          "expr": "(sum(increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -328,7 +368,7 @@
       "targets": [
         {
           "refId": "Q11",
-          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\"}[5m])) * 60",
+          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -381,7 +421,7 @@
       "targets": [
         {
           "refId": "Q13",
-          "expr": "(sum(increase(queue_jobs_failed_total{service_name=~\"$service\"}[5m]))) or vector(0)",
+          "expr": "(sum(increase(queue_jobs_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -438,7 +478,7 @@
       "targets": [
         {
           "refId": "Q15",
-          "expr": "(sum(increase(schedule_tasks_failed_total{service_name=~\"$service\"}[1h]))) or vector(0)",
+          "expr": "(sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -556,7 +596,7 @@
       "targets": [
         {
           "refId": "Q18",
-          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",
@@ -673,7 +713,7 @@
       "targets": [
         {
           "refId": "Q20",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -682,7 +722,7 @@
         },
         {
           "refId": "Q21",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "datasource": {
             "type": "prometheus",
@@ -691,7 +731,7 @@
         },
         {
           "refId": "Q22",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "datasource": {
             "type": "prometheus",
@@ -822,7 +862,7 @@
       "targets": [
         {
           "refId": "Q25",
-          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "expr": "sum(rate(queue_jobs_processed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "processed",
           "datasource": {
             "type": "prometheus",
@@ -831,7 +871,7 @@
         },
         {
           "refId": "Q26",
-          "expr": "sum(rate(queue_jobs_released_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "expr": "sum(rate(queue_jobs_released_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "released",
           "datasource": {
             "type": "prometheus",
@@ -840,7 +880,7 @@
         },
         {
           "refId": "Q27",
-          "expr": "sum(rate(queue_jobs_failed_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "expr": "sum(rate(queue_jobs_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "failed",
           "datasource": {
             "type": "prometheus",
@@ -1032,7 +1072,7 @@
       "targets": [
         {
           "refId": "Q29",
-          "expr": "topk(5, sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\"}[$__rate_interval])))",
+          "expr": "topk(5, sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{exception}}",
           "datasource": {
             "type": "prometheus",
@@ -1088,7 +1128,7 @@
       "targets": [
         {
           "refId": "Q31",
-          "expr": "sum(increase(schedule_tasks_processed_total{service_name=~\"$service\"}[1h]))",
+          "expr": "sum(increase(schedule_tasks_processed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "processed",
           "datasource": {
             "type": "prometheus",
@@ -1097,7 +1137,7 @@
         },
         {
           "refId": "Q32",
-          "expr": "sum(increase(schedule_tasks_failed_total{service_name=~\"$service\"}[1h]))",
+          "expr": "sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "failed",
           "datasource": {
             "type": "prometheus",
@@ -1106,7 +1146,7 @@
         },
         {
           "refId": "Q33",
-          "expr": "sum(increase(schedule_tasks_skipped_total{service_name=~\"$service\"}[1h]))",
+          "expr": "sum(increase(schedule_tasks_skipped_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "skipped",
           "datasource": {
             "type": "prometheus",
@@ -1311,7 +1351,7 @@
       "targets": [
         {
           "refId": "Q37",
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\"}[10m]))) > 0",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[10m]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -1447,7 +1487,7 @@
       "targets": [
         {
           "refId": "Q39",
-          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\"}[10m]))) > 0",
+          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[10m]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -1588,7 +1628,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -1605,6 +1645,133 @@
       "options": {
         "cellHeight": "sm"
       }
+    },
+    {
+      "id": 41,
+      "type": "row",
+      "title": "Fleet \u2014 environments & hosts",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": []
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Requests by environment",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "targets": [
+        {
+          "refId": "Q42",
+          "expr": "sum by (deployment_environment_name) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{deployment_environment_name}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Same service across prod/staging/\u2026 \u2014 filter with the $environment dropdown above."
+    },
+    {
+      "id": 45,
+      "type": "timeseries",
+      "title": "Requests by host",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "targets": [
+        {
+          "refId": "Q44",
+          "expr": "sum by (host_name) (rate(http_server_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{host_name}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "Per-host/pod breakdown of the otherwise-aggregated fleet. Filter with $host."
     }
   ],
   "editable": true

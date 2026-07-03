@@ -67,3 +67,23 @@ it('escapes label values', function () {
 it('renders nothing for an empty family list', function () {
     expect((new PrometheusRenderer)->render([]))->toBe('');
 });
+
+it('stamps resource identity labels on every scraped series', function () {
+    $renderer = new PrometheusRenderer;
+
+    $family = new MetricFamily(
+        new MetricDefinition('http.server.requests', MetricType::Counter, 'reqs', ''),
+        [new Sample(['http_route' => '/x'], 5.0)],
+    );
+
+    $out = $renderer->render([$family], [
+        'service_name' => 'demo-web',
+        'deployment_environment_name' => 'production',
+        'host_name' => 'web-01',
+    ]);
+
+    expect($out)->toContain('service_name="demo-web"')
+        ->and($out)->toContain('deployment_environment_name="production"')
+        ->and($out)->toContain('host_name="web-01"')
+        ->and($out)->toContain('http_route="/x"'); // original sample label preserved
+});

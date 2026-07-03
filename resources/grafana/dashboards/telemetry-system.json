@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -67,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 185,
+      "id": 190,
       "type": "stat",
       "title": "CPU",
       "datasource": {
@@ -82,8 +122,8 @@
       },
       "targets": [
         {
-          "refId": "Q186",
-          "expr": "system_cpu_utilization_ratio{service_name=~\"$service\"} * 100",
+          "refId": "Q191",
+          "expr": "system_cpu_utilization_ratio{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -128,7 +168,7 @@
       }
     },
     {
-      "id": 187,
+      "id": 192,
       "type": "stat",
       "title": "Memory",
       "datasource": {
@@ -143,7 +183,7 @@
       },
       "targets": [
         {
-          "refId": "Q188",
+          "refId": "Q193",
           "expr": "system_memory_utilization_ratio{state=\"used\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -189,7 +229,7 @@
       }
     },
     {
-      "id": 189,
+      "id": 194,
       "type": "stat",
       "title": "Load 1m",
       "datasource": {
@@ -204,7 +244,7 @@
       },
       "targets": [
         {
-          "refId": "Q190",
+          "refId": "Q195",
           "expr": "system_cpu_load_average_ratio{period=\"1m\"}",
           "legendFormat": "__auto",
           "datasource": {
@@ -242,7 +282,7 @@
       }
     },
     {
-      "id": 191,
+      "id": 196,
       "type": "stat",
       "title": "Disk used",
       "datasource": {
@@ -257,7 +297,7 @@
       },
       "targets": [
         {
-          "refId": "Q192",
+          "refId": "Q197",
           "expr": "system_filesystem_usage_bytes{state=\"used\"} / (system_filesystem_usage_bytes{state=\"used\"} + system_filesystem_usage_bytes{state=\"free\"}) * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -303,7 +343,7 @@
       }
     },
     {
-      "id": 193,
+      "id": 198,
       "type": "row",
       "title": "Host",
       "collapsed": false,
@@ -316,7 +356,7 @@
       "panels": []
     },
     {
-      "id": 195,
+      "id": 200,
       "type": "timeseries",
       "title": "Memory by state",
       "datasource": {
@@ -331,7 +371,7 @@
       },
       "targets": [
         {
-          "refId": "Q194",
+          "refId": "Q199",
           "expr": "system_memory_usage_bytes",
           "legendFormat": "{{state}}",
           "datasource": {
@@ -418,7 +458,7 @@
       }
     },
     {
-      "id": 197,
+      "id": 202,
       "type": "timeseries",
       "title": "Load averages",
       "datasource": {
@@ -433,7 +473,7 @@
       },
       "targets": [
         {
-          "refId": "Q196",
+          "refId": "Q201",
           "expr": "system_cpu_load_average_ratio",
           "legendFormat": "{{period}}",
           "datasource": {
@@ -474,7 +514,7 @@
       }
     },
     {
-      "id": 199,
+      "id": 204,
       "type": "timeseries",
       "title": "Network I/O rate",
       "datasource": {
@@ -489,7 +529,7 @@
       },
       "targets": [
         {
-          "refId": "Q198",
+          "refId": "Q203",
           "expr": "rate(system_network_io_bytes[$__rate_interval])",
           "legendFormat": "{{direction}}",
           "datasource": {
@@ -530,7 +570,7 @@
       }
     },
     {
-      "id": 201,
+      "id": 206,
       "type": "timeseries",
       "title": "Monitored process groups",
       "datasource": {
@@ -545,7 +585,7 @@
       },
       "targets": [
         {
-          "refId": "Q200",
+          "refId": "Q205",
           "expr": "process_memory_rss_bytes",
           "legendFormat": "{{process}}",
           "datasource": {
@@ -587,7 +627,7 @@
       "description": "telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."
     },
     {
-      "id": 202,
+      "id": 207,
       "type": "row",
       "title": "Workers",
       "collapsed": false,
@@ -600,7 +640,7 @@
       "panels": []
     },
     {
-      "id": 204,
+      "id": 209,
       "type": "timeseries",
       "title": "Worker leak curves \u2014 one line per worker process",
       "datasource": {
@@ -615,8 +655,8 @@
       },
       "targets": [
         {
-          "refId": "Q203",
-          "expr": "worker_memory_rss_bytes{service_name=~\"$service\"}",
+          "refId": "Q208",
+          "expr": "worker_memory_rss_bytes{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}",
           "legendFormat": "pid {{pid}}",
           "datasource": {
             "type": "prometheus",
@@ -656,7 +696,7 @@
       }
     },
     {
-      "id": 205,
+      "id": 210,
       "type": "row",
       "title": "Telemetry health (self-observability)",
       "collapsed": false,
@@ -669,7 +709,7 @@
       "panels": []
     },
     {
-      "id": 207,
+      "id": 212,
       "type": "timeseries",
       "title": "Export outcomes / min",
       "datasource": {
@@ -684,8 +724,8 @@
       },
       "targets": [
         {
-          "refId": "Q206",
-          "expr": "sum by (outcome) (rate(telemetry_export_count_total{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "refId": "Q211",
+          "expr": "sum by (outcome) (rate(telemetry_export_count_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -802,7 +842,7 @@
       "description": "The package reporting on itself. Sustained retryable/failed means the backend is unreachable."
     },
     {
-      "id": 209,
+      "id": 214,
       "type": "timeseries",
       "title": "Export p95 duration",
       "datasource": {
@@ -817,8 +857,8 @@
       },
       "targets": [
         {
-          "refId": "Q208",
-          "expr": "histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
+          "refId": "Q213",
+          "expr": "histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{signal}}",
           "datasource": {
             "type": "prometheus",
@@ -858,7 +898,7 @@
       }
     },
     {
-      "id": 210,
+      "id": 215,
       "type": "stat",
       "title": "Circuit breaker",
       "datasource": {
@@ -873,8 +913,8 @@
       },
       "targets": [
         {
-          "refId": "Q211",
-          "expr": "max(telemetry_export_circuit_open_ratio{service_name=~\"$service\"}) or vector(0)",
+          "refId": "Q216",
+          "expr": "max(telemetry_export_circuit_open_ratio{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -916,7 +956,7 @@
       "description": "1 = OTLP circuit open (recent transport failure). Alert on sustained 1."
     },
     {
-      "id": 212,
+      "id": 217,
       "type": "stat",
       "title": "Spool depth",
       "datasource": {
@@ -931,8 +971,8 @@
       },
       "targets": [
         {
-          "refId": "Q213",
-          "expr": "max(telemetry_spool_depth{service_name=~\"$service\"}) or vector(0)",
+          "refId": "Q218",
+          "expr": "max(telemetry_spool_depth{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",

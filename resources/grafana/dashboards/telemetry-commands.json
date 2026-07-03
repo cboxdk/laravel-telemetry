@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -63,7 +103,7 @@
           "refId": "command"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -87,7 +127,7 @@
   ],
   "panels": [
     {
-      "id": 103,
+      "id": 108,
       "type": "stat",
       "title": "Runs / h",
       "datasource": {
@@ -102,8 +142,8 @@
       },
       "targets": [
         {
-          "refId": "Q104",
-          "expr": "sum(increase(commands_completed_total{service_name=~\"$service\",command=~\"$command\"}[1h])) + sum(increase(commands_failed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))",
+          "refId": "Q109",
+          "expr": "sum(increase(commands_completed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) + sum(increase(commands_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -140,7 +180,7 @@
       }
     },
     {
-      "id": 105,
+      "id": 110,
       "type": "stat",
       "title": "Failed / h",
       "datasource": {
@@ -155,8 +195,8 @@
       },
       "targets": [
         {
-          "refId": "Q106",
-          "expr": "(sum(increase(commands_failed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))) or vector(0)",
+          "refId": "Q111",
+          "expr": "(sum(increase(commands_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -197,7 +237,7 @@
       }
     },
     {
-      "id": 107,
+      "id": 112,
       "type": "stat",
       "title": "avg duration",
       "datasource": {
@@ -212,8 +252,8 @@
       },
       "targets": [
         {
-          "refId": "Q108",
-          "expr": "sum(rate(command_duration_milliseconds_sum{service_name=~\"$service\",command=~\"$command\"}[1h])) / sum(rate(command_duration_milliseconds_count{service_name=~\"$service\",command=~\"$command\"}[1h]))",
+          "refId": "Q113",
+          "expr": "sum(rate(command_duration_milliseconds_sum{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) / sum(rate(command_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -250,7 +290,7 @@
       }
     },
     {
-      "id": 109,
+      "id": 114,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -265,8 +305,8 @@
       },
       "targets": [
         {
-          "refId": "Q110",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",command=~\"$command\"}[1h])))",
+          "refId": "Q115",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -303,7 +343,7 @@
       }
     },
     {
-      "id": 111,
+      "id": 116,
       "type": "table",
       "title": "Runs by command (1h)",
       "datasource": {
@@ -318,8 +358,8 @@
       },
       "targets": [
         {
-          "refId": "Q112",
-          "expr": "sum by (command) (increase(commands_completed_total{service_name=~\"$service\",command=~\"$command\"}[1h]))",
+          "refId": "Q117",
+          "expr": "sum by (command) (increase(commands_completed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -365,7 +405,7 @@
       }
     },
     {
-      "id": 113,
+      "id": 118,
       "type": "table",
       "title": "p95 by command",
       "datasource": {
@@ -380,8 +420,8 @@
       },
       "targets": [
         {
-          "refId": "Q114",
-          "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",command=~\"$command\"}[1h]))) > 0",
+          "refId": "Q119",
+          "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -471,7 +511,7 @@
       }
     },
     {
-      "id": 115,
+      "id": 120,
       "type": "table",
       "title": "Command traces",
       "datasource": {
@@ -492,7 +532,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=~\"artisan .*\"}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=~\"artisan .*\"}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -511,7 +551,7 @@
       }
     },
     {
-      "id": 116,
+      "id": 121,
       "type": "text",
       "title": "Enable",
       "gridPos": {

@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -111,7 +151,7 @@
   ],
   "panels": [
     {
-      "id": 214,
+      "id": 219,
       "type": "table",
       "title": "Requests for user $user ($usertype)",
       "datasource": {
@@ -132,7 +172,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\"} | select(span.enduser.type, span.enduser.guard)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\"} | select(span.enduser.type, span.enduser.guard)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -151,7 +191,7 @@
       }
     },
     {
-      "id": 215,
+      "id": 220,
       "type": "table",
       "title": "Errors hit by user $user ($usertype)",
       "datasource": {
@@ -172,7 +212,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -191,7 +231,7 @@
       }
     },
     {
-      "id": 216,
+      "id": 221,
       "type": "table",
       "title": "Session journey \u2014 every request in visit $sessionhash",
       "datasource": {
@@ -212,7 +252,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.session.hash=~\"$sessionhash\"} | select(span.enduser.id, span.session.hash)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.session.hash=~\"$sessionhash\"} | select(span.enduser.id, span.session.hash)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -232,7 +272,7 @@
       "description": "session.hash from any request span follows the visitor across requests \u2014 the anonymous-user story enduser.id can't tell."
     },
     {
-      "id": 217,
+      "id": 222,
       "type": "table",
       "title": "Memory hogs (> $minmb MB)",
       "datasource": {
@@ -253,7 +293,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.php.memory.peak_bytes > $minmb000000}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.php.memory.peak_bytes > $minmb000000}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -272,7 +312,7 @@
       }
     },
     {
-      "id": 218,
+      "id": 223,
       "type": "text",
       "title": "Tip",
       "gridPos": {

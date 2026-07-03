@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -63,7 +103,7 @@
           "refId": "task"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -87,7 +127,7 @@
   ],
   "panels": [
     {
-      "id": 117,
+      "id": 122,
       "type": "stat",
       "title": "Processed / h",
       "datasource": {
@@ -102,8 +142,8 @@
       },
       "targets": [
         {
-          "refId": "Q118",
-          "expr": "sum(increase(schedule_tasks_processed_total{service_name=~\"$service\",task=~\"$task\"}[1h]))",
+          "refId": "Q123",
+          "expr": "sum(increase(schedule_tasks_processed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -140,7 +180,7 @@
       }
     },
     {
-      "id": 119,
+      "id": 124,
       "type": "stat",
       "title": "Failed / h",
       "datasource": {
@@ -155,8 +195,8 @@
       },
       "targets": [
         {
-          "refId": "Q120",
-          "expr": "(sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",task=~\"$task\"}[1h]))) or vector(0)",
+          "refId": "Q125",
+          "expr": "(sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -197,7 +237,7 @@
       }
     },
     {
-      "id": 121,
+      "id": 126,
       "type": "stat",
       "title": "Skipped / h",
       "datasource": {
@@ -212,8 +252,8 @@
       },
       "targets": [
         {
-          "refId": "Q122",
-          "expr": "(sum(increase(schedule_tasks_skipped_total{service_name=~\"$service\",task=~\"$task\"}[1h]))) or vector(0)",
+          "refId": "Q127",
+          "expr": "(sum(increase(schedule_tasks_skipped_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -255,7 +295,7 @@
       "description": "Skips from filters or withoutOverlapping locks \u2014 the outcome most monitoring misses."
     },
     {
-      "id": 123,
+      "id": 128,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -270,8 +310,8 @@
       },
       "targets": [
         {
-          "refId": "Q124",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",task=~\"$task\"}[1h])))",
+          "refId": "Q129",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -308,7 +348,7 @@
       }
     },
     {
-      "id": 128,
+      "id": 133,
       "type": "timeseries",
       "title": "Outcomes by task",
       "datasource": {
@@ -323,8 +363,8 @@
       },
       "targets": [
         {
-          "refId": "Q125",
-          "expr": "sum by (task) (increase(schedule_tasks_processed_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
+          "refId": "Q130",
+          "expr": "sum by (task) (increase(schedule_tasks_processed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "ok {{task}}",
           "datasource": {
             "type": "prometheus",
@@ -332,8 +372,8 @@
           }
         },
         {
-          "refId": "Q126",
-          "expr": "sum by (task) (increase(schedule_tasks_failed_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
+          "refId": "Q131",
+          "expr": "sum by (task) (increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "fail {{task}}",
           "datasource": {
             "type": "prometheus",
@@ -341,8 +381,8 @@
           }
         },
         {
-          "refId": "Q127",
-          "expr": "sum by (task) (increase(schedule_tasks_skipped_total{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval]))",
+          "refId": "Q132",
+          "expr": "sum by (task) (increase(schedule_tasks_skipped_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[$__rate_interval]))",
           "legendFormat": "skip {{task}}",
           "datasource": {
             "type": "prometheus",
@@ -428,7 +468,7 @@
       }
     },
     {
-      "id": 130,
+      "id": 135,
       "type": "timeseries",
       "title": "p95 duration by task",
       "datasource": {
@@ -443,8 +483,8 @@
       },
       "targets": [
         {
-          "refId": "Q129",
-          "expr": "histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",task=~\"$task\"}[$__rate_interval])))",
+          "refId": "Q134",
+          "expr": "histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}[$__rate_interval])))",
           "legendFormat": "{{task}}",
           "datasource": {
             "type": "prometheus",
@@ -484,7 +524,7 @@
       }
     },
     {
-      "id": 131,
+      "id": 136,
       "type": "table",
       "title": "Task runs",
       "datasource": {
@@ -505,7 +545,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=~\"schedule .*\"}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=~\"schedule .*\"}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -524,7 +564,7 @@
       }
     },
     {
-      "id": 132,
+      "id": 137,
       "type": "table",
       "title": "Failed task runs",
       "datasource": {
@@ -545,7 +585,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=~\"schedule .*\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=~\"schedule .*\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"

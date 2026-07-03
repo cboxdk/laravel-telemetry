@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -67,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 163,
+      "id": 168,
       "type": "stat",
       "title": "Requests / min",
       "datasource": {
@@ -82,8 +122,8 @@
       },
       "targets": [
         {
-          "refId": "Q164",
-          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\"}[5m])) * 60",
+          "refId": "Q169",
+          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -120,7 +160,7 @@
       }
     },
     {
-      "id": 165,
+      "id": 170,
       "type": "stat",
       "title": "p95 latency",
       "datasource": {
@@ -135,8 +175,8 @@
       },
       "targets": [
         {
-          "refId": "Q166",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\"}[5m])))",
+          "refId": "Q171",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -177,7 +217,7 @@
       }
     },
     {
-      "id": 167,
+      "id": 172,
       "type": "stat",
       "title": "4xx+5xx / min",
       "datasource": {
@@ -192,8 +232,8 @@
       },
       "targets": [
         {
-          "refId": "Q168",
-          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",http_response_status_code=~\"[45]..\"}[5m])) * 60",
+          "refId": "Q173",
+          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"[45]..\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -234,7 +274,7 @@
       }
     },
     {
-      "id": 169,
+      "id": 174,
       "type": "stat",
       "title": "Connection failures / h",
       "datasource": {
@@ -249,8 +289,8 @@
       },
       "targets": [
         {
-          "refId": "Q170",
-          "expr": "(sum(increase(http_client_connection_failures_total{service_name=~\"$service\"}[1h]))) or vector(0)",
+          "refId": "Q175",
+          "expr": "(sum(increase(http_client_connection_failures_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -291,7 +331,7 @@
       }
     },
     {
-      "id": 172,
+      "id": 177,
       "type": "timeseries",
       "title": "p95 by host",
       "datasource": {
@@ -306,8 +346,8 @@
       },
       "targets": [
         {
-          "refId": "Q171",
-          "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\"}[$__rate_interval])))",
+          "refId": "Q176",
+          "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{server_address}}",
           "datasource": {
             "type": "prometheus",
@@ -347,7 +387,7 @@
       }
     },
     {
-      "id": 174,
+      "id": 179,
       "type": "timeseries",
       "title": "Rate by host & status",
       "datasource": {
@@ -362,8 +402,8 @@
       },
       "targets": [
         {
-          "refId": "Q173",
-          "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\"}[$__rate_interval])) * 60",
+          "refId": "Q178",
+          "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{server_address}} {{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",
@@ -403,7 +443,7 @@
       }
     },
     {
-      "id": 175,
+      "id": 180,
       "type": "table",
       "title": "Outgoing call spans",
       "datasource": {
@@ -424,7 +464,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=client && span.server.address != \"\"} | select(span.server.address, span.url.path, span.http.response.status_code)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=client && span.server.address != \"\"} | select(span.server.address, span.url.path, span.http.response.status_code)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"

@@ -43,7 +43,47 @@
           "refId": "service"
         },
         "includeAll": true,
-        "allValue": ".*",
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "refId": "environment"
+        },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": false,
+        "refresh": 2,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "refId": "host"
+        },
+        "includeAll": true,
+        "allValue": ".+",
         "multi": false,
         "refresh": 2,
         "current": {
@@ -89,7 +129,7 @@
   ],
   "panels": [
     {
-      "id": 146,
+      "id": 151,
       "type": "table",
       "title": "Slowest queries (> $minms ms) \u2014 SQL text on the span",
       "datasource": {
@@ -110,7 +150,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && name=\"db.query\" && duration>${minms}ms} | select(span.db.query.text, span.db.namespace)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=\"db.query\" && duration>${minms}ms} | select(span.db.query.text, span.db.namespace)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -129,7 +169,7 @@
       }
     },
     {
-      "id": 147,
+      "id": 152,
       "type": "table",
       "title": "N+1 suspects \u2014 requests running \u2265 $minqueries queries",
       "datasource": {
@@ -150,7 +190,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=server && span.db.query.count >= $minqueries} | select(span.db.query.count, span.db.query.time_ms)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.db.query.count >= $minqueries} | select(span.db.query.count, span.db.query.time_ms)",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -170,7 +210,7 @@
       "description": "db.query.count/time_ms tallies live on every root span."
     },
     {
-      "id": 148,
+      "id": 153,
       "type": "table",
       "title": "Query-heaviest jobs",
       "datasource": {
@@ -191,7 +231,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && kind=consumer && span.db.query.count >= $minqueries} | select(span.db.query.count, span.db.query.time_ms)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=consumer && span.db.query.count >= $minqueries} | select(span.db.query.count, span.db.query.time_ms)",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -210,7 +250,7 @@
       }
     },
     {
-      "id": 149,
+      "id": 154,
       "type": "text",
       "title": "Tip",
       "gridPos": {

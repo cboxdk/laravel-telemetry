@@ -18,13 +18,21 @@ use Cbox\Telemetry\Metrics\Sample;
  */
 final class PrometheusRenderer
 {
+    /** @var array<string, string> resource identity labels stamped on every series */
+    private array $resourceLabels = [];
+
     public const MIME_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 
     /**
      * @param  list<MetricFamily>  $families
      */
-    public function render(array $families): string
+    /**
+     * @param  list<MetricFamily>  $families
+     * @param  array<string, string>  $resourceLabels  service_name/host_name/… stamped on every series so a single Prometheus scraping many apps can tell them apart
+     */
+    public function render(array $families, array $resourceLabels = []): string
     {
+        $this->resourceLabels = $resourceLabels;
         $output = [];
 
         foreach ($this->deduplicate($families) as $family) {
@@ -124,7 +132,7 @@ final class PrometheusRenderer
      */
     private function renderLabels(array $labels, array $extra = []): string
     {
-        $all = [...$labels, ...$extra];
+        $all = [...$this->resourceLabels, ...$labels, ...$extra];
 
         if ($all === []) {
             return '';

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Logs dashboards returned HTTP 400 — Loki rejects a stream selector that
+  can match empty (`{service_name=~".*"}`). Template variables now use
+  `.+` for their "All" value (valid in both Loki and Prometheus).
+
+### Added
+
+- Dashboard filters for **environment** and **host** across the whole
+  suite: `$environment` (`deployment_environment_name`) separates the same
+  service across prod/staging/…, and `$host` (`host_name`) breaks down the
+  otherwise-aggregated fleet. Both thread through every metric and trace
+  query; the overview gains a "Fleet" row (requests by environment, by
+  host). The Requests dashboard's domain filter was renamed `$host` →
+  `$domain` to free up `$host` for the machine/pod.
+- The Prometheus scrape endpoint now stamps the resource identity
+  (`service_name`, `service_namespace`, `deployment_environment_name`,
+  `host_name`) onto every series — so a single Prometheus scraping many
+  apps (or many hosts) can tell them apart, matching what OTLP push
+  carries. Churny attrs (deploy id, version) are left off.
+
 ## [0.1.0-alpha.2] - 2026-07-03
 
 Env-var naming standardization and first-class OTLP auth. Breaking vs
