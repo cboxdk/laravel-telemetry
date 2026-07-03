@@ -15,11 +15,17 @@ use Illuminate\Contracts\View\Engine;
  * ALWAYS proceeds — telemetry failures around it are swallowed, and
  * unknown method calls (getCompiler(), …) forward to the real engine so
  * packages that poke at engine internals keep working.
+ *
+ * The wrapped engine is deliberately named `$engine`: Laravel's blade error
+ * renderer (BladeMapper::getKnownPaths) is decorator-aware and reflects a
+ * wrapped engine's `lastCompiled` through a property named exactly `engine`.
+ * Rename it and rendering any view exception fatals with "Property
+ * TracingEngine::$lastCompiled does not exist".
  */
 final class TracingEngine implements Engine
 {
     public function __construct(
-        private readonly Engine $inner,
+        private readonly Engine $engine,
         private readonly Container $container,
     ) {}
 
@@ -49,7 +55,7 @@ final class TracingEngine implements Engine
         });
 
         try {
-            return $this->inner->get($path, $data);
+            return $this->engine->get($path, $data);
         } finally {
             FailSafe::guard(fn () => $span?->end());
         }
@@ -114,6 +120,6 @@ final class TracingEngine implements Engine
      */
     public function __call(string $method, array $arguments): mixed
     {
-        return $this->inner->{$method}(...$arguments);
+        return $this->engine->{$method}(...$arguments);
     }
 }

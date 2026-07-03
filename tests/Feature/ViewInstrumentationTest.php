@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\TracingEngine;
 use Cbox\Telemetry\Instrumentation\ViewInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Support\Facades\Route;
@@ -72,4 +73,27 @@ it('still renders when telemetry is a no-op', function () {
     config()->set('telemetry.enabled', false);
 
     expect(view('page', ['title' => 'Plain'])->render())->toContain('Plain');
+});
+
+it('exposes the wrapped engine so the blade error renderer can read lastCompiled', function () {
+    (new ViewInstrumentation)->register(app());
+
+    $engine = app('view')->getEngineResolver()->resolve('blade');
+
+    expect($engine)->toBeInstanceOf(TracingEngine::class);
+
+    // Reproduces Illuminate\Foundation\Exceptions\Renderer\Mappers\BladeMapper
+    // ::getKnownPaths(): a wrapped engine without its own lastCompiled must
+    // expose the inner engine through a property named exactly "engine", or
+    // rendering any view exception fatals with "Property
+    // TracingEngine::$lastCompiled does not exist".
+    $reflection = new ReflectionClass($engine);
+
+    expect($reflection->hasProperty('lastCompiled'))->toBeFalse()
+        ->and($reflection->hasProperty('engine'))->toBeTrue();
+
+    $inner = (new ReflectionProperty($engine, 'engine'))->getValue($engine);
+
+    expect(new ReflectionProperty($inner, 'lastCompiled'))
+        ->getValue($inner)->toBeArray();
 });
