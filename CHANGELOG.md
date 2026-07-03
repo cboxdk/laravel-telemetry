@@ -1,12 +1,20 @@
 # Changelog
 
-All notable changes to `cboxdk/laravel-telemetry` are documented here.
+All notable changes to `cboxdk/laravel-telemetry` will be documented in this file.
 
-## Unreleased
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Initial release.
+## [Unreleased]
 
-### Hardening (pre-alpha self-review)
+## [0.1.0-alpha.1] - 2026-07-03
+
+First public release. **Alpha** — the public API may still change before the
+1.0 stability guarantee. Everything below is new in this release.
+
+### Added
+
+#### Reliability & correctness
 
 - **Octane**: the gate/policy hook was bound once to the boot-time Gate
   instance, which Octane flushes per request — so `authorization.checks`
@@ -32,7 +40,7 @@ Initial release.
   the telemetry store/spool connections instead of replacing them, so
   the self-instrumentation guarantee holds.
 
-### Performance
+#### Performance
 
 - Octane hardening (Swoole/RoadRunner/FrankenPHP): half-open
   instrumentation state (in-flight HTTP calls, open transactions,
@@ -52,7 +60,7 @@ Initial release.
   cost one store command, histogram observations flush as pre-aggregated
   buckets. `MetricStore` gained `mergeHistogram()` for this.
 
-### Observability UX
+#### Observability UX
 
 - Resource detection (`resource_detection`, default on): every signal
   now carries where it ran — `container.id`/`container.runtime` from
@@ -218,7 +226,7 @@ Initial release.
   Prometheus) — a bare `job` label collides with Prometheus' reserved
   scrape-job label and was silently overwritten by collectors.
 
-### Hardening (post-review)
+#### Foundations & hardening
 
 - Redis store: steady-state writes are now a single atomic command
   (Redis Cluster-safe, ~5x fewer round trips); metadata refreshes per
@@ -265,3 +273,6 @@ Initial release.
   `llms.txt` documentation index, an `AGENTS.md`/`CLAUDE.md` agent guide
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
+
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.1...HEAD
+[0.1.0-alpha.1]: https://github.com/cboxdk/laravel-telemetry/releases/tag/v0.1.0-alpha.1
