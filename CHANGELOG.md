@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-07-04
+
+Drop-in backend error tracking — structured, fingerprinted exception
+records (the raw data for an issues view).
+
 ### Added
 
 - **Structured exception records** for drop-in backend error tracking.
@@ -360,7 +365,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/cboxdk/laravel-telemetry/releases/tag/v0.1.0-alpha.1
