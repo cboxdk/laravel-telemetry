@@ -51,7 +51,9 @@ started while another is active becomes its child.
 
 Request root spans are named `METHOD /route/{pattern}` by default.
 Behind catch-all routes, name them yourself with
-`Telemetry::nameRequestsUsing()` — and add attributes at terminate with
+`Telemetry::nameRequestsUsing()`, override the useless `http.route` label
+with `resolveRouteUsing()` (so route tables and histograms group by the
+logical route), and add attributes at terminate with
 `enrichRequestsUsing()`; see [Runtime hooks](../extension-points/hooks.md).
 An explicit `updateName()` during the request always survives terminate.
 

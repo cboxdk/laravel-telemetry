@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array<string, scalar|null> contextAttributes()
  * @method static void labelRequestsUsing(\Closure|null $resolver)
  * @method static void nameRequestsUsing(\Closure|null $resolver)
+ * @method static void resolveRouteUsing(\Closure|null $resolver)
  * @method static void enrichRequestsUsing(\Closure|null $resolver)
  * @method static void classifyCacheKeysUsing(\Closure|null $classifier)
  * @method static void resolveUserUsing(\Closure|null $resolver)

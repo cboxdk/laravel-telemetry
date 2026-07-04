@@ -56,6 +56,8 @@ class TelemetryManager
 
     private ?Closure $requestNameResolver = null;
 
+    private ?Closure $routeResolver = null;
+
     private ?Closure $requestEnricher = null;
 
     private ?Closure $cacheKeyClassifier = null;
@@ -334,6 +336,48 @@ class TelemetryManager
         $name = FailSafe::guard(fn () => ($this->requestNameResolver)($request, $response));
 
         return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /**
+     * Supply the logical route identity for catch-all frameworks — a
+     * CMS's single "/{segments?}" names every page the same. The return
+     * value replaces the `http.route` span attribute AND metric label, so
+     * the whole ecosystem — dashboards, route tables, TraceQL — groups by
+     * the logical route, not the useless catch-all template. The literal
+     * Laravel route template is preserved as the `http.route.template`
+     * attribute.
+     *
+     * MUST be bounded: `http.route` is a metric label, so return a value
+     * from a fixed, small set (a content type, a collection), never an id
+     * or slug. Return null to keep the literal route template. This is the
+     * route counterpart to nameRequestsUsing (which shapes the span name);
+     * an instrumentation for a catch-all framework typically sets both.
+     *
+     *     Telemetry::resolveRouteUsing(function ($request, $response) {
+     *         $entry = $request->attributes->get('statamic.entry');
+     *
+     *         return $entry ? 'entry:'.$entry->collectionHandle() : null;
+     *     });
+     *
+     * @param  (Closure(mixed, mixed): ?string)|null  $resolver
+     */
+    public function resolveRouteUsing(?Closure $resolver): void
+    {
+        $this->routeResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     */
+    public function resolveRoute(mixed $request, mixed $response): ?string
+    {
+        if ($this->routeResolver === null) {
+            return null;
+        }
+
+        $route = FailSafe::guard(fn () => ($this->routeResolver)($request, $response));
+
+        return is_string($route) && $route !== '' ? $route : null;
     }
 
     /**

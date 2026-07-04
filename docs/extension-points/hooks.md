@@ -27,8 +27,35 @@ Telemetry::nameRequestsUsing(function ($request, $response) {
 
 Keep names **bounded** — collections and types, never ids or slugs.
 Precedence: an explicit `updateName()` on the span during the request
-always wins; then this resolver; then the default `METHOD /route/{pattern}`.
-`http.route` keeps the raw route pattern regardless.
+always wins; then this resolver; then the default `METHOD <route>`.
+
+`nameRequestsUsing` shapes only the span *name*. To also fix the
+`http.route` metric label (so dashboards and route tables group by the
+logical route, not the catch-all), pair it with `resolveRouteUsing()`.
+
+## Logical route — `resolveRouteUsing()`
+
+For a catch-all framework the literal route template is useless — a CMS's
+single `/{segments?}` is the `http.route` on every page, so every route
+table and latency histogram collapses into one bucket. This hook supplies
+the **logical route**, which replaces `http.route` on both the span
+attribute *and* the metric label. Everything downstream — the UI route
+table, Grafana, TraceQL — then groups by it:
+
+```php
+Telemetry::resolveRouteUsing(function ($request, $response) {
+    $entry = $request->attributes->get('resolved.entry');
+
+    return $entry ? 'entry:'.$entry->collection : null; // null = keep the template
+});
+```
+
+The return value **MUST be bounded** — it is a metric label, so a fixed,
+small set (content types, collections), never an id or slug. When it
+overrides the template, the raw pattern is preserved as the
+`http.route.template` span attribute. This is the route counterpart to
+`nameRequestsUsing`; a catch-all instrumentation usually sets both (often
+to the same value — the name is `METHOD ` + route).
 
 ## Root-span enrichment — `enrichRequestsUsing()`
 
@@ -70,6 +97,7 @@ key stays on the span). Whole stores can be excluded with
 | Hook | Shapes | Signature |
 |---|---|---|
 | `nameRequestsUsing()` | root span name | `fn ($request, $response): ?string` |
+| `resolveRouteUsing()` | `http.route` (span + metric, bounded!) | `fn ($request, $response): ?string` |
 | `enrichRequestsUsing()` | root span attributes | `fn ($request, $response): array` |
 | `labelRequestsUsing()` | request metric labels (bounded!) | `fn ($request): array` |
 | `resolveUserUsing()` | user attribution | `fn ($user, ?string $guard): array` |

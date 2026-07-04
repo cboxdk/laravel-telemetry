@@ -268,6 +268,54 @@ it('lets the app name request spans behind catch-all routes', function () {
         ->and($span->attributes()['http.route'])->toBe('/{page}');
 });
 
+it('lets an instrumentation override the logical route behind a catch-all', function () {
+    Route::get('/{page}', fn (string $page) => 'cms')->where('page', '.*');
+
+    Telemetry::resolveRouteUsing(fn ($request, $response) => 'entry:blog');
+
+    $this->get('/some/deep/cms/page');
+
+    $span = requestSpans($this->collector)[0];
+
+    // http.route becomes the logical route; the literal template is kept.
+    expect($span->name)->toBe('GET entry:blog')
+        ->and($span->attributes()['http.route'])->toBe('entry:blog')
+        ->and($span->attributes()['http.route.template'])->toBe('/{page}');
+
+    // The metric label follows — so route tables group by the logical route.
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+    $sample = $families['http.server.request.duration']->samples[0];
+
+    expect($sample->labels['http.route'])->toBe('entry:blog');
+});
+
+it('keeps the route template when no route resolver returns a value', function () {
+    Route::get('/{page}', fn (string $page) => 'cms')->where('page', '.*');
+
+    Telemetry::resolveRouteUsing(fn ($request, $response) => null);
+
+    $this->get('/some/page');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.route'])->toBe('/{page}')
+        ->and($span->attributes())->not->toHaveKey('http.route.template');
+});
+
+it('lets nameRequestsUsing and resolveRouteUsing shape name and route independently', function () {
+    Route::get('/{page}', fn (string $page) => 'cms')->where('page', '.*');
+
+    Telemetry::nameRequestsUsing(fn () => 'GET Blog article');
+    Telemetry::resolveRouteUsing(fn () => 'entry:blog.article');
+
+    $this->get('/some/page');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->name)->toBe('GET Blog article')
+        ->and($span->attributes()['http.route'])->toBe('entry:blog.article');
+});
+
 it('never clobbers an explicitly renamed request span', function () {
     Route::get('/renaming', function () {
         Telemetry::currentSpan()->updateName('GET custom:name');

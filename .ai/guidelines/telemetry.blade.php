@@ -15,7 +15,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 
 - Set ambient facets once per request (middleware, after tenant/auth resolution): `Telemetry::context(['team.id' => $id, 'plan' => $plan])` — they flow to every span/event/log AND into dispatched jobs automatically. Never put unbounded ids in metric labels; context is for traces/events/logs.
 - For bounded metric dimensions (plan/tier/team) use `Telemetry::labelRequestsUsing(fn ($request) => ['plan' => ...])` — enables p95 per plan in PromQL. Bounded values only.
-- Behind catch-all routes, name root spans with `Telemetry::nameRequestsUsing(fn ($request, $response) => 'GET entry:blog')` (bounded names, never ids); add root-span attributes at terminate with `enrichRequestsUsing(fn ($request, $response) => [...])`.
+- Behind catch-all routes, name root spans with `Telemetry::nameRequestsUsing(fn ($request, $response) => 'GET entry:blog')` (bounded names, never ids), and override the useless `http.route` label with `resolveRouteUsing(fn ($request, $response) => 'entry:blog')` so route tables and histograms group by the logical route (bounded — it is a metric label; the literal template is kept as `http.route.template`); add root-span attributes at terminate with `enrichRequestsUsing(fn ($request, $response) => [...])`.
 - Cache-heavy subsystems: group or drop cache keys with `Telemetry::classifyCacheKeysUsing(fn (string $store, string $key) => 'group'|null)`; exclude whole stores via `instrument.cache_ignore_stores`.
 
 ### Rules

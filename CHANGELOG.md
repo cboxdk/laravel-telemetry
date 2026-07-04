@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-07-04
+
+### Added
+
+- `Telemetry::resolveRouteUsing()` — supply the **logical route** for
+  catch-all frameworks. A CMS's single `/{segments?}` template makes every
+  page share one `http.route`, collapsing route tables and latency
+  histograms into a single bucket. The resolver's (bounded) return value
+  now replaces `http.route` on both the span attribute and the metric
+  label, so the whole ecosystem — the UI route table, Grafana, TraceQL —
+  groups by the logical route. The literal Laravel template is preserved
+  as the `http.route.template` span attribute when overridden. This is the
+  route counterpart to `nameRequestsUsing` (which shapes only the span
+  name).
+
 ## [0.1.0-alpha.3] - 2026-07-03
 
 Dashboard fixes: the logs panels returned HTTP 400, and the suite gained

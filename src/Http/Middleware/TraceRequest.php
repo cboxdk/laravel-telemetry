@@ -136,12 +136,17 @@ final class TraceRequest
         }
 
         FailSafe::guard(function () use ($request, $response, $span) {
-            $route = $this->routePattern($request);
+            $template = $this->routePattern($request);
+
+            // The logical route: an instrumentation can override the
+            // literal route template for catch-all frameworks (a CMS's
+            // "/{segments?}" identifies nothing) via resolveRouteUsing().
+            // The override MUST be bounded — it becomes a metric label.
+            $route = $this->telemetry->resolveRoute($request, $response) ?? $template;
 
             // Naming precedence: an explicit updateName() during the
             // request wins; then the app's nameRequestsUsing() resolver;
-            // then the default route pattern. Catch-all routes (CMSs)
-            // need the first two — "GET /{slug}" names nothing.
+            // then "METHOD <logical route>".
             if (! $span->hasCustomName()) {
                 $span->updateName($this->telemetry->resolveRequestName($request, $response)
                     ?? $request->method().' '.$route);
@@ -151,6 +156,12 @@ final class TraceRequest
                 'http.route' => $route,
                 'http.response.status_code' => $response->getStatusCode(),
             ]);
+
+            // Preserve the literal Laravel route template when overridden —
+            // the raw pattern is still useful for debugging.
+            if ($route !== $template) {
+                $span->setAttribute('http.route.template', $template);
+            }
 
             // Attribute the request to the authenticated user (resolved by
             // now) — enables per-user trace filtering. Id only, never PII.
