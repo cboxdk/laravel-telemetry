@@ -169,6 +169,13 @@ class TelemetryServiceProvider extends ServiceProvider
                 (string) ($config['prefix'] ?? 'telemetry/sourcemaps'),
             );
         });
+
+        // Register the `telemetry` log driver in register(), not boot(): the
+        // `log` manager may be resolved (and a `stack` channel built) before
+        // this provider boots — if the driver isn't registered by then, the
+        // telemetry sub-channel silently falls back to an emergency handler
+        // and no logs ever reach telemetry.
+        $this->registerLogDriver();
     }
 
     public function boot(): void
@@ -205,7 +212,6 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerOctaneReset();
         $this->registerHttpClientMacro();
         $this->registerAboutCommand();
-        $this->registerLogDriver();
     }
 
     /**
@@ -263,7 +269,7 @@ class TelemetryServiceProvider extends ServiceProvider
             $log->extend('telemetry', function ($app, array $config) {
                 return new Logger('telemetry', [
                     new TelemetryLogHandler(
-                        $app->make(TelemetryManager::class),
+                        fn (): TelemetryManager => $app->make(TelemetryManager::class),
                         $config['level'] ?? Level::Debug,
                     ),
                 ]);

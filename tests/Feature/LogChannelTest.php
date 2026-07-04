@@ -77,3 +77,17 @@ it('flattens exceptions and non-scalar context', function () {
         ->and($attributes['exception.message'])->toBe('boom')
         ->and($attributes['log.context.rows'])->toBe('{"a":1}');
 });
+
+it('routes log records to the active fake even if the channel was resolved first', function () {
+    // Build + cache the telemetry channel against the real manager.
+    Log::channel('telemetry')->info('warm up');
+
+    $fake = Telemetry::fake();
+
+    Log::channel('telemetry')->warning('after fake', ['disk' => '/dev/sda1']);
+
+    $events = $fake->recordedEvents('after fake');
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->attributes['log.context.disk'])->toBe('/dev/sda1');
+});

@@ -126,7 +126,7 @@ it('counts batch lifecycle and notification failures', function () {
 });
 
 it('counts deprecations logged through the telemetry channel', function () {
-    $handler = new TelemetryLogHandler(app(TelemetryManager::class));
+    $handler = new TelemetryLogHandler(fn () => app(TelemetryManager::class));
 
     $logger = new Logger('deprecations', [$handler]);
     $logger->warning('str_contains(): Passing null to parameter #1 is deprecated');

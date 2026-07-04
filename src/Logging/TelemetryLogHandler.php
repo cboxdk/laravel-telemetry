@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Logging;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
+use Closure;
 use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\Level;
 use Monolog\LogRecord;
@@ -18,36 +19,52 @@ use Monolog\LogRecord;
  * OTLP severity range, scalar context flattened to attributes, and — the
  * point of it all — correlated to the active trace, so logs appear on the
  * trace timeline in Tempo/Grafana.
+ *
+ * The manager is resolved lazily, per write, rather than captured at
+ * construction: the log channel is often built and cached before a test
+ * swaps in `Telemetry::fake()`, and a captured reference would keep pointing
+ * at the original manager — so faked assertions would silently miss log
+ * events. Resolving on each write always honours the current binding.
  */
 final class TelemetryLogHandler extends AbstractProcessingHandler
 {
+    /** @var Closure(): TelemetryManager */
+    private readonly Closure $resolveTelemetry;
+
+    /**
+     * @param  Closure(): TelemetryManager  $telemetry
+     */
     public function __construct(
-        private readonly TelemetryManager $telemetry,
+        Closure $telemetry,
         int|string|Level $level = Level::Debug,
         bool $bubble = true,
     ) {
+        $this->resolveTelemetry = $telemetry;
+
         parent::__construct($level, $bubble);
     }
 
     protected function write(LogRecord $record): void
     {
         FailSafe::guard(function () use ($record) {
+            $telemetry = ($this->resolveTelemetry)();
+
             // Point LOG_DEPRECATIONS_CHANNEL=telemetry (or include the
             // telemetry channel in its stack) and deprecations become
             // countable — the pre-upgrade checklist as a metric.
             if ($record->channel === 'deprecations') {
-                $this->telemetry->counter('php.deprecations', 'Deprecation notices logged')->inc();
+                $telemetry->counter('php.deprecations', 'Deprecation notices logged')->inc();
             }
 
-            $span = $this->telemetry->currentSpan();
+            $span = $telemetry->currentSpan();
 
-            $this->telemetry->recordEvent(new TelemetryEvent(
+            $telemetry->recordEvent(new TelemetryEvent(
                 name: $record->message,
                 timeUnixNano: (int) ((float) $record->datetime->format('U.u') * 1e9),
-                attributes: $this->telemetry->contextAttributes()
+                attributes: $telemetry->contextAttributes()
                     + ['log.channel' => $record->channel]
                     + $this->contextAttributes($record->context),
-                traceId: $span->traceId ?? $this->telemetry->traceId(),
+                traceId: $span->traceId ?? $telemetry->traceId(),
                 spanId: $span?->spanId,
                 severityNumber: $this->severityNumber($record->level),
                 severityText: $record->level->getName(),

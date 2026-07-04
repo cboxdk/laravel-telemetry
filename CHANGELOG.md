@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] - 2026-07-04
+
+Alerting rules, plus a log-channel boot-order fix.
+
+### Added
+
+- **Bundled alerting rules** (`resources/grafana/alerts/telemetry-alerts.yaml`)
+  — a standard Prometheus rule file (loadable via `rule_files:`, importable
+  into Grafana unified alerting) that fires on the same metrics the
+  dashboards chart: request 5xx rate + p95 latency, exception spikes, queue
+  failures + backlog, scheduled-task failures, outgoing-HTTP failures, and a
+  pipeline self-check (export failing / no data). Per service + environment,
+  thresholds tunable.
+
+### Fixed
+
+- **The `telemetry` log driver is now registered in `register()`, not
+  `boot()`.** If anything resolved the `log` manager (and built a `stack`
+  channel) before this provider booted, the telemetry sub-channel silently
+  fell back to an emergency handler and no logs ever reached telemetry.
+  Registering the driver earlier guarantees it exists before any channel is
+  built.
+- **The log handler resolves the telemetry manager lazily, per write.** A
+  channel built and cached before `Telemetry::fake()` used to keep the
+  original manager, so faked assertions silently missed log events.
+
 ## [0.1.0-alpha.8] - 2026-07-04
 
 Source-map symbolication: browser stacks resolve to original source.

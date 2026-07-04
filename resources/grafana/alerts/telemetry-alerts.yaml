@@ -1,0 +1,192 @@
+# Telemetry alerting rules — cboxdk/laravel-telemetry
+#
+# Standard Prometheus rule format: loadable directly by Prometheus / Grafana
+# Mimir via `rule_files:`, and importable into Grafana unified alerting
+# ("Import alert rules" → Prometheus). Pair with an Alertmanager (or Grafana
+# contact points) to route by the `severity` label.
+#
+# These fire on the SAME metrics the bundled dashboards chart, aggregated per
+# service + environment, so a page links straight to the relevant dashboard.
+# Thresholds are sensible defaults — tune `expr`/`for` to your SLOs. Every
+# rule is scoped by (service_name, deployment_environment_name); add a
+# `host_name` filter if you alert per-instance.
+#
+# Regenerate nothing — this file is hand-maintained; edit thresholds inline.
+
+groups:
+  # ---------------------------------------------------------------------------
+  # Requests — the user-facing SLO signals (availability + latency).
+  # ---------------------------------------------------------------------------
+  - name: telemetry-requests
+    rules:
+      - alert: HighRequestErrorRate
+        # 5xx share of traffic. Critical page.
+        expr: |
+          100 * sum by (service_name, deployment_environment_name) (
+            rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name, deployment_environment_name) (
+            rate(http_server_request_duration_count[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx error rate over 5% on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ printf \"%.1f\" $value }}% of requests are returning 5xx over the last 5m."
+
+      - alert: ElevatedRequestErrorRate
+        expr: |
+          100 * sum by (service_name, deployment_environment_name) (
+            rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+          )
+          /
+          sum by (service_name, deployment_environment_name) (
+            rate(http_server_request_duration_count[5m])
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "5xx error rate over 1% on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ printf \"%.1f\" $value }}% of requests are returning 5xx over the last 10m."
+
+      - alert: HighRequestLatencyP95
+        # p95 request duration, in milliseconds, over a 5m window.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service_name, deployment_environment_name) (
+              rate(http_server_request_duration_bucket[5m])
+            )
+          ) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 request latency above 1s on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "p95 is {{ printf \"%.0f\" $value }}ms over the last 5m (threshold 1000ms)."
+
+  # ---------------------------------------------------------------------------
+  # Exceptions — the "throw away Sentry" signal. exceptions.reported counts
+  # every report()ed throwable by class; group/triage in the UI, alert on rate.
+  # ---------------------------------------------------------------------------
+  - name: telemetry-exceptions
+    rules:
+      - alert: ExceptionSpike
+        expr: |
+          sum by (service_name, deployment_environment_name) (
+            increase(exceptions_reported_total[5m])
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Exception spike on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ printf \"%.0f\" $value }} exceptions reported in the last 5m (threshold 10)."
+
+      - alert: NewExceptionClassBurst
+        # A single class dominating — often a fresh regression after deploy.
+        expr: |
+          topk(1, sum by (service_name, deployment_environment_name, exception) (
+            increase(exceptions_reported_total[10m])
+          )) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.exception }} firing repeatedly on {{ $labels.service_name }}"
+          description: "{{ printf \"%.0f\" $value }} occurrences of {{ $labels.exception }} in 10m ({{ $labels.deployment_environment_name }})."
+
+  # ---------------------------------------------------------------------------
+  # Background work — queues and the scheduler.
+  # ---------------------------------------------------------------------------
+  - name: telemetry-background
+    rules:
+      - alert: QueueJobsFailing
+        expr: |
+          sum by (service_name, deployment_environment_name) (
+            increase(queue_jobs_failed_total[10m])
+          ) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue jobs failing on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ printf \"%.0f\" $value }} jobs moved to failed in the last 10m."
+
+      - alert: QueueWaitTimeHigh
+        # p95 time a job spends waiting before a worker picks it up — backlog.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service_name, deployment_environment_name) (
+              rate(queue_job_wait_time_bucket[5m])
+            )
+          ) > 30000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue backlog on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "p95 job wait time is {{ printf \"%.0f\" $value }}ms over 5m (threshold 30s) — workers are behind."
+
+      - alert: ScheduledTaskFailing
+        expr: |
+          sum by (service_name, deployment_environment_name) (
+            increase(schedule_tasks_failed_total[15m])
+          ) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled task failing on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ printf \"%.0f\" $value }} scheduled task runs failed in the last 15m."
+
+  # ---------------------------------------------------------------------------
+  # Egress — outgoing HTTP (third-party dependencies).
+  # ---------------------------------------------------------------------------
+  - name: telemetry-egress
+    rules:
+      - alert: OutgoingHttpConnectionFailures
+        expr: |
+          sum by (service_name, deployment_environment_name, server_address) (
+            increase(http_client_connection_failures_total[5m])
+          ) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outgoing HTTP failing to {{ $labels.server_address }} from {{ $labels.service_name }}"
+          description: "{{ printf \"%.0f\" $value }} connection failures to {{ $labels.server_address }} in 5m ({{ $labels.deployment_environment_name }})."
+
+  # ---------------------------------------------------------------------------
+  # Pipeline self-observability — is telemetry itself getting out? A failing
+  # exporter means every alert above can go silently blind.
+  # ---------------------------------------------------------------------------
+  - name: telemetry-pipeline
+    rules:
+      - alert: TelemetryExportFailing
+        expr: |
+          sum by (service_name, deployment_environment_name) (
+            increase(telemetry_export_count_total{outcome=~"failed|error"}[10m])
+          ) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Telemetry export failing on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "The exporter reported failed/errored batches in the last 10m — downstream dashboards and alerts may be blind."
+
+      # Dead-man's switch — opt in by wiring this to a heartbeat alert in your
+      # Alertmanager. Fires when NO telemetry has been scraped for 15m, which
+      # catches the whole pipeline (or the app) being down. It also fires for a
+      # genuinely idle service, so only enable it for always-on services.
+      - alert: TelemetryNoData
+        expr: |
+          absent(telemetry_export_count_total)
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No telemetry received for 15m"
+          description: "telemetry_export_count_total has been absent for 15m — the exporter, the scrape, or the app is down. (Disable for idle/on-demand services.)"

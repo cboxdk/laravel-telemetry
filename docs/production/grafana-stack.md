@@ -99,6 +99,29 @@ Note: Grafana v13.0's anonymous mode currently fails to lazy-load panel
 plugins (blank panels) — log in, or pin an older image, when using
 anonymous access.
 
+## Alerting
+
+A bundled Prometheus rule file
+(`resources/grafana/alerts/telemetry-alerts.yaml`) fires on the same
+metrics the dashboards chart — request 5xx rate and p95 latency, exception
+spikes, queue failures and backlog, scheduled-task failures, outgoing-HTTP
+failures, and a pipeline self-check (export failing / no telemetry). Rules
+are scoped per service + environment; thresholds are sensible defaults you
+tune to your SLOs.
+
+It's the standard Prometheus format, so it loads three ways:
+
+```yaml
+# Prometheus / Grafana Mimir — reference it from prometheus.yml:
+rule_files:
+  - /etc/prometheus/telemetry-alerts.yaml
+```
+
+Or in Grafana: **Alerting → Alert rules → Import** → Prometheus, and paste
+the file. Route the `severity` label (`critical`/`warning`) to your
+Alertmanager or Grafana contact points. Validate edits with
+`promtool check rules resources/grafana/alerts/telemetry-alerts.yaml`.
+
 ## Query starters
 
 ```promql
