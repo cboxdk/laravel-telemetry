@@ -62,6 +62,10 @@ class TelemetryManager
 
     private ?Closure $cacheKeyClassifier = null;
 
+    private ?Closure $sessionResolver = null;
+
+    private ?Closure $clientGeoResolver = null;
+
     /** @var array{id: string, type: string, guard: string|null}|null */
     private ?array $rememberedUser = null;
 
@@ -517,6 +521,70 @@ class TelemetryManager
         }
 
         return FailSafe::guard(fn (): array => ($this->userAttributeResolver)($user, $guard)) ?? [];
+    }
+
+    /**
+     * Override how the analytics `session.id` (the shared visit key across
+     * browser + server) is derived from the request. The built-in default
+     * is a cookieless, daily-rotating salted hash; a hook lets you source it
+     * from Cloudflare (e.g. `CF-Ray`), a first-party cookie, or your own
+     * logic:
+     *
+     *     Telemetry::resolveSessionUsing(fn ($request) =>
+     *         $request->header('CF-Ray') ?: $request->cookie('visit'));
+     *
+     * Return null to fall back to the cookieless default.
+     *
+     * @param  (Closure(Request): ?string)|null  $resolver
+     */
+    public function resolveSessionUsing(?Closure $resolver): void
+    {
+        $this->sessionResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware / browser snippet
+     */
+    public function resolveSessionId(Request $request): ?string
+    {
+        if ($this->sessionResolver === null) {
+            return null;
+        }
+
+        $id = FailSafe::guard(fn (): ?string => ($this->sessionResolver)($request));
+
+        return ($id === null || $id === '') ? null : $id;
+    }
+
+    /**
+     * Provide `client.geo.*` for the request span and analytics events —
+     * e.g. from Cloudflare's edge headers, so no geo database is needed:
+     *
+     *     Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
+     *         'client.geo.country'      => $request->header('CF-IPCountry'),
+     *         'client.geo.region'       => $request->header('CF-Region'),
+     *         'client.address'          => $request->header('CF-Connecting-IP'),
+     *     ]));
+     *
+     * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
+     */
+    public function resolveClientGeoUsing(?Closure $resolver): void
+    {
+        $this->clientGeoResolver = $resolver;
+    }
+
+    /**
+     * @internal used by the request middleware
+     *
+     * @return array<string, scalar|null>
+     */
+    public function resolveClientGeo(Request $request): array
+    {
+        if ($this->clientGeoResolver === null) {
+            return [];
+        }
+
+        return FailSafe::guard(fn (): array => ($this->clientGeoResolver)($request)) ?? [];
     }
 
     /*

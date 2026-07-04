@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Http\Middleware;
 
+use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
@@ -203,6 +204,18 @@ final class TraceRequest
                 ]);
             }
 
+            // Analytics keystone (opt-in, default off): a shared, cross-request
+            // session.id so a whole visit — not just one trace — can be
+            // analysed, plus optional client.geo.*. Both are hook-overridable
+            // (Cloudflare headers, a cookie, your own logic); the built-in
+            // session.id is a cookieless, daily-rotating salted hash. Strictly
+            // additive — nothing here runs, or is stamped, when analytics is
+            // off, so existing telemetry is bit-for-bit unchanged.
+            if (config('telemetry.analytics.enabled', false)) {
+                $span->setAttribute('session.id', $this->analyticsSessionId($request));
+                $span->setAttributes($this->telemetry->resolveClientGeo($request));
+            }
+
             // App-defined root-span enrichment with the final response in
             // hand (Telemetry::enrichRequestsUsing) — status-dependent
             // attributes work here.
@@ -352,6 +365,23 @@ final class TraceRequest
         });
 
         return is_string($guard) && $guard !== '' ? $guard : null;
+    }
+
+    /**
+     * The analytics session.id: a registered hook wins; otherwise the
+     * built-in cookieless, daily-rotating salted default.
+     */
+    private function analyticsSessionId(Request $request): string
+    {
+        $resolved = $this->telemetry->resolveSessionId($request);
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        $salt = (string) (config('telemetry.analytics.session.salt') ?: config('app.key', ''));
+
+        return AnalyticsIdentity::cookielessSession($request, $salt);
     }
 
     /**

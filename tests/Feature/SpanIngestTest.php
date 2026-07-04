@@ -128,6 +128,21 @@ it('renders nothing when ingest is disabled', function () {
     expect(BrowserSnippet::render())->toBe('');
 });
 
+it('omits data-session when analytics is off', function () {
+    config()->set('telemetry.ingest.spans.enabled', true);
+    config()->set('telemetry.analytics.enabled', false);
+
+    expect(BrowserSnippet::render())->not->toContain('data-session');
+});
+
+it('propagates the shared session.id via data-session when analytics is on', function () {
+    config()->set('telemetry.ingest.spans.enabled', true);
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.session.salt', 'test-salt');
+
+    expect(BrowserSnippet::render())->toContain('data-session="');
+});
+
 it('serves the zero-build RUM script with cache headers', function () {
     config()->set('telemetry.ingest.spans.enabled', true);
 

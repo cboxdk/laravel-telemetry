@@ -101,7 +101,11 @@ final class Redactor
      */
     public static function defaultSafeKeys(): array
     {
-        return ['session.driver', 'session.hash'];
+        // session.id is the OTel semantic-convention session identifier (the
+        // analytics keystone) — a salted hash by construction, never the raw
+        // Laravel session id (that is only ever stamped, hashed, as
+        // session.hash). Safe to record despite the "session" segment.
+        return ['session.driver', 'session.hash', 'session.id'];
     }
 
     /**

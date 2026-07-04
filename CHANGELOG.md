@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.11] - 2026-07-04
+
+Analytics foundation — the shared `session.id` keystone (opt-in, default off).
+
+### Added
+
+- **`telemetry.analytics` config (default off).** The first, additive step
+  toward observability-grade analytics on top of the telemetry we already
+  collect. Nothing changes when the flag is off.
+- **Shared `session.id` across browser + server.** With analytics on, the
+  request middleware stamps a `session.id` on the server span, and the
+  `@telemetryBrowser` directive propagates the same value to the RUM SDK
+  (via `data-session`), so a whole *visit* — not just one trace — is one
+  key. The built-in default is a **cookieless**, daily-rotating salted hash
+  (IP + UA + host + day), so a raw IP is never a durable grouping key.
+- **Two overridable hooks** (the way to plug Cloudflare, a cookie, or your
+  own logic):
+  - `Telemetry::resolveSessionUsing($request)` — override the `session.id`
+    (e.g. `CF-Ray`, a first-party cookie). Returns null → cookieless default.
+  - `Telemetry::resolveClientGeoUsing($request)` — supply `client.geo.*`
+    from edge headers (e.g. `CF-IPCountry`), no geo database required.
+- `session.id` is now a default redaction safe-key (it is the OTel session
+  identifier, a hash by construction — never the raw Laravel session id,
+  which is only ever recorded, hashed, as `session.hash`).
+
 ## [0.1.0-alpha.10] - 2026-07-04
 
 Prometheus metric names now carry unit suffixes.

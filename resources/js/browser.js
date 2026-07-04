@@ -21,6 +21,10 @@
   var doFetch = script.getAttribute('data-fetch') !== '0';
   var doErrors = script.getAttribute('data-errors') !== '0';
   var sample = parseFloat(script.getAttribute('data-sample') || '1');
+  // The shared analytics session.id, propagated from the server (only when
+  // analytics is enabled). Stamped on every span so browser and server share
+  // one visit key.
+  var session = script.getAttribute('data-session');
 
   // Head sampling — decide once per page; keep whole traces.
   if (sample < 1 && Math.random() > sample) return;
@@ -58,6 +62,8 @@
   }
 
   function span(name, kind, start, end, attributes, parentId, status) {
+    var attrs = attributes || {};
+    if (session) attrs['session.id'] = session;
     push({
       traceId: traceId,
       spanId: hex(8),
@@ -66,7 +72,7 @@
       kind: kind || 'internal',
       start: Math.round(start),
       end: Math.round(end),
-      attributes: attributes || {},
+      attributes: attrs,
       status: status || 'ok'
     });
   }

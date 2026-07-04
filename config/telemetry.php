@@ -340,6 +340,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Analytics (opt-in, default OFF)
+    |--------------------------------------------------------------------------
+    |
+    | An additive analytics layer on top of the telemetry we already collect
+    | — a shared session.id across browser + server, so visits (not just
+    | single traces) can be analysed. Everything here is off by default and
+    | changes NOTHING when disabled. The identity and geo resolution are
+    | fully overridable via hooks, so you can source them from Cloudflare
+    | headers (CF-Connecting-IP, CF-IPCountry, CF-Ray), a first-party
+    | cookie, or your own logic — see Telemetry::resolveSessionUsing() and
+    | Telemetry::resolveClientGeoUsing().
+    |
+    */
+
+    'analytics' => [
+        'enabled' => env('TELEMETRY_ANALYTICS', false),
+
+        'session' => [
+            // Cookieless by default: the built-in session.id is a
+            // daily-rotating, salted hash so a raw IP never becomes a
+            // grouping key. Override the whole thing with a hook for exact,
+            // cookie-based visits.
+            'salt' => env('TELEMETRY_ANALYTICS_SALT'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Automatic Instrumentation
     |--------------------------------------------------------------------------
     */

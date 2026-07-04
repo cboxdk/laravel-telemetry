@@ -92,6 +92,39 @@ With a classifier registered, kept operations carry the group as a
 key stays on the span). Whole stores can be excluded with
 `instrument.cache_ignore_stores`.
 
+## Analytics session id — `resolveSessionUsing()`
+
+Only active when `telemetry.analytics.enabled` is on. Overrides how the
+shared `session.id` (the analytics keystone — one visit key across browser
+and server spans) is derived from the request. The built-in default is a
+cookieless, daily-rotating salted hash; a hook lets you source it from
+Cloudflare, a first-party cookie, or your own logic:
+
+```php
+Telemetry::resolveSessionUsing(fn ($request) =>
+    $request->header('CF-Ray')          // Cloudflare's request id
+        ?: $request->cookie('visit'));  // or your own cookie
+```
+
+Return `null` to fall back to the cookieless default. Whatever it returns
+is also propagated to the browser (via the `@telemetryBrowser` directive's
+`data-session`), so the RUM SDK stamps the SAME `session.id`.
+
+## Client geo — `resolveClientGeoUsing()`
+
+Only active when `telemetry.analytics.enabled` is on. Supplies
+`client.geo.*` (and may override `client.address`) for the request span —
+e.g. straight from Cloudflare's edge headers, so no geo database is needed
+and the raw IP can be dropped:
+
+```php
+Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
+    'client.geo.country' => $request->header('CF-IPCountry'),
+    'client.geo.region'  => $request->header('CF-Region'),
+    'client.geo.city'    => $request->header('CF-IPCity'),
+]));
+```
+
 ## The full hook surface
 
 | Hook | Shapes | Signature |
