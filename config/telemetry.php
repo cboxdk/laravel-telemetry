@@ -280,6 +280,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Browser / Frontend Span Ingest (optional)
+    |--------------------------------------------------------------------------
+    |
+    | An opt-in endpoint the browser posts its own spans to (page load,
+    | fetch timings, JS errors). When the browser also propagates its W3C
+    | traceparent to your backend, browser and backend spans share one
+    | trace id — end-to-end distributed tracing in a single waterfall.
+    |
+    | A browser endpoint cannot hold a secret, so it is protected by
+    | throttling, strict payload bounding and optional head sampling —
+    | never a bearer token. Add your own auth via `middleware` if the app
+    | is behind login.
+    |
+    */
+
+    'ingest' => [
+        'spans' => [
+            'enabled' => env('TELEMETRY_INGEST_SPANS', false),
+            'path' => env('TELEMETRY_INGEST_SPANS_PATH', 'telemetry/spans'),
+            // Flood defenses (a browser endpoint is world-reachable).
+            'middleware' => ['throttle:300,1'],
+            'max_spans' => 128,          // per batch; excess dropped
+            'max_attributes' => 32,      // per span
+            'sample_rate' => 1.0,        // head sampling; drop a fraction of batches
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Automatic Instrumentation
     |--------------------------------------------------------------------------
     */

@@ -175,6 +175,20 @@ with the key `log.message`.
 |---|---|
 | `default_buckets` | `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` (ms) |
 
+## Browser span ingest (optional)
+
+| Key | Env | Default |
+|---|---|---|
+| `ingest.spans.enabled` | `TELEMETRY_INGEST_SPANS` | `false` — a `POST` endpoint the browser sends its spans to (RUM → distributed tracing) |
+| `ingest.spans.path` | `TELEMETRY_INGEST_SPANS_PATH` | `telemetry/spans` |
+| `ingest.spans.middleware` | — | `['throttle:300,1']` — add `auth` etc. for logged-in apps |
+| `ingest.spans.max_spans` | — | `128` per batch (excess dropped) |
+| `ingest.spans.max_attributes` | — | `32` per span |
+| `ingest.spans.sample_rate` | — | `1.0` — head sampling (0–1) to cap volume |
+
+Correlate with `@telemetryTraceparent` in your layout. See
+[Browser tracing](../production/browser-tracing.md).
+
 ## Automatic instrumentation
 
 | Key | Env | Default |

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] - 2026-07-04
+
+End-to-end distributed tracing: an optional browser span ingest.
+
+### Added
+
+- **Browser / RUM span ingest** (`TELEMETRY_INGEST_SPANS`, off by default):
+  an opt-in `POST {ingest.spans.path}` endpoint the frontend sends its own
+  spans to (page load, fetch timings, JS errors). Combined with the
+  existing incoming-`traceparent` continuation, browser and backend spans
+  share one trace id — a single end-to-end waterfall. Protected by
+  throttling, strict payload bounding (capped span count/attributes/name
+  lengths, hex-id validation, timestamp clamping) and optional head
+  sampling — never a bearer token, since a browser can't hold a secret.
+  Every value passes the redaction engine; spans are stamped `browser`.
+- `@telemetryTraceparent` Blade directive — renders a
+  `<meta name="traceparent">` so the browser can parent its RUM spans to
+  the current server trace.
+- `Telemetry::ingestSpans()` — export externally-produced spans directly.
+
 ## [0.1.0-alpha.5] - 2026-07-04
 
 Drop-in backend error tracking — structured, fingerprinted exception
@@ -365,7 +385,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.5...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.6...HEAD
+[0.1.0-alpha.6]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.2...v0.1.0-alpha.3

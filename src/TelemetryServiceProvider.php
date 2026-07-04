@@ -23,6 +23,7 @@ use Cbox\Telemetry\Exporters\Spool\RedisSpool;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
+use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
 use Cbox\Telemetry\Instrumentation\BusInstrumentation;
@@ -68,6 +69,7 @@ use Illuminate\Http\Client\Events\RequestSending;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\QueueManager;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Octane\Events\RequestReceived;
@@ -172,6 +174,8 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         $this->registerPrometheusRoutes();
+        $this->registerSpanIngestRoute();
+        $this->registerBladeDirectives();
         $this->registerRequestInstrumentation();
         $this->registerQueueInstrumentation();
         $this->registerQueryInstrumentation();
@@ -414,6 +418,42 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         return new SpoolingOtlpExporter($direct, $serializer, $app->make(Spool::class));
+    }
+
+    /**
+     * The optional browser/RUM span ingest route. Off by default; when on,
+     * the frontend POSTs its spans here and they join the same trace as
+     * the backend. Protected by throttling + payload bounding, not a token.
+     */
+    /**
+     * @telemetryTraceparent — renders a <meta name="traceparent"> so the
+     * browser can parent its RUM spans to the current server trace. A no-op
+     * when no trace is active.
+     */
+    private function registerBladeDirectives(): void
+    {
+        if (! class_exists(Blade::class)) {
+            return;
+        }
+
+        Blade::directive('telemetryTraceparent', static fn (): string => "<?php \$__tp = app('telemetry')->traceparent(); if (\$__tp !== null) { echo '<meta name=\"traceparent\" content=\"'.htmlspecialchars(\$__tp, ENT_QUOTES).'\">'; } ?>");
+    }
+
+    private function registerSpanIngestRoute(): void
+    {
+        $config = (array) $this->app->make('config')->get('telemetry.ingest.spans', []);
+
+        if (! ($config['enabled'] ?? false)) {
+            return;
+        }
+
+        /** @var Router $router */
+        $router = $this->app->make(Router::class);
+
+        $router->post((string) ($config['path'] ?? 'telemetry/spans'), SpanIngestController::class)
+            ->middleware((array) ($config['middleware'] ?? []))
+            ->defaults('telemetryIngest', $config)
+            ->name('telemetry.ingest.spans');
     }
 
     private function registerPrometheusRoutes(): void

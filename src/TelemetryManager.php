@@ -659,6 +659,32 @@ class TelemetryManager
     }
 
     /**
+     * Export externally-produced spans (browser RUM) directly, under their
+     * own trace/span ids — so they join the SAME trace as the backend when
+     * the browser propagated its traceparent. Redacted like any span.
+     *
+     * @param  list<Span>  $spans
+     */
+    public function ingestSpans(array $spans): void
+    {
+        if (! $this->enabled || $spans === []) {
+            return;
+        }
+
+        if ($this->redactor !== null) {
+            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? $spans;
+        }
+
+        $this->flushing = true;
+
+        try {
+            $this->export(new TelemetryBatch(resource: $this->resource, spans: $spans), Signal::Traces);
+        } finally {
+            $this->flushing = false;
+        }
+    }
+
+    /**
      * Push metrics from the shared store (plus observable gauges) to every
      * exporter that supports metrics. Run by the `telemetry:flush` command.
      */

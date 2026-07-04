@@ -38,6 +38,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Configuration](docs/configuration/reference.md): every config key
 - [Providers](docs/extension-points/providers.md): publish telemetry from your package
 - [Custom exporters](docs/extension-points/exporters.md): the Exporter contract
+- [Browser tracing](docs/production/browser-tracing.md): optional frontend span ingest — end-to-end distributed tracing
 - [Runtime hooks](docs/extension-points/hooks.md): request naming/enrichment, cache classification, user resolution, redaction
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
 - [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget
