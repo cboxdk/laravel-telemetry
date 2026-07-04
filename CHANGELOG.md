@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] - 2026-07-04
+
+Source-map symbolication: browser stacks resolve to original source.
+
+### Added
+
+- **Source-map upload + symbolication.** An opt-in, **token-gated**
+  `POST {sourcemaps.path}` endpoint (`TELEMETRY_SOURCEMAPS`,
+  `TELEMETRY_SOURCEMAPS_TOKEN`) receives your build's `.map` files from CI,
+  keyed by release, validated as v3, size-capped, and stored on a configured
+  disk. Unlike the world-reachable span ingest, uploads come from CI — which
+  *can* hold a secret — so this is bearer-token gated and secure by default
+  (a token is required; it can never be left accidentally open).
+- **`Support\Symbolicator`** — a self-contained source-map v3 resolver (a
+  hand-rolled VLQ decoder, no ext, no library). `symbolicateStack($release,
+  $stack)` parses Chrome/Firefox/Safari stack strings and resolves each
+  minified frame back to original source/line/column/name, so browser error
+  grouping and detail become as good as the backend's. Symbolication is a
+  read-time concern — the raw stack is stored as-is; an issues UI resolves it
+  on demand, so maps never have to be public. Fail-safe: a missing or bad map
+  just leaves the frame minified.
+
 ## [0.1.0-alpha.7] - 2026-07-04
 
 Turnkey browser RUM: a bundled, zero-build script + one Blade directive.

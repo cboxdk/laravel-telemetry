@@ -139,6 +139,53 @@ For richer frontend instrumentation (component renders, route changes),
 the same endpoint accepts whatever spans you produce — or point the
 OpenTelemetry JS SDK's OTLP exporter at a collector if you prefer.
 
+## Source maps (symbolication)
+
+Minified browser stacks (`app-abc.js:1:2481`) are useless on their own, and
+the file names shift every deploy. Upload your build's source maps, keyed by
+**release**, and stacks resolve back to original source/line/column/name —
+so browser error grouping and detail get as good as the backend's.
+
+Enable the upload endpoint (off, and secure, by default — it stores what it
+receives, so a token is **required**, never accidentally open):
+
+```dotenv
+TELEMETRY_SOURCEMAPS=true
+TELEMETRY_SOURCEMAPS_TOKEN=a-long-random-secret   # CI holds this, not the browser
+```
+
+Upload from your build pipeline. With
+[`@cboxdk/telemetry-browser`](https://github.com/cboxdk/laravel-telemetry)
+it's one CLI call (or the bundled Vite plugin):
+
+```bash
+npx telemetry-sourcemaps \
+  --dir dist/assets --release "$GIT_SHA" \
+  --endpoint https://app.example.com/telemetry/sourcemaps \
+  --token "$TELEMETRY_SOURCEMAPS_TOKEN"
+```
+
+Each `.map` is POSTed as `{ release, name, map }` with a `Bearer` token,
+validated as a v3 map, size-capped (`sourcemaps.max_bytes`), and stored on
+`sourcemaps.disk` under `sourcemaps.prefix/<release>/<name>`. Set the same
+`release` on the SDK (`init({ release })`) so browser spans and their maps
+line up. The `Symbolicator` service (a self-contained VLQ decoder — no ext,
+no library) resolves stacks against them at read time:
+
+```php
+app(\Cbox\Telemetry\Support\Symbolicator::class)
+    ->symbolicateStack($release, $exceptionStacktrace);
+// -> [['function' => 'checkout', 'file' => 'src/checkout.ts',
+//      'line' => 42, 'column' => 7, 'original' => true], ...]
+```
+
+Symbolication is a **read-time** concern: the raw minified stack is stored
+as-is on the exception span, and an issues UI (or your own tooling) resolves
+it on demand via `Symbolicator`. Maps never have to be public.
+
+Uploads never fail your build loudly and never throw into a request — a
+missing or malformed map just leaves the frame minified (`original: false`).
+
 ## Security notes
 
 A world-reachable ingest endpoint is inherently abusable; the defenses are

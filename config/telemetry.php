@@ -317,6 +317,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Source Maps (optional — for symbolicating browser stacks)
+    |--------------------------------------------------------------------------
+    |
+    | An upload endpoint the build pipeline POSTs source maps to (via the
+    | @cboxdk/telemetry-browser uploader), keyed by release. telemetry-ui
+    | then resolves minified browser frames back to the original source.
+    | Uploads come from CI, so this is bearer-token gated (set a token) —
+    | it is never accidentally open.
+    |
+    */
+
+    'sourcemaps' => [
+        'enabled' => env('TELEMETRY_SOURCEMAPS', false),
+        'token' => env('TELEMETRY_SOURCEMAPS_TOKEN'),
+        'path' => env('TELEMETRY_SOURCEMAPS_PATH', 'telemetry/sourcemaps'),
+        'disk' => env('TELEMETRY_SOURCEMAPS_DISK', 'local'),
+        'prefix' => 'telemetry/sourcemaps',
+        'middleware' => [],
+        'max_bytes' => 20 * 1024 * 1024,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Automatic Instrumentation
     |--------------------------------------------------------------------------
     */

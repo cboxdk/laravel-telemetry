@@ -24,6 +24,7 @@ use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
 use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
+use Cbox\Telemetry\Http\Controllers\SourcemapController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
@@ -53,6 +54,7 @@ use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
+use Cbox\Telemetry\Support\Symbolicator;
 use Cbox\Telemetry\Tracing\Tracer;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Auth\Events\Login;
@@ -157,6 +159,16 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->alias(TelemetryManager::class, 'telemetry');
 
         $this->app->singleton(PrometheusRenderer::class);
+
+        // Resolvable by telemetry-ui to symbolicate browser stacks.
+        $this->app->singleton(Symbolicator::class, function (Application $app) {
+            $config = (array) $app->make('config')->get('telemetry.sourcemaps', []);
+
+            return new Symbolicator(
+                $app->make('filesystem')->disk((string) ($config['disk'] ?? 'local')),
+                (string) ($config['prefix'] ?? 'telemetry/sourcemaps'),
+            );
+        });
     }
 
     public function boot(): void
@@ -180,6 +192,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->registerPrometheusRoutes();
         $this->registerSpanIngestRoute();
+        $this->registerSourcemapRoute();
         $this->registerBladeDirectives();
         $this->registerRequestInstrumentation();
         $this->registerQueueInstrumentation();
@@ -430,6 +443,25 @@ class TelemetryServiceProvider extends ServiceProvider
      * the frontend POSTs its spans here and they join the same trace as
      * the backend. Protected by throttling + payload bounding, not a token.
      */
+    /**
+     * The source map upload endpoint (bearer-token gated). Off by default.
+     */
+    private function registerSourcemapRoute(): void
+    {
+        $config = (array) $this->app->make('config')->get('telemetry.sourcemaps', []);
+
+        if (! ($config['enabled'] ?? false)) {
+            return;
+        }
+
+        /** @var Router $router */
+        $router = $this->app->make(Router::class);
+
+        $router->post((string) ($config['path'] ?? 'telemetry/sourcemaps'), SourcemapController::class)
+            ->middleware((array) ($config['middleware'] ?? []))
+            ->name('telemetry.sourcemaps');
+    }
+
     /**
      * @telemetryTraceparent — renders a <meta name="traceparent"> so the
      * browser can parent its RUM spans to the current server trace. A no-op
