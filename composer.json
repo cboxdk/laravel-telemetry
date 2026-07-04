@@ -46,7 +46,8 @@
     "suggest": {
         "ext-apcu": "Required when using the apcu metric store.",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
-        "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans."
+        "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans.",
+        "geoip2/geoip2": "Resolve client.geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped."
     },
     "autoload": {
         "psr-4": {

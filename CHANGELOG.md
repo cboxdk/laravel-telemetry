@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.14] - 2026-07-05
+
+Analytics — built-in geo + User-Agent parsing (opt-in, optional deps).
+
+### Added
+
+- **User-Agent parsing** (`TELEMETRY_ANALYTICS_UA`, off). Dependency-free
+  `Support\UserAgentParser` turns `user_agent.original` into low-cardinality
+  `user_agent.name` / `os.name` / `device.type` (mobile/tablet/desktop/bot) —
+  families only, never versions, so they stay safe group-by dimensions.
+- **Geo from the IP** (`TELEMETRY_ANALYTICS_GEO` + `..._GEO_DB`, off).
+  `Support\GeoResolver` resolves `client.geo.country` (+ continent) via an
+  **optional** MaxMind database (`geoip2/geoip2` is a composer *suggest*, not
+  a requirement) at collection time, so the raw IP can be dropped. The reader
+  is built lazily and cached — no boot-time I/O — and it is a silent no-op
+  without the package/database. A `resolveClientGeoUsing()` hook (e.g.
+  Cloudflare) always wins over it.
+
 ## [0.1.0-alpha.13] - 2026-07-04
 
 Analytics — browser event channel (SPA views, engagement, custom events).

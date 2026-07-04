@@ -154,3 +154,26 @@ it('can disable page_view events while keeping session.id', function () {
     expect(analyticsEvents($this->collector, 'analytics.page_view'))->toBeEmpty()
         ->and(analyticsServerSpan($this->collector)->attributes())->toHaveKey('session.id');
 });
+
+it('stamps parsed user_agent.* when analytics.user_agent is on', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.user_agent', true);
+    Route::get('/ua', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/ua', ['User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36']);
+
+    $attrs = analyticsServerSpan($this->collector)->attributes();
+    expect($attrs['user_agent.name'])->toBe('Chrome')
+        ->and($attrs['os.name'])->toBe('Windows')
+        ->and($attrs['device.type'])->toBe('desktop');
+});
+
+it('does not parse the UA when the toggle is off', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.user_agent', false);
+    Route::get('/ua', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/ua', ['User-Agent' => 'Mozilla/5.0 Chrome/120.0']);
+
+    expect(analyticsServerSpan($this->collector)->attributes())->not->toHaveKey('user_agent.name');
+});

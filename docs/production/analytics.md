@@ -70,6 +70,30 @@ Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
 ]));
 ```
 
+No edge? Turn on the **built-in** MaxMind resolver (the hook still wins when
+set). Install the optional package and point at a GeoLite2 database:
+
+```bash
+composer require geoip2/geoip2   # optional — a composer "suggest"
+```
+
+```dotenv
+TELEMETRY_ANALYTICS_GEO=true
+TELEMETRY_ANALYTICS_GEO_DB=/var/lib/GeoLite2-Country.mmdb
+```
+
+It resolves `client.geo.country` (+ continent) at collection time; the reader
+is built lazily and cached (no boot-time I/O). Without the package or the
+database it is a silent no-op.
+
+## Device & browser
+
+Turn on `TELEMETRY_ANALYTICS_UA` to parse `user_agent.original` into
+low-cardinality `user_agent.name` / `os.name` / `device.type` (mobile /
+tablet / desktop / bot) at collection time — dependency-free, families only
+(never versions), so they stay safe group-by dimensions. Leave it off to keep
+the raw UA for query-time parsing instead.
+
 ## Browser analytics
 
 With `@telemetryBrowser` and analytics on (the directive emits

@@ -368,6 +368,21 @@ return [
             // cookie-based visits.
             'salt' => env('TELEMETRY_ANALYTICS_SALT'),
         ],
+
+        // Country/continent from the client IP, resolved at collection time
+        // via an OPTIONAL MaxMind database (composer suggest: geoip2/geoip2),
+        // so the raw IP can be dropped afterwards. A resolveClientGeoUsing()
+        // hook (e.g. Cloudflare CF-IPCountry) always wins over this.
+        'geo' => [
+            'enabled' => env('TELEMETRY_ANALYTICS_GEO', false),
+            'database' => env('TELEMETRY_ANALYTICS_GEO_DB'),
+        ],
+
+        // Parse user_agent.original into low-cardinality user_agent.name /
+        // os.name / device.type (dependency-free, families only, never
+        // versions). Off by default — leave the raw UA for query-time if you
+        // prefer.
+        'user_agent' => env('TELEMETRY_ANALYTICS_UA', false),
     ],
 
     /*

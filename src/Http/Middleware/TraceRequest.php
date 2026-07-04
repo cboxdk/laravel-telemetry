@@ -6,7 +6,9 @@ namespace Cbox\Telemetry\Http\Middleware;
 
 use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\ResourceUsage;
+use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -213,10 +215,10 @@ final class TraceRequest
             // off, so existing telemetry is bit-for-bit unchanged.
             if (config('telemetry.analytics.enabled', false)) {
                 $sessionId = $this->analyticsSessionId($request);
-                $geo = $this->telemetry->resolveClientGeo($request);
+                $enrichment = [...$this->analyticsGeo($request), ...$this->analyticsUserAgent($request)];
 
                 $span->setAttribute('session.id', $sessionId);
-                $span->setAttributes($geo);
+                $span->setAttributes($enrichment);
 
                 // The unsampled analytics page-view: an EVENT (OTLP log), not
                 // a span, so it survives trace sampling — a page view must
@@ -225,7 +227,7 @@ final class TraceRequest
                 // top-level document loads (GET, HTML, non-AJAX) — the
                 // canonical count that works even without JS.
                 if (config('telemetry.analytics.page_views', true) && $this->isPageView($request, $response)) {
-                    $this->emitPageView($request, $response, $sessionId, $geo);
+                    $this->emitPageView($request, $response, $sessionId, $enrichment);
                 }
             }
 
@@ -433,6 +435,38 @@ final class TraceRequest
         $path = trim($request->path(), '/');
 
         return $path === '' ? '/' : '/'.$path;
+    }
+
+    /**
+     * `client.geo.*` for the request: a registered hook wins (e.g. Cloudflare
+     * edge headers); otherwise the optional built-in MaxMind resolver when
+     * `analytics.geo` is enabled (a no-op without the geoip2/geoip2 package).
+     *
+     * @return array<string, scalar|null>
+     */
+    private function analyticsGeo(Request $request): array
+    {
+        $geo = $this->telemetry->resolveClientGeo($request);
+
+        if ($geo !== [] || ! config('telemetry.analytics.geo.enabled', false)) {
+            return $geo;
+        }
+
+        return app(GeoResolver::class)->resolve($request->ip());
+    }
+
+    /**
+     * Low-cardinality UA family dimensions, when `analytics.user_agent` is on.
+     *
+     * @return array<string, string>
+     */
+    private function analyticsUserAgent(Request $request): array
+    {
+        if (! config('telemetry.analytics.user_agent', false)) {
+            return [];
+        }
+
+        return UserAgentParser::parse($request->userAgent());
     }
 
     /**

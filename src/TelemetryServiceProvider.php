@@ -51,6 +51,7 @@ use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\ExceptionAttributes;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
@@ -168,6 +169,14 @@ class TelemetryServiceProvider extends ServiceProvider
                 $app->make('filesystem')->disk((string) ($config['disk'] ?? 'local')),
                 (string) ($config['prefix'] ?? 'telemetry/sourcemaps'),
             );
+        });
+
+        // Analytics geo — lazy MaxMind reader (no boot-time I/O), cached for
+        // the process. A no-op without the optional geoip2/geoip2 package.
+        $this->app->singleton(GeoResolver::class, function (Application $app) {
+            $db = $app->make('config')->get('telemetry.analytics.geo.database');
+
+            return new GeoResolver(is_string($db) && $db !== '' ? $db : null);
         });
 
         // Register the `telemetry` log driver in register(), not boot(): the
