@@ -23,11 +23,11 @@ groups:
         # 5xx share of traffic. Critical page.
         expr: |
           100 * sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_milliseconds_count{http_response_status_code=~"5.."}[5m])
           )
           /
           sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_count[5m])
+            rate(http_server_request_duration_milliseconds_count[5m])
           ) > 5
         for: 5m
         labels:
@@ -39,11 +39,11 @@ groups:
       - alert: ElevatedRequestErrorRate
         expr: |
           100 * sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_milliseconds_count{http_response_status_code=~"5.."}[5m])
           )
           /
           sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_count[5m])
+            rate(http_server_request_duration_milliseconds_count[5m])
           ) > 1
         for: 10m
         labels:
@@ -57,7 +57,7 @@ groups:
         expr: |
           histogram_quantile(0.95,
             sum by (le, service_name, deployment_environment_name) (
-              rate(http_server_request_duration_bucket[5m])
+              rate(http_server_request_duration_milliseconds_bucket[5m])
             )
           ) > 1000
         for: 10m
@@ -120,7 +120,7 @@ groups:
         expr: |
           histogram_quantile(0.95,
             sum by (le, service_name, deployment_environment_name) (
-              rate(queue_job_wait_time_bucket[5m])
+              rate(queue_job_wait_time_milliseconds_bucket[5m])
             )
           ) > 30000
         for: 10m

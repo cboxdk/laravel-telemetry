@@ -37,6 +37,30 @@ it('renders gauges without labels', function () {
         ->toContain("queue_depth 7.5\n");
 });
 
+it('suffixes the name with the unit, before _total', function () {
+    $output = (new PrometheusRenderer)->render([
+        // Byte-valued gauge → _bytes suffix.
+        new MetricFamily(
+            new MetricDefinition('memory.peak', MetricType::Gauge, unit: 'By'),
+            [new Sample([], 1024.0)],
+        ),
+        // ms counter → unit before _total: <name>_milliseconds_total.
+        new MetricFamily(
+            new MetricDefinition('job.time', MetricType::Counter, unit: 'ms'),
+            [new Sample([], 3.0)],
+        ),
+        // Unitless stays bare.
+        new MetricFamily(
+            new MetricDefinition('cache.size', MetricType::Gauge, unit: '1'),
+            [new Sample([], 9.0)],
+        ),
+    ]);
+
+    expect($output)->toContain("memory_peak_bytes 1024\n")
+        ->toContain("job_time_milliseconds_total 3\n")
+        ->toContain("cache_size 9\n");
+});
+
 it('accumulates histogram buckets into cumulative le form', function () {
     $output = (new PrometheusRenderer)->render([
         new MetricFamily(
@@ -46,11 +70,12 @@ it('accumulates histogram buckets into cumulative le form', function () {
     ]);
 
     expect($output)
-        ->toContain('req_duration_bucket{route="/",le="10"} 2')
-        ->toContain('req_duration_bucket{route="/",le="100"} 3')
-        ->toContain('req_duration_bucket{route="/",le="+Inf"} 4')
-        ->toContain('req_duration_sum{route="/"} 5065')
-        ->toContain('req_duration_count{route="/"} 4');
+        // Unit 'ms' becomes the '_milliseconds' name suffix (before _bucket/_sum/_count).
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="10"} 2')
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="100"} 3')
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4')
+        ->toContain('req_duration_milliseconds_sum{route="/"} 5065')
+        ->toContain('req_duration_milliseconds_count{route="/"} 4');
 });
 
 it('escapes label values', function () {

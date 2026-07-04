@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] - 2026-07-04
+
+Prometheus metric names now carry unit suffixes.
+
+### Changed (breaking)
+
+- **Prometheus metric names now include the unit as a suffix**, per
+  Prometheus/OpenMetrics convention: a `ms` metric renders as
+  `<name>_milliseconds` and a `By` metric as `<name>_bytes` (the suffix
+  precedes `_total`/`_bucket`/`_sum`/`_count`). Previously the unit lived
+  only in the `# HELP` text, so e.g. `http_server_request_duration` is now
+  `http_server_request_duration_milliseconds`. This is what the bundled
+  dashboards and alerting rules already expected — their latency/duration/
+  memory panels and rules now resolve against real series. **If you wrote
+  your own PromQL against these metrics, add the unit suffix.** OTLP metric
+  names are unaffected (units stay a separate field there).
+- The bundled alerting rules (alpha.9) are updated to the suffixed names.
+
 ## [0.1.0-alpha.9] - 2026-07-04
 
 Alerting rules, plus a log-channel boot-order fix.

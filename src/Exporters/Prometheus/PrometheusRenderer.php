@@ -13,8 +13,10 @@ use Cbox\Telemetry\Metrics\Sample;
  * Renders metric families to the Prometheus text exposition format.
  *
  * Names are converted from OTel dot notation to Prometheus underscores;
- * counters get the conventional `_total` suffix; histogram buckets are
- * accumulated into cumulative `le` buckets at render time.
+ * the unit becomes a name suffix (`_milliseconds`, `_bytes`, …) per
+ * Prometheus/OpenMetrics convention; counters get the conventional `_total`
+ * suffix; histogram buckets are accumulated into cumulative `le` buckets at
+ * render time.
  */
 final class PrometheusRenderer
 {
@@ -36,7 +38,7 @@ final class PrometheusRenderer
         $output = [];
 
         foreach ($this->deduplicate($families) as $family) {
-            $name = $family->definition->prometheusName();
+            $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
 
             if ($family->type() === MetricType::Counter) {
                 $name .= '_total';
@@ -99,6 +101,24 @@ final class PrometheusRenderer
         }
 
         return array_values($byName);
+    }
+
+    /**
+     * The unit as a Prometheus name suffix. OTel/UCUM unit → Prometheus base
+     * unit word (`ms` → `_milliseconds`, `By` → `_bytes`); unknown or unitless
+     * ('1', '', 'count') get nothing. Placed before `_total`/`_bucket`, so a
+     * `ms` counter reads `<name>_milliseconds_total`.
+     */
+    private function unitSuffix(string $unit): string
+    {
+        return match ($unit) {
+            'ms' => '_milliseconds',
+            's' => '_seconds',
+            'By', 'bytes' => '_bytes',
+            'By/s' => '_bytes_per_second',
+            '%' => '_percent',
+            default => '',
+        };
     }
 
     /**
