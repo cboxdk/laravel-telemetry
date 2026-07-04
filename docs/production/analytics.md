@@ -70,6 +70,55 @@ Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
 ]));
 ```
 
+## Browser analytics
+
+With `@telemetryBrowser` and analytics on (the directive emits
+`data-analytics`), the [`@cboxdk/telemetry-browser`](https://github.com/cboxdk/telemetry-browser)
+SDK adds — all as **events**, never sampled:
+
+- **SPA page views** — `history` navigations the server never sees become
+  `analytics.page_view` events (with `document.referrer` and the previous
+  path). Full-page loads are still counted once by the server.
+- **Engagement** — visible time (`visibilitychange`) and scroll depth,
+  summarised into one `analytics.engagement` event on page hide, so you can
+  compute bounce / engaged sessions.
+- **Custom events / goals** — `telemetry.track('signup_completed', { plan })`
+  for conversions.
+- Device segmentation — screen size and `devicePixelRatio` alongside the
+  existing viewport / language / connection dimensions.
+
+The browser posts these to the same ingest endpoint under an `events` key;
+the server re-emits them unsampled with the `analytics.source="browser"` and
+`telemetry.stream="analytics"` markers, on the same stream as the server's
+page views. Web Vitals continue to flow as browser spans, correlated by
+`session.id`.
+
+## On LGTM (low-traffic)
+
+No ClickHouse needed for a small site: analytics events are **OTLP log
+records**, so they land in **Loki** and answer the core questions with LogQL.
+Select the stream with the marker, then aggregate:
+
+```logql
+# Views over time
+sum(count_over_time({service_name="my-app"} | json | telemetry_stream="analytics" | analytics_event="page_view" [$__auto]))
+
+# Top pages (last 24h)
+topk(10, sum by (url_path) (count_over_time({service_name="my-app"} | json | analytics_event="page_view" [24h])))
+
+# Top referrers
+topk(10, sum by (http_request_header_referer) (count_over_time({service_name="my-app"} | json | analytics_event="page_view" [24h])))
+
+# Approximate unique visitors (distinct session ids in the window)
+count(sum by (session_id) (count_over_time({service_name="my-app"} | json | analytics_event="page_view" [24h])))
+```
+
+Uniques and funnels are **approximate** on Loki (it counts log lines, not a
+`COUNT(DISTINCT …)` over a huge cardinality set). That is fine for a
+low-traffic site. When you outgrow it, point an OTel Collector's ClickHouse
+exporter at the same `telemetry.stream="analytics"` events for exact
+uniques/funnels — **no application change**, the events are identical.
+
 ## Privacy
 
 Cookieless by default; the raw IP is never a grouping key and can be dropped

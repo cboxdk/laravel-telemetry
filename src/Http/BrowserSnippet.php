@@ -31,11 +31,14 @@ final class BrowserSnippet
         $asset = url((string) ($config['asset_path'] ?? 'telemetry/browser.js'));
         $endpoint = url((string) ($config['path'] ?? 'telemetry/spans'));
 
+        $analytics = config('telemetry.analytics.enabled', false) ? ' data-analytics="1"' : '';
+
         return $meta.'<script src="'.e($asset).'" defer'
             .' data-endpoint="'.e($endpoint).'"'
             .' data-fetch="'.(($browser['fetch'] ?? true) ? '1' : '0').'"'
             .' data-errors="'.(($browser['errors'] ?? true) ? '1' : '0').'"'
             .' data-sample="'.e((string) ($browser['sample'] ?? 1.0)).'"'
+            .$analytics
             .self::sessionAttribute().'></script>';
     }
 

@@ -161,3 +161,69 @@ it('404s the RUM script when ingest is disabled', function () {
     expect(fn () => (new BrowserAssetController)(app(TelemetryManager::class)))
         ->toThrow(HttpException::class);
 });
+
+function ingestEventsPayload(array $events, array $config = []): Response
+{
+    $request = Request::create('/telemetry/spans', 'POST', content: json_encode(['events' => $events]));
+    $request->headers->set('Content-Type', 'application/json');
+
+    $route = new Route('POST', '/telemetry/spans', []);
+    $route->defaults('telemetryIngest', $config + ['enabled' => true, 'max_spans' => 128, 'max_attributes' => 32, 'sample_rate' => 1.0]);
+    $request->setRouteResolver(fn () => $route);
+
+    return (new SpanIngestController)($request, app(TelemetryManager::class));
+}
+
+function ingestedEvents(CollectingExporter $c): array
+{
+    return collect($c->batches())->flatMap(fn ($b) => $b->events)->all();
+}
+
+it('ingests browser analytics events as unsampled OTLP log records', function () {
+    $now = (int) (microtime(true) * 1000);
+
+    $response = ingestEventsPayload([[
+        'name' => 'page_view',
+        'sessionId' => 'visit-9',
+        'traceId' => str_repeat('ab12', 8),
+        'time' => $now,
+        'attributes' => ['url.path' => '/pricing', 'http.request.header.referer' => 'https://news.ycombinator.com/'],
+    ], [
+        'name' => 'signup_completed',
+        'sessionId' => 'visit-9',
+        'time' => $now,
+        'attributes' => ['plan' => 'pro'],
+    ]]);
+
+    expect($response->getStatusCode())->toBe(204);
+
+    $events = ingestedEvents($this->collector);
+    expect($events)->toHaveCount(2);
+
+    $pageView = collect($events)->firstWhere('name', 'analytics.page_view');
+    expect($pageView)->not->toBeNull()
+        ->and($pageView->attributes['telemetry.stream'])->toBe('analytics')
+        ->and($pageView->attributes['analytics.source'])->toBe('browser')
+        ->and($pageView->attributes['analytics.event'])->toBe('page_view')
+        ->and($pageView->attributes['session.id'])->toBe('visit-9')
+        ->and($pageView->attributes['url.path'])->toBe('/pricing')
+        ->and($pageView->traceId)->toBe(str_repeat('ab12', 8));
+
+    $signup = collect($events)->firstWhere('name', 'analytics.signup_completed');
+    expect($signup)->not->toBeNull()
+        ->and($signup->attributes['plan'])->toBe('pro')
+        ->and($signup->traceId)->toBeNull();
+});
+
+it('drops analytics events with no usable name and caps the count', function () {
+    $response = ingestEventsPayload([
+        ['name' => 'ok_event', 'time' => (int) (microtime(true) * 1000)],
+        ['name' => '!!!', 'time' => 1],       // sanitizes to empty → dropped
+        ['name' => 'past_the_cap', 'time' => (int) (microtime(true) * 1000)],
+    ], ['max_spans' => 2]);
+
+    expect($response->getStatusCode())->toBe(204);
+    // The cap slices the raw input to 2 (like spans); of those the bad name
+    // is dropped — so only the valid one in-window survives.
+    expect(collect(ingestedEvents($this->collector))->pluck('name')->all())->toBe(['analytics.ok_event']);
+});

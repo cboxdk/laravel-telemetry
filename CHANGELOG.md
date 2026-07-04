@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.13] - 2026-07-04
+
+Analytics — browser event channel (SPA views, engagement, custom events).
+
+### Added
+
+- **The span ingest also accepts analytics `events`.** The browser posts
+  page views / engagement / custom `track()` calls under an `events` key; the
+  endpoint re-emits them as **unsampled OTLP log records** (bounded and
+  validated like spans) with `analytics.source="browser"` +
+  `telemetry.stream="analytics"` markers — the same stream as the server's
+  `analytics.page_view`. New `TelemetryManager::ingestEvents()`.
+- **`@telemetryBrowser` emits `data-analytics`** when `telemetry.analytics`
+  is on, so the SDK turns on its analytics channel: SPA page-view events
+  (with `document.referrer`), engagement (visible time + scroll depth), a
+  `track(name, props)` conversion API, and screen/DPR device dimensions.
+- The [Analytics guide](docs/production/analytics.md) now covers the browser
+  channel and a **LogQL cookbook** so a low-traffic LGTM stack answers
+  top-pages / views-over-time / referrers / approximate uniques without
+  ClickHouse.
+
 ## [0.1.0-alpha.12] - 2026-07-04
 
 Analytics — unsampled page-view events.

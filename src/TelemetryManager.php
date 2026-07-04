@@ -753,6 +753,33 @@ class TelemetryManager
     }
 
     /**
+     * Export externally-produced events (browser analytics: SPA page views,
+     * engagement, custom track() calls) directly as OTLP log records —
+     * unsampled, so a page view is never undercounted. Redacted like any
+     * event.
+     *
+     * @param  list<TelemetryEvent>  $events
+     */
+    public function ingestEvents(array $events): void
+    {
+        if (! $this->enabled || $events === []) {
+            return;
+        }
+
+        if ($this->redactor !== null) {
+            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? $events;
+        }
+
+        $this->flushing = true;
+
+        try {
+            $this->export(new TelemetryBatch(resource: $this->resource, events: $events), Signal::Events);
+        } finally {
+            $this->flushing = false;
+        }
+    }
+
+    /**
      * Push metrics from the shared store (plus observable gauges) to every
      * exporter that supports metrics. Run by the `telemetry:flush` command.
      */
