@@ -79,3 +79,34 @@ Flare::context('trace_id', Telemetry::traceId());
 
 Disable all automatic publishing with
 `TELEMETRY_TRACES_SHARE_CONTEXT=false`.
+
+## Exceptions as structured records (drop-in error tracking)
+
+Every `report()`ed exception — handled or not — becomes a **structured
+error record** exported as an OTLP log (→ Loki), alongside the
+`exceptions.reported` counter and the span event in the trace waterfall.
+Each record carries:
+
+- `exception.type`, `exception.message`
+- `exception.file`, `exception.line`, `exception.stacktrace`
+- **`exception.group`** — a Sentry-style fingerprint (exception class +
+  the throw site, `vendor/` frames skipped) so identical failures group
+  into one *issue* instead of merging by class. Machine-independent, so a
+  fingerprint is stable across hosts and deploys.
+- the ambient [context](../core-concepts/traces.md#custom-dimensions-context)
+  (team, tenant, user, trace id).
+- optionally `exception.source` — the code around the throw site — when
+  `instrument.exception_source` is on.
+
+Because it's an OTLP log record (not just a span event), an exception is
+captured **even out of a trace** (early boot, some CLI) or when the trace
+is sampled away. This is the raw data an issues UI groups by
+`exception.group` (first/last seen, count, sample stacktrace, drill to
+the trace). The counter stays class-scoped for bounded rate/alerting;
+the fingerprint lives on the record, never as a metric label.
+
+> Backend error tracking without a separate error-tracker: query the
+> exception records in Loki, or group them in
+> [`cboxdk/laravel-telemetry-ui`](https://github.com/cboxdk/laravel-telemetry).
+> What this does not replace: a triage workflow (assign/resolve),
+> automatic regression detection, or frontend/source-map error tracking.

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Structured exception records** for drop-in backend error tracking.
+  Every `report()`ed exception (handled or not) now emits an OTLP log
+  record (→ Loki, severity ERROR) with `exception.type`/`message`/`file`/
+  `line`/`stacktrace`, the ambient context, and a **Sentry-style
+  `exception.group` fingerprint** (class + throw site, `vendor/` skipped)
+  so identical failures group into one issue instead of merging by class.
+  Captured even out of a trace or when sampled away. Span exception
+  events are enriched to match and deduplicated by exception identity
+  (a failed job is recorded once, not twice). Opt-in `exception.source`
+  (`instrument.exception_source`) attaches the code around the throw site.
+
 ## [0.1.0-alpha.4] - 2026-07-04
 
 ### Added

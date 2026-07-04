@@ -205,7 +205,8 @@ with the key `log.message`.
 | `instrument.mail` | `TELEMETRY_INSTRUMENT_MAIL` | `true` — mail.send spans + counter |
 | `instrument.notifications` | `TELEMETRY_INSTRUMENT_NOTIFICATIONS` | `true` — notification.send spans + counter |
 | `instrument.http_client` | `TELEMETRY_INSTRUMENT_HTTP_CLIENT` | `true` — outgoing Http-client spans + duration by host/method/status |
-| `instrument.exceptions` | `TELEMETRY_INSTRUMENT_EXCEPTIONS` | `true` — exceptions.reported counter incl. handled report()s |
+| `instrument.exceptions` | `TELEMETRY_INSTRUMENT_EXCEPTIONS` | `true` — `exceptions.reported` counter + a structured, fingerprinted exception record (OTLP log) on every `report()`, incl. handled ones |
+| `instrument.exception_source` | `TELEMETRY_INSTRUMENT_EXCEPTION_SOURCE` | `false` — attach the source lines around the throw site (`exception.source`); reads the file, so opt-in |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 
 ## Host & process monitor

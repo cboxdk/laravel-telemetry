@@ -13,6 +13,7 @@ use Cbox\Telemetry\Console\MonitorCommand;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
@@ -45,6 +46,7 @@ use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
+use Cbox\Telemetry\Support\ExceptionAttributes;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
@@ -676,14 +678,36 @@ class TelemetryServiceProvider extends ServiceProvider
                 $handler->reportable(static function (\Throwable $e) use ($app): void {
                     FailSafe::guard(function () use ($app, $e) {
                         $telemetry = $app->make(TelemetryManager::class);
+                        $config = $app->make('config');
 
+                        // Bounded metric: rate/alerting by class.
                         $telemetry->counter('exceptions.reported', 'Exceptions passed to report()')
                             ->inc(1, ['exception' => $e::class]);
 
-                        $telemetry->currentSpan()?->addEvent('exception', [
-                            'exception.type' => $e::class,
-                            'exception.message' => $e->getMessage(),
-                        ]);
+                        $attributes = ExceptionAttributes::from(
+                            $e,
+                            $app->basePath(),
+                            (bool) $config->get('telemetry.instrument.exception_source', false),
+                        );
+
+                        // Trace waterfall: annotate the active span WITHOUT
+                        // failing it (report() may be a handled + recovered
+                        // path). Deduped so a failed job isn't recorded twice.
+                        $telemetry->currentSpan()?->noteException($e, fail: false);
+
+                        // Issues feed: a structured, searchable error record
+                        // (OTLP log → Loki) with a fingerprint — captured even
+                        // out of a trace or when the trace is sampled away.
+                        $span = $telemetry->currentSpan();
+                        $telemetry->recordEvent(new TelemetryEvent(
+                            name: 'exception',
+                            timeUnixNano: (int) (microtime(true) * 1e9),
+                            attributes: $telemetry->contextAttributes() + $attributes,
+                            traceId: $span->traceId ?? $telemetry->traceId(),
+                            spanId: $span?->spanId,
+                            severityNumber: 17, // ERROR
+                            severityText: 'ERROR',
+                        ));
                     });
                 });
             },

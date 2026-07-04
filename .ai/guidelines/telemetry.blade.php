@@ -57,3 +57,4 @@ Or inline: `Telemetry::contributes('my-domain', fn (\Cbox\Telemetry\Metrics\Regi
 - OTLP metrics need the scheduler: `Schedule::command('telemetry:flush')->everyMinute()->onOneServer();`
 - Ship logs as trace-correlated OTLP records by adding the `telemetry` log channel to the stack in `config/logging.php`: `['driver' => 'telemetry', 'level' => 'info']`.
 - Full docs live in `vendor/cboxdk/laravel-telemetry/docs/` (start at `docs/getting-started/api-reference.md`).
+- Exceptions: every `report()`ed exception emits a structured OTLP record (`exception.type/message/file/line/stacktrace`, `exception.group` fingerprint, ambient context) for backend error tracking; `exceptions.reported{exception}` counts by class. Fingerprint groups by throw site, not class.

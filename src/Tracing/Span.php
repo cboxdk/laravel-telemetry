@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Tracing;
 
+use Cbox\Telemetry\Support\ExceptionAttributes;
 use Cbox\Telemetry\Support\TraceParent;
 use Closure;
 use Throwable;
@@ -24,6 +25,8 @@ final class Span
     private array $events = [];
 
     private bool $customName = false;
+
+    private ?int $recordedException = null;
 
     private SpanStatus $status = SpanStatus::Unset;
 
@@ -154,13 +157,29 @@ final class Span
 
     public function recordException(Throwable $exception): self
     {
-        $this->addEvent('exception', [
-            'exception.type' => $exception::class,
-            'exception.message' => $exception->getMessage(),
-            'exception.stacktrace' => $exception->getTraceAsString(),
-        ]);
+        return $this->noteException($exception, fail: true);
+    }
 
-        return $this->setStatus(SpanStatus::Error, $exception->getMessage());
+    /**
+     * Attach the exception to this span. Deduplicated by exception identity
+     * so an error reported through several paths (JobFailed AND report(),
+     * say) lands one event, not three. `$fail` sets the span to Error —
+     * unhandled failures fail the span; a handled report() only annotates.
+     */
+    public function noteException(Throwable $exception, bool $fail): self
+    {
+        $id = spl_object_id($exception);
+
+        if ($this->recordedException !== $id) {
+            $this->recordedException = $id;
+            $this->addEvent('exception', ExceptionAttributes::from($exception));
+        }
+
+        if ($fail) {
+            $this->setStatus(SpanStatus::Error, $exception->getMessage());
+        }
+
+        return $this;
     }
 
     public function setStatus(SpanStatus $status, ?string $description = null): self

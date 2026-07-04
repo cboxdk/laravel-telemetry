@@ -398,6 +398,12 @@ return [
         // exceptions.reported counter — includes HANDLED exceptions that
         // report() swallows.
         'exceptions' => env('TELEMETRY_INSTRUMENT_EXCEPTIONS', true),
+
+        // Attach the source lines around the throw site to exception
+        // records (exception.source) — the "feels like Sentry" detail.
+        // Off by default: it reads the source file on every reported
+        // exception.
+        'exception_source' => env('TELEMETRY_INSTRUMENT_EXCEPTION_SOURCE', false),
     ],
 
     /*
