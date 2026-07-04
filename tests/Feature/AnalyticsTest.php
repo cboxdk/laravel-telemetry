@@ -89,3 +89,68 @@ it('computes a cookieless session id that is stable per day and rotates', functi
         ->not->toBe($tue)          // rotates at midnight
         ->not->toBe($otherSalt);   // salt matters
 });
+
+function analyticsEvents(CollectingExporter $collector, string $name): array
+{
+    $events = [];
+    foreach ($collector->batches() as $batch) {
+        foreach ($batch->events as $event) {
+            if ($event->name === $name) {
+                $events[] = $event;
+            }
+        }
+    }
+
+    return $events;
+}
+
+it('emits an unsampled analytics.page_view event for an HTML GET', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.session.salt', 'test-salt');
+    Route::get('/page', fn () => response('<html>hi</html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/page', ['referer' => 'https://google.com/'])->assertOk();
+
+    $events = analyticsEvents($this->collector, 'analytics.page_view');
+    expect($events)->toHaveCount(1);
+
+    $attrs = $events[0]->attributes;
+    expect($attrs['telemetry.stream'])->toBe('analytics')
+        ->and($attrs['analytics.source'])->toBe('server')
+        ->and($attrs['url.path'])->toBe('/page')
+        ->and($attrs['http.response.status_code'])->toBe(200)
+        ->and($attrs['http.request.header.referer'])->toBe('https://google.com/')
+        ->and($attrs['session.id'])->toHaveLength(32)
+        ->and($events[0]->traceId)->not->toBeNull();
+});
+
+it('does not emit a page_view when analytics is off', function () {
+    config()->set('telemetry.analytics.enabled', false);
+    Route::get('/page', fn () => response('<html>hi</html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/page')->assertOk();
+
+    expect(analyticsEvents($this->collector, 'analytics.page_view'))->toBeEmpty();
+});
+
+it('does not count JSON/XHR or non-GET as page views', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    Route::get('/api', fn () => response()->json(['ok' => true]));
+    Route::get('/page', fn () => response('<html>hi</html>')->header('Content-Type', 'text/html'));
+
+    $this->getJson('/api')->assertOk();                               // JSON response
+    $this->get('/page', ['X-Requested-With' => 'XMLHttpRequest']);    // AJAX
+
+    expect(analyticsEvents($this->collector, 'analytics.page_view'))->toBeEmpty();
+});
+
+it('can disable page_view events while keeping session.id', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.page_views', false);
+    Route::get('/page', fn () => response('<html>hi</html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/page')->assertOk();
+
+    expect(analyticsEvents($this->collector, 'analytics.page_view'))->toBeEmpty()
+        ->and(analyticsServerSpan($this->collector)->attributes())->toHaveKey('session.id');
+});

@@ -357,6 +357,10 @@ return [
     'analytics' => [
         'enabled' => env('TELEMETRY_ANALYTICS', false),
 
+        // Emit an unsampled `analytics.page_view` event per top-level
+        // document load — the count that must never be undersampled.
+        'page_views' => env('TELEMETRY_ANALYTICS_PAGE_VIEWS', true),
+
         'session' => [
             // Cookieless by default: the built-in session.id is a
             // daily-rotating, salted hash so a raw IP never becomes a

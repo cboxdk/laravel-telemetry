@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.12] - 2026-07-04
+
+Analytics — unsampled page-view events.
+
+### Added
+
+- **`analytics.page_view` events (opt-in).** Each top-level document load (a
+  GET returning HTML, non-AJAX) emits an `analytics.page_view` **event** — an
+  OTLP log record, not a span — so it bypasses trace sampling and a page view
+  is never undercounted, even when the full trace is tail-sampled away. It
+  carries `trace_id` + `session.id` as the bridge to the waterfall, plus a
+  flat one-row-per-view shape (`url.path`, `http.route`, status, referrer,
+  `user_agent.original`, `enduser.id`, `client.geo.*`) and a
+  `telemetry.stream="analytics"` marker so an OTel Collector can route the
+  stream to ClickHouse with no app change. Toggle with
+  `TELEMETRY_ANALYTICS_PAGE_VIEWS` (default on when analytics is enabled).
+- New [Analytics guide](docs/production/analytics.md).
+
 ## [0.1.0-alpha.11] - 2026-07-04
 
 Analytics foundation — the shared `session.id` keystone (opt-in, default off).

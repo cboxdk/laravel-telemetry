@@ -212,8 +212,21 @@ final class TraceRequest
             // additive — nothing here runs, or is stamped, when analytics is
             // off, so existing telemetry is bit-for-bit unchanged.
             if (config('telemetry.analytics.enabled', false)) {
-                $span->setAttribute('session.id', $this->analyticsSessionId($request));
-                $span->setAttributes($this->telemetry->resolveClientGeo($request));
+                $sessionId = $this->analyticsSessionId($request);
+                $geo = $this->telemetry->resolveClientGeo($request);
+
+                $span->setAttribute('session.id', $sessionId);
+                $span->setAttributes($geo);
+
+                // The unsampled analytics page-view: an EVENT (OTLP log), not
+                // a span, so it survives trace sampling — a page view must
+                // never be undercounted. Carries session.id + trace id as the
+                // bridge to the (maybe-sampled-away) waterfall. Only for
+                // top-level document loads (GET, HTML, non-AJAX) — the
+                // canonical count that works even without JS.
+                if (config('telemetry.analytics.page_views', true) && $this->isPageView($request, $response)) {
+                    $this->emitPageView($request, $response, $sessionId, $geo);
+                }
             }
 
             // App-defined root-span enrichment with the final response in
@@ -365,6 +378,61 @@ final class TraceRequest
         });
 
         return is_string($guard) && $guard !== '' ? $guard : null;
+    }
+
+    /**
+     * A top-level document load worth counting as a page view: a GET that
+     * returns HTML and isn't an AJAX/fetch call. Assets, API/JSON and XHR are
+     * excluded — the browser SDK counts client-side navigations separately.
+     */
+    private function isPageView(Request $request, Response $response): bool
+    {
+        if (! $request->isMethod('GET') || $request->ajax()) {
+            return false;
+        }
+
+        return str_contains((string) $response->headers->get('Content-Type', ''), 'text/html');
+    }
+
+    /**
+     * Emit the unsampled `analytics.page_view` event (an OTLP log record, so
+     * it survives trace sampling). Flat, one-row-per-view shape with a
+     * `telemetry.stream` marker so an OTel Collector can route it to
+     * ClickHouse without any app change.
+     *
+     * @param  array<string, scalar|null>  $geo
+     */
+    private function emitPageView(Request $request, Response $response, string $sessionId, array $geo): void
+    {
+        $attributes = array_filter([
+            'telemetry.stream' => 'analytics',
+            'analytics.source' => 'server',
+            'analytics.event' => 'page_view',
+            'session.id' => $sessionId,
+            'url.path' => $this->requestPath($request),
+            'http.route' => $this->routePattern($request),
+            'http.request.method' => $request->getMethod(),
+            'http.response.status_code' => $response->getStatusCode(),
+            'user_agent.original' => $request->userAgent(),
+            'http.request.header.referer' => $request->headers->get('referer'),
+        ], static fn ($v) => $v !== null);
+
+        if (($user = $request->user()) !== null) {
+            $attributes['enduser.id'] = (string) $user->getAuthIdentifier();
+        }
+
+        /** @var array<string, scalar|null> $attributes */
+        $this->telemetry->event('analytics.page_view', [...$attributes, ...$geo]);
+    }
+
+    /**
+     * The normalized request path ("/" for the root).
+     */
+    private function requestPath(Request $request): string
+    {
+        $path = trim($request->path(), '/');
+
+        return $path === '' ? '/' : '/'.$path;
     }
 
     /**
