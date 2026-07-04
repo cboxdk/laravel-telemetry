@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Http\BrowserSnippet;
+use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
@@ -105,5 +107,42 @@ it('redacts secrets in browser span attributes before export', function () {
 
 it('404s when the ingest is disabled', function () {
     expect(fn () => ingest([browserSpan()], ['enabled' => false]))
+        ->toThrow(HttpException::class);
+});
+
+it('renders the browser snippet (script + config) when ingest is enabled', function () {
+    config()->set('telemetry.ingest.spans.enabled', true);
+
+    $html = BrowserSnippet::render();
+
+    expect($html)->toContain('<script')
+        ->toContain('browser.js')
+        ->toContain('data-endpoint=')
+        ->toContain('data-fetch="1"')
+        ->toContain('data-errors="1"');
+});
+
+it('renders nothing when ingest is disabled', function () {
+    config()->set('telemetry.ingest.spans.enabled', false);
+
+    expect(BrowserSnippet::render())->toBe('');
+});
+
+it('serves the zero-build RUM script with cache headers', function () {
+    config()->set('telemetry.ingest.spans.enabled', true);
+
+    $res = (new BrowserAssetController)(app(TelemetryManager::class));
+
+    expect($res->getStatusCode())->toBe(200)
+        ->and($res->headers->get('Content-Type'))->toContain('javascript')
+        ->and($res->headers->get('Cache-Control'))->toContain('max-age')
+        ->and($res->getContent())->toContain('traceparent')
+        ->and($res->getContent())->toContain('sendBeacon');
+});
+
+it('404s the RUM script when ingest is disabled', function () {
+    config()->set('telemetry.ingest.spans.enabled', false);
+
+    expect(fn () => (new BrowserAssetController)(app(TelemetryManager::class)))
         ->toThrow(HttpException::class);
 });

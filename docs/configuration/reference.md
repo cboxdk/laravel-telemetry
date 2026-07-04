@@ -184,9 +184,11 @@ with the key `log.message`.
 | `ingest.spans.middleware` | — | `['throttle:300,1']` — add `auth` etc. for logged-in apps |
 | `ingest.spans.max_spans` | — | `128` per batch (excess dropped) |
 | `ingest.spans.max_attributes` | — | `32` per span |
-| `ingest.spans.sample_rate` | — | `1.0` — head sampling (0–1) to cap volume |
+| `ingest.spans.sample_rate` | — | `1.0` — server-side head sampling (0–1) to cap volume |
+| `ingest.spans.asset_path` | `TELEMETRY_INGEST_SPANS_ASSET` | `telemetry/browser.js` — the bundled RUM script `@telemetryBrowser` loads |
+| `ingest.spans.browser.{fetch,errors,sample}` | — | `true`/`true`/`1.0` — what the bundled script captures |
 
-Correlate with `@telemetryTraceparent` in your layout. See
+Add `@telemetryBrowser` to your layout for turnkey RUM (or `@telemetryTraceparent` + your own script). See
 [Browser tracing](../production/browser-tracing.md).
 
 ## Automatic instrumentation

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] - 2026-07-04
+
+Turnkey browser RUM: a bundled, zero-build script + one Blade directive.
+
+### Added
+
+- **`@telemetryBrowser`** — a single Blade directive that emits the
+  traceparent meta plus a bundled, dependency-free RUM script (served from
+  your app, cached). It roots the browser trace on the server trace,
+  records a `document.load` span, instruments `fetch` (propagating
+  `traceparent` to same-origin calls so backend spans join the trace;
+  cross-origin skipped to avoid CORS preflight), and captures uncaught JS
+  errors as error spans. What it captures is configurable
+  (`ingest.spans.browser.{fetch,errors,sample}`). Publish it to your own
+  build with `vendor:publish --tag=telemetry-assets`. No npm, no build
+  step — a full browser SDK remains a separate future package.
+
 ## [0.1.0-alpha.6] - 2026-07-04
 
 End-to-end distributed tracing: an optional browser span ingest.
@@ -385,7 +402,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.6...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.7...HEAD
+[0.1.0-alpha.7]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.3...v0.1.0-alpha.4

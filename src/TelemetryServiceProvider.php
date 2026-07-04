@@ -22,6 +22,7 @@ use Cbox\Telemetry\Exporters\Prometheus\PrometheusRenderer;
 use Cbox\Telemetry\Exporters\Spool\RedisSpool;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
+use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
@@ -164,6 +165,10 @@ class TelemetryServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../config/telemetry.php' => config_path('telemetry.php'),
             ], 'telemetry-config');
+
+            $this->publishes([
+                __DIR__.'/../resources/js/browser.js' => public_path('vendor/telemetry/browser.js'),
+            ], 'telemetry-assets');
 
             $this->commands([FlushCommand::class,
                 DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
@@ -454,6 +459,10 @@ class TelemetryServiceProvider extends ServiceProvider
             ->middleware((array) ($config['middleware'] ?? []))
             ->defaults('telemetryIngest', $config)
             ->name('telemetry.ingest.spans');
+
+        // The zero-build RUM script served for @telemetryBrowser.
+        $router->get((string) ($config['asset_path'] ?? 'telemetry/browser.js'), BrowserAssetController::class)
+            ->name('telemetry.ingest.asset');
     }
 
     private function registerPrometheusRoutes(): void

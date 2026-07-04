@@ -38,21 +38,40 @@ strict payload bounding and optional head sampling — never a bearer token
 ]],
 ```
 
-## Correlate the browser to the server trace
+## Turnkey: one directive
 
-Drop the directive in your layout `<head>` — it renders a
-`<meta name="traceparent">` with the current server trace (a no-op when
-none is active):
+Add `@telemetryBrowser` to your layout `<head>` and you're done — it emits
+the traceparent meta **and** a bundled, zero-dependency RUM script:
 
 ```blade
 <head>
-    @telemetryTraceparent
+    @telemetryBrowser
     ...
 </head>
 ```
 
-The browser reads that as the parent for its root span, and sends the same
-`traceparent` header on API calls so the backend continues it.
+That script (served from your app, cached) roots the browser trace on the
+server trace, records a `document.load` span, instruments `fetch`
+(propagating `traceparent` to **same-origin** calls so backend spans join
+the trace — cross-origin is skipped to avoid CORS preflight), and captures
+uncaught JS errors as error spans. Tune it in config:
+
+```php
+'ingest' => ['spans' => [
+    'browser' => [
+        'fetch' => true,    // instrument fetch + propagate traceparent
+        'errors' => true,   // capture uncaught errors
+        'sample' => 1.0,    // client-side head sampling (0–1)
+    ],
+]],
+```
+
+Publish it to your own build/CDN instead of serving it live:
+`php artisan vendor:publish --tag=telemetry-assets`.
+
+Prefer to roll your own? Use `@telemetryTraceparent` (just the meta) and
+POST to the endpoint yourself — the contract and a minimal snippet are
+below.
 
 ## The endpoint contract
 
@@ -83,9 +102,9 @@ The browser reads that as the parent for its root span, and sends the same
   each span is stamped `browser: true`.
 - Always returns `204`.
 
-## A minimal browser snippet
+## Or roll your own
 
-No SDK required — a few lines get you page-load + fetch spans:
+No SDK required — `@telemetryTraceparent` plus a few lines get you page-load + fetch spans:
 
 ```js
 const hex = n => [...crypto.getRandomValues(new Uint8Array(n))]

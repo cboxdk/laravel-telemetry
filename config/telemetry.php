@@ -304,6 +304,14 @@ return [
             'max_spans' => 128,          // per batch; excess dropped
             'max_attributes' => 32,      // per span
             'sample_rate' => 1.0,        // head sampling; drop a fraction of batches
+
+            // The bundled zero-build RUM script (@telemetryBrowser).
+            'asset_path' => env('TELEMETRY_INGEST_SPANS_ASSET', 'telemetry/browser.js'),
+            'browser' => [
+                'fetch' => true,   // instrument fetch + propagate traceparent (same-origin)
+                'errors' => true,  // capture uncaught JS errors as error spans
+                'sample' => 1.0,   // client-side head sampling (0-1)
+            ],
         ],
     ],
 
