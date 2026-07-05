@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Browser span/event ingest (`SpanIngestController`) no longer exports to
+  OTLP inline in the request cycle — the built spans/events are stashed on
+  the request and exported by a new terminable `Http\Middleware\FlushBrowserIngest`
+  (auto-attached to the ingest route), so a slow/down collector can no
+  longer add curl latency to this world-reachable endpoint's response.
+- Static analysis raised from PHPStan/Larastan level 8 to level 9. A new
+  `Support\Cast` helper type-narrows `mixed` values (config reads, framework
+  interfaces typed `mixed`) into their expected shape, degrading to a sane
+  default instead of PHP's silent, often-wrong scalar coercions.
+- `tests/Unit` and `tests/Feature` now mirror `src/`'s subdirectory
+  structure, matching `cboxdk/system-metrics` and `cboxdk/laravel-queue-metrics`.
+
+### Fixed
+
+- `TelemetryManager::labelRequestsUsing()` had lost its docblock to a
+  copy-paste artifact (an orphaned block sat above `nameRequestsUsing()`
+  instead); both are documented correctly now.
+- `Span::cpuNowMs()` no longer assumes every `getrusage()` key is present.
+- `QueueInstrumentation::completeJob()`'s trailing `flush()`/`resetContext()`
+  now run inside `FailSafe::guard`, consistent with the rest of the file.
+- Removed a duplicated docblock on `PrometheusRenderer::render()`.
+- `Facades\Telemetry`'s `@method` docblock was missing `resolveSessionUsing()`,
+  `resolveClientGeoUsing()`, `ingestSpans()` and `ingestEvents()`.
+- `ScheduleInstrumentation` cast `$event->task->timezone` straight to
+  `string`, which fatal-errors when a schedule uses `->timezone(new
+  DateTimeZone(...))` instead of a timezone name string; now handles
+  `DateTimeZone`, `string` and the `config('app.timezone')` fallback
+  explicitly.
+- Added test coverage for `Providers\SystemMetricsProvider` (previously none).
+
 ## [0.1.0-alpha.14] - 2026-07-05
 
 Analytics — built-in geo + User-Agent parsing (opt-in, optional deps).
@@ -550,7 +582,14 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.7...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.14...HEAD
+[0.1.0-alpha.14]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.13...v0.1.0-alpha.14
+[0.1.0-alpha.13]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.12...v0.1.0-alpha.13
+[0.1.0-alpha.12]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.11...v0.1.0-alpha.12
+[0.1.0-alpha.11]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.10...v0.1.0-alpha.11
+[0.1.0-alpha.10]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
+[0.1.0-alpha.9]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
+[0.1.0-alpha.8]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.4...v0.1.0-alpha.5

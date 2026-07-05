@@ -6,7 +6,7 @@ start at `docs/getting-started/api-reference.md` for the public API.
 ## Commands
 
 ```bash
-composer check          # pint --test + phpstan (level 8, 1G) + pest — run before every commit
+composer check          # pint --test + phpstan (level 9, 1G) + pest — run before every commit
 composer test           # pest only
 vendor/bin/pest --group=redis   # integration tests (needs local Redis)
 php -d apc.enable_cli=1 vendor/bin/pest --group=apcu
@@ -51,7 +51,9 @@ structural changes; ADR conclusions are not to be silently reversed.
 ## Conventions
 
 - PHP ^8.3, `declare(strict_types=1)` everywhere, final classes by default,
-  readonly value objects, Pest tests, Larastan level 8.
+  readonly value objects, Pest tests, Larastan level 9. Narrow `mixed`
+  values (config reads, framework interfaces typed `mixed`) through
+  `Support\Cast` rather than a raw `(string)`/`(int)`/`(float)` cast.
 - New behaviour ships with tests; public API changes ship with docs
   (`docs/`) and, when user-visible, a `CHANGELOG.md` entry and an update to
   `.ai/guidelines/telemetry.blade.php` + `llms.txt`.

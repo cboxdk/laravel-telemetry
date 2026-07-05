@@ -8,6 +8,7 @@ use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
 use Throwable;
@@ -48,7 +49,7 @@ final class DoctorCommand extends Command
 
     private function checkStore(MetricStore $store): bool
     {
-        $driver = (string) config('telemetry.store');
+        $driver = Cast::string(config('telemetry.store'), 'redis');
 
         try {
             $definition = new MetricDefinition('telemetry.doctor.heartbeat', MetricType::Gauge, 'telemetry:doctor round-trip check', 's');
@@ -108,13 +109,13 @@ final class DoctorCommand extends Command
             return true;
         }
 
-        $endpoint = (string) config('telemetry.otlp.endpoint');
+        $endpoint = Cast::string(config('telemetry.otlp.endpoint'));
 
         $transport = new OtlpTransport(
             endpoint: $endpoint,
-            headers: (array) config('telemetry.otlp.headers', []),
-            timeout: (float) config('telemetry.otlp.timeout', 3.0),
-            connectTimeout: (float) config('telemetry.otlp.connect_timeout', 1.0),
+            headers: Cast::stringMap(config('telemetry.otlp.headers', [])),
+            timeout: Cast::float(config('telemetry.otlp.timeout'), 3.0),
+            connectTimeout: Cast::float(config('telemetry.otlp.connect_timeout'), 1.0),
         );
 
         $start = microtime(true);

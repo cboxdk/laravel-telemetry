@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http;
 
 use Cbox\Telemetry\Support\AnalyticsIdentity;
+use Cbox\Telemetry\Support\Cast;
 
 /**
  * Renders the @telemetryBrowser output: the traceparent meta (so the
@@ -28,8 +29,8 @@ final class BrowserSnippet
         $traceparent = app('telemetry')->traceparent();
         $meta = is_string($traceparent) ? '<meta name="traceparent" content="'.e($traceparent).'">' : '';
 
-        $asset = url((string) ($config['asset_path'] ?? 'telemetry/browser.js'));
-        $endpoint = url((string) ($config['path'] ?? 'telemetry/spans'));
+        $asset = url(Cast::string($config['asset_path'] ?? null, 'telemetry/browser.js'));
+        $endpoint = url(Cast::string($config['path'] ?? null, 'telemetry/spans'));
 
         $analytics = config('telemetry.analytics.enabled', false) ? ' data-analytics="1"' : '';
 
@@ -37,7 +38,7 @@ final class BrowserSnippet
             .' data-endpoint="'.e($endpoint).'"'
             .' data-fetch="'.(($browser['fetch'] ?? true) ? '1' : '0').'"'
             .' data-errors="'.(($browser['errors'] ?? true) ? '1' : '0').'"'
-            .' data-sample="'.e((string) ($browser['sample'] ?? 1.0)).'"'
+            .' data-sample="'.e(Cast::string($browser['sample'] ?? null, '1.0')).'"'
             .$analytics
             .self::sessionAttribute().'></script>';
     }
@@ -59,7 +60,7 @@ final class BrowserSnippet
         $sessionId = app('telemetry')->resolveSessionId($request)
             ?? AnalyticsIdentity::cookielessSession(
                 $request,
-                (string) (config('telemetry.analytics.session.salt') ?: config('app.key', '')),
+                Cast::string(config('telemetry.analytics.session.salt')) ?: Cast::string(config('app.key')),
             );
 
         return ' data-session="'.e($sessionId).'"';

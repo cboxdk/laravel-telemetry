@@ -175,6 +175,22 @@ with the key `log.message`.
 |---|---|
 | `default_buckets` | `[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]` (ms) |
 
+## Analytics (optional)
+
+An additive layer on top of the telemetry already collected — a shared
+`session.id` across browser + server so a whole visit, not just one trace,
+can be analysed. Off by default; changes nothing when disabled. See
+[Analytics](../production/analytics.md).
+
+| Key | Env | Default |
+|---|---|---|
+| `analytics.enabled` | `TELEMETRY_ANALYTICS` | `false` |
+| `analytics.page_views` | `TELEMETRY_ANALYTICS_PAGE_VIEWS` | `true` — unsampled `analytics.page_view` event per top-level document load |
+| `analytics.session.salt` | `TELEMETRY_ANALYTICS_SALT` | — the daily-rotating, salted hash that keeps the built-in `session.id` cookieless; override entirely via `Telemetry::resolveSessionUsing()` |
+| `analytics.geo.enabled` | `TELEMETRY_ANALYTICS_GEO` | `false` — country/continent from the client IP via an optional MaxMind database (`composer require geoip2/geoip2`); `Telemetry::resolveClientGeoUsing()` (e.g. Cloudflare `CF-IPCountry`) always wins |
+| `analytics.geo.database` | `TELEMETRY_ANALYTICS_GEO_DB` | — path to the MaxMind `.mmdb` file |
+| `analytics.user_agent` | `TELEMETRY_ANALYTICS_UA` | `false` — parse `user_agent.original` into low-cardinality `user_agent.name`/`os.name`/`device.type` (families only, never versions) |
+
 ## Browser span ingest (optional)
 
 | Key | Env | Default |

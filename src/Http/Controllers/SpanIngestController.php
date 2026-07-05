@@ -23,9 +23,19 @@ use Illuminate\Http\Response;
  * every input is bounded hard: capped span count, strict hex ids, capped
  * names/attributes, sane timestamps. Invalid spans are dropped, not
  * fatal. Values pass through the redaction engine before export.
+ *
+ * The built spans/events are stashed on the request rather than exported
+ * inline — Http\Middleware\FlushBrowserIngest (auto-attached to this
+ * route) does the actual OTLP export from terminate(), the same timing
+ * as the main request span flush, so a slow/down collector never adds
+ * curl latency to this world-reachable endpoint's response.
  */
 final class SpanIngestController
 {
+    public const PENDING_SPANS = 'telemetry.ingest.pending_spans';
+
+    public const PENDING_EVENTS = 'telemetry.ingest.pending_events';
+
     private const TRACE_ID = '/^[0-9a-f]{32}$/';
 
     private const SPAN_ID = '/^[0-9a-f]{16}$/';
@@ -48,7 +58,7 @@ final class SpanIngestController
             return new Response('', 204);
         }
 
-        FailSafe::guard(function () use ($request, $telemetry, $config) {
+        FailSafe::guard(function () use ($request, $config) {
             $input = $request->json('spans');
 
             if (! is_array($input)) {
@@ -69,13 +79,15 @@ final class SpanIngestController
                 }
             }
 
-            $telemetry->ingestSpans($spans);
+            if ($spans !== []) {
+                $request->attributes->set(self::PENDING_SPANS, $spans);
+            }
         });
 
         // Analytics events (SPA page views, engagement, custom track()) —
         // re-emitted as unsampled OTLP log records so they are never
         // undercounted, on the same event stream as the server's page views.
-        FailSafe::guard(function () use ($request, $telemetry, $config) {
+        FailSafe::guard(function () use ($request, $config) {
             $input = $request->json('events');
 
             if (! is_array($input)) {
@@ -96,7 +108,9 @@ final class SpanIngestController
                 }
             }
 
-            $telemetry->ingestEvents($events);
+            if ($events !== []) {
+                $request->attributes->set(self::PENDING_EVENTS, $events);
+            }
         });
 
         return new Response('', 204);

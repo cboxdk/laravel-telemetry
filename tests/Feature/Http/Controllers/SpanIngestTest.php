@@ -6,6 +6,7 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Http\BrowserSnippet;
 use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
+use Cbox\Telemetry\Http\Middleware\FlushBrowserIngest;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -28,7 +29,10 @@ function ingest(array $spans, array $config = []): Response
     $route->defaults('telemetryIngest', $config + ['enabled' => true, 'max_spans' => 128, 'max_attributes' => 32, 'sample_rate' => 1.0]);
     $request->setRouteResolver(fn () => $route);
 
-    return (new SpanIngestController)($request, app(TelemetryManager::class));
+    $response = (new SpanIngestController)($request, app(TelemetryManager::class));
+    app(FlushBrowserIngest::class)->terminate($request, $response);
+
+    return $response;
 }
 
 function ingestedSpans(CollectingExporter $c): array
@@ -50,6 +54,24 @@ function browserSpan(array $over = []): array
         'attributes' => ['http.url' => 'https://app.test/dashboard'],
     ], $over);
 }
+
+it('defers the export to terminate(), not the controller response', function () {
+    $request = Request::create('/telemetry/spans', 'POST', content: json_encode(['spans' => [browserSpan()]]));
+    $request->headers->set('Content-Type', 'application/json');
+
+    $route = new Route('POST', '/telemetry/spans', []);
+    $route->defaults('telemetryIngest', ['enabled' => true, 'max_spans' => 128, 'max_attributes' => 32, 'sample_rate' => 1.0]);
+    $request->setRouteResolver(fn () => $route);
+
+    $response = (new SpanIngestController)($request, app(TelemetryManager::class));
+
+    expect($response->getStatusCode())->toBe(204)
+        ->and(ingestedSpans($this->collector))->toBeEmpty();
+
+    app(FlushBrowserIngest::class)->terminate($request, $response);
+
+    expect(ingestedSpans($this->collector))->toHaveCount(1);
+});
 
 it('ingests a valid browser span under its own trace id', function () {
     $trace = str_repeat('ab12', 8);
@@ -171,7 +193,10 @@ function ingestEventsPayload(array $events, array $config = []): Response
     $route->defaults('telemetryIngest', $config + ['enabled' => true, 'max_spans' => 128, 'max_attributes' => 32, 'sample_rate' => 1.0]);
     $request->setRouteResolver(fn () => $route);
 
-    return (new SpanIngestController)($request, app(TelemetryManager::class));
+    $response = (new SpanIngestController)($request, app(TelemetryManager::class));
+    app(FlushBrowserIngest::class)->terminate($request, $response);
+
+    return $response;
 }
 
 function ingestedEvents(CollectingExporter $c): array

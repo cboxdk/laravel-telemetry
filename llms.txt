@@ -40,6 +40,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Custom exporters](docs/extension-points/exporters.md): the Exporter contract
 - [Analytics](docs/production/analytics.md): opt-in web analytics on the telemetry we collect — shared session.id, unsampled page_view events, geo/session hooks (Cloudflare-friendly)
 - [Browser tracing](docs/production/browser-tracing.md): optional frontend span ingest — end-to-end distributed tracing, plus token-gated source-map upload + `Symbolicator` for symbolicating browser stacks
+- [Error tracking & support flow](docs/production/error-tracking.md): the trace id ties errors (Sentry/Flare), support cases and the Tempo waterfall together
 - [Runtime hooks](docs/extension-points/hooks.md): request naming/enrichment, cache classification, user resolution, redaction
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
 - [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget

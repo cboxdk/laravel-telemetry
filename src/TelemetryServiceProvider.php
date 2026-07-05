@@ -26,6 +26,7 @@ use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Controllers\SourcemapController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
+use Cbox\Telemetry\Http\Middleware\FlushBrowserIngest;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
 use Cbox\Telemetry\Instrumentation\BusInstrumentation;
@@ -49,6 +50,7 @@ use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExceptionAttributes;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GeoResolver;
@@ -89,11 +91,11 @@ class TelemetryServiceProvider extends ServiceProvider
             $config = $app->make('config');
 
             return new OtlpTransport(
-                endpoint: (string) $config->get('telemetry.otlp.endpoint'),
-                headers: (array) $config->get('telemetry.otlp.headers', []),
-                timeout: (float) $config->get('telemetry.otlp.timeout', 3.0),
-                connectTimeout: (float) $config->get('telemetry.otlp.connect_timeout', 1.0),
-                compress: (bool) $config->get('telemetry.otlp.compression', true),
+                endpoint: Cast::string($config->get('telemetry.otlp.endpoint')),
+                headers: Cast::stringMap($config->get('telemetry.otlp.headers', [])),
+                timeout: Cast::float($config->get('telemetry.otlp.timeout'), 3.0),
+                connectTimeout: Cast::float($config->get('telemetry.otlp.connect_timeout'), 1.0),
+                compress: Cast::bool($config->get('telemetry.otlp.compression'), true),
             );
         });
 
@@ -102,9 +104,9 @@ class TelemetryServiceProvider extends ServiceProvider
 
             return new RedisSpool(
                 redis: $app->make('redis'),
-                connection: (string) $config->get('telemetry.otlp.spool.connection', 'default'),
-                key: (string) $config->get('telemetry.otlp.spool.key', 'telemetry:spool'),
-                maxItems: (int) $config->get('telemetry.otlp.spool.max_items', 20000),
+                connection: Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
+                key: Cast::string($config->get('telemetry.otlp.spool.key'), 'telemetry:spool'),
+                maxItems: Cast::int($config->get('telemetry.otlp.spool.max_items'), 20000),
             );
         });
 
@@ -124,8 +126,8 @@ class TelemetryServiceProvider extends ServiceProvider
             $enabled = (bool) $config->get('telemetry.enabled');
 
             $tracer = new Tracer(
-                sampleRate: $enabled ? (float) $config->get('telemetry.traces.sample_rate', 1.0) : 0.0,
-                maxBuffer: (int) $config->get('telemetry.traces.max_buffer', 5000),
+                sampleRate: $enabled ? Cast::float($config->get('telemetry.traces.sample_rate'), 1.0) : 0.0,
+                maxBuffer: Cast::int($config->get('telemetry.traces.max_buffer'), 5000),
                 alwaysSampleErrors: $enabled && (bool) $config->get('telemetry.traces.always_sample_errors', true),
             );
 
@@ -142,11 +144,11 @@ class TelemetryServiceProvider extends ServiceProvider
                 registry: $app->make(Registry::class),
                 tracer: $app->make(Tracer::class),
                 resource: $this->buildResource($app),
-                maxBufferedEvents: (int) $app->make('config')->get('telemetry.events.max_buffer', 5000),
+                maxBufferedEvents: Cast::int($app->make('config')->get('telemetry.events.max_buffer'), 5000),
                 tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
-                slowRequestMs: (float) $app->make('config')->get('telemetry.traces.details.slow_request_ms', 1000),
-                slowSpanMs: (float) $app->make('config')->get('telemetry.traces.details.slow_span_ms', 100),
-                redactor: Redactor::fromConfig((array) $app->make('config')->get('telemetry.redaction', [])),
+                slowRequestMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_request_ms'), 1000),
+                slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
+                redactor: Redactor::fromConfig(Cast::stringKeyedArray($app->make('config')->get('telemetry.redaction', []))),
                 selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
             );
 
@@ -163,11 +165,11 @@ class TelemetryServiceProvider extends ServiceProvider
 
         // Resolvable by telemetry-ui to symbolicate browser stacks.
         $this->app->singleton(Symbolicator::class, function (Application $app) {
-            $config = (array) $app->make('config')->get('telemetry.sourcemaps', []);
+            $config = Cast::stringKeyedArray($app->make('config')->get('telemetry.sourcemaps', []));
 
             return new Symbolicator(
-                $app->make('filesystem')->disk((string) ($config['disk'] ?? 'local')),
-                (string) ($config['prefix'] ?? 'telemetry/sourcemaps'),
+                $app->make('filesystem')->disk(Cast::string($config['disk'] ?? null, 'local')),
+                Cast::string($config['prefix'] ?? null, 'telemetry/sourcemaps'),
             );
         });
 
@@ -318,13 +320,15 @@ class TelemetryServiceProvider extends ServiceProvider
 
         AboutCommand::add('Telemetry', fn () => [
             'Enabled' => config('telemetry.enabled') ? '<fg=green;options=bold>ENABLED</>' : '<fg=yellow;options=bold>DISABLED</>',
-            'Metric Store' => (string) config('telemetry.store'),
-            'Exporters' => implode(', ', (array) config('telemetry.exporters', [])) ?: 'none',
+            'Metric Store' => Cast::string(config('telemetry.store'), 'redis'),
+            'Exporters' => implode(', ', Cast::stringList(config('telemetry.exporters', []))) ?: 'none',
             'Prometheus' => config('telemetry.prometheus.enabled')
-                ? collect((array) config('telemetry.prometheus.endpoints'))->map(fn ($e) => '/'.ltrim($e['path'] ?? '', '/'))->implode(', ')
+                ? collect(Cast::array(config('telemetry.prometheus.endpoints')))
+                    ->map(fn ($e) => '/'.ltrim(Cast::string(Cast::stringKeyedArray($e)['path'] ?? null), '/'))
+                    ->implode(', ')
                     .(config('telemetry.prometheus.allowed_ips') === [] ? ' <fg=yellow;options=bold>(OPEN — no IP allowlist)</>' : '')
                 : 'off',
-            'Trace Sample Rate' => (string) config('telemetry.traces.sample_rate'),
+            'Trace Sample Rate' => Cast::string(config('telemetry.traces.sample_rate'), '1.0'),
             'System Metrics' => class_exists(SystemMetrics::class) && config('telemetry.providers.system.enabled')
                 ? 'active'
                 : (config('telemetry.providers.system.enabled') ? 'install cboxdk/system-metrics to activate' : 'off'),
@@ -339,16 +343,16 @@ class TelemetryServiceProvider extends ServiceProvider
             return new NullMetricStore;
         }
 
-        $driver = (string) $config->get('telemetry.store', 'redis');
+        $driver = Cast::string($config->get('telemetry.store'), 'redis');
 
         $store = match ($driver) {
             'redis' => new RedisMetricStore(
                 redis: $app->make(RedisFactory::class),
-                connection: (string) $config->get('telemetry.stores.redis.connection', 'default'),
-                prefix: (string) $config->get('telemetry.stores.redis.prefix', 'telemetry'),
+                connection: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
+                prefix: Cast::string($config->get('telemetry.stores.redis.prefix'), 'telemetry'),
             ),
             'apcu' => new ApcuMetricStore(
-                prefix: (string) $config->get('telemetry.stores.apcu.prefix', 'telemetry'),
+                prefix: Cast::string($config->get('telemetry.stores.apcu.prefix'), 'telemetry'),
             ),
             'array' => new ArrayMetricStore,
             default => new NullMetricStore,
@@ -371,8 +375,8 @@ class TelemetryServiceProvider extends ServiceProvider
         $config = $app->make('config');
 
         $resource = [
-            'service.name' => (string) $config->get('telemetry.service.name', 'laravel'),
-            'deployment.environment.name' => (string) $config->get('telemetry.service.environment', 'production'),
+            'service.name' => Cast::string($config->get('telemetry.service.name'), 'laravel'),
+            'deployment.environment.name' => Cast::string($config->get('telemetry.service.environment'), 'production'),
             'host.name' => (string) gethostname(),
             'telemetry.sdk.name' => 'cboxdk/laravel-telemetry',
             'telemetry.sdk.language' => 'php',
@@ -463,7 +467,7 @@ class TelemetryServiceProvider extends ServiceProvider
      */
     private function registerSourcemapRoute(): void
     {
-        $config = (array) $this->app->make('config')->get('telemetry.sourcemaps', []);
+        $config = Cast::stringKeyedArray($this->app->make('config')->get('telemetry.sourcemaps', []));
 
         if (! ($config['enabled'] ?? false)) {
             return;
@@ -472,8 +476,8 @@ class TelemetryServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make(Router::class);
 
-        $router->post((string) ($config['path'] ?? 'telemetry/sourcemaps'), SourcemapController::class)
-            ->middleware((array) ($config['middleware'] ?? []))
+        $router->post(Cast::string($config['path'] ?? null, 'telemetry/sourcemaps'), SourcemapController::class)
+            ->middleware(Cast::stringList($config['middleware'] ?? []))
             ->name('telemetry.sourcemaps');
     }
 
@@ -493,7 +497,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
     private function registerSpanIngestRoute(): void
     {
-        $config = (array) $this->app->make('config')->get('telemetry.ingest.spans', []);
+        $config = Cast::stringKeyedArray($this->app->make('config')->get('telemetry.ingest.spans', []));
 
         if (! ($config['enabled'] ?? false)) {
             return;
@@ -502,13 +506,13 @@ class TelemetryServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make(Router::class);
 
-        $router->post((string) ($config['path'] ?? 'telemetry/spans'), SpanIngestController::class)
-            ->middleware((array) ($config['middleware'] ?? []))
+        $router->post(Cast::string($config['path'] ?? null, 'telemetry/spans'), SpanIngestController::class)
+            ->middleware([...Cast::stringList($config['middleware'] ?? []), FlushBrowserIngest::class])
             ->defaults('telemetryIngest', $config)
             ->name('telemetry.ingest.spans');
 
         // The zero-build RUM script served for @telemetryBrowser.
-        $router->get((string) ($config['asset_path'] ?? 'telemetry/browser.js'), BrowserAssetController::class)
+        $router->get(Cast::string($config['asset_path'] ?? null, 'telemetry/browser.js'), BrowserAssetController::class)
             ->name('telemetry.ingest.asset');
     }
 
@@ -560,7 +564,7 @@ class TelemetryServiceProvider extends ServiceProvider
                     }
 
                     $this->app->make(TelemetryManager::class)->rememberAuthenticatedUser([
-                        'id' => (string) $event->user->getAuthIdentifier(),
+                        'id' => Cast::string($event->user->getAuthIdentifier()),
                         'type' => Str::snake(class_basename($event->user)),
                         'guard' => $event->guard,
                     ]);
@@ -603,7 +607,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->make(QueryInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
-            (float) $this->app->make('config')->get('telemetry.instrument.queries_min_duration', 0),
+            Cast::float($this->app->make('config')->get('telemetry.instrument.queries_min_duration'), 0.0),
         );
     }
 
@@ -679,11 +683,11 @@ class TelemetryServiceProvider extends ServiceProvider
             // spans generating writes). An explicit ignore list is
             // UNIONED with these, never replaces them, so the documented
             // guarantee holds even when an operator adds their own.
-            $ignored = (array) $config->get('telemetry.instrument.redis_ignore_connections', []);
+            $ignored = Cast::stringList($config->get('telemetry.instrument.redis_ignore_connections', []));
             $ignored = array_values(array_unique([
-                (string) $config->get('telemetry.stores.redis.connection', 'default'),
-                (string) $config->get('telemetry.otlp.spool.connection', 'default'),
-                ...array_filter($ignored, is_string(...)),
+                Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
+                Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
+                ...$ignored,
             ]));
 
             $this->app->singleton(RedisInstrumentation::class);
@@ -823,7 +827,7 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         $this->app->make(TelemetryManager::class)->provider(new SystemMetricsProvider(
-            cpuInterval: (float) $config->get('telemetry.providers.system.cpu_interval', 0.1),
+            cpuInterval: Cast::float($config->get('telemetry.providers.system.cpu_interval'), 0.1),
         ));
     }
 

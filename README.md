@@ -48,6 +48,13 @@ spec-stable HTTP JSON.
 - ✅ Ships 13 Grafana dashboards (`telemetry:dashboards`) — an APM-style
   suite (requests, jobs, queries, cache, exceptions, system, users …) —
   service-scoped, LGTM-ready
+- ✅ Opt-in web analytics: a shared cookieless `session.id`, unsampled
+  `page_view` events, and built-in geo + User-Agent enrichment (default off)
+- ✅ Browser/RUM tracing: a zero-build `@telemetryBrowser` snippet ingests
+  frontend spans and `track()` events into the same trace as the backend,
+  plus token-gated source-map upload for symbolicated JS stack traces
+- ✅ Error tracking flow: the trace id ties Sentry/Flare issues, support
+  cases and the trace waterfall together automatically
 - ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
   guidelines, `llms.txt` and an agent guide — your AI assistant follows the
   conventions out of the box
@@ -96,7 +103,10 @@ Full documentation lives in [`docs/`](docs/index.md):
   [OTLP](docs/production/otlp.md),
   [**the recommended Grafana stack**](docs/production/grafana-stack.md),
   [performance](docs/production/performance.md),
-  [security](docs/production/security.md)
+  [security](docs/production/security.md),
+  [analytics](docs/production/analytics.md),
+  [browser/RUM tracing](docs/production/browser-tracing.md),
+  [error tracking](docs/production/error-tracking.md)
 
 Design decisions (and the prior-art survey behind them) are recorded in
 [`docs/adr/`](docs/adr/0001-runtime-model.md).

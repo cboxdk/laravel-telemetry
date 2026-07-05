@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Exporters\Otlp;
 
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExportResult;
 
 /**
@@ -118,7 +119,7 @@ class OtlpTransport
 
                     foreach ($value as $field => $count) {
                         if (str_starts_with((string) $field, 'rejected')) {
-                            $rejected = (int) $count;
+                            $rejected = Cast::int($count);
                         }
                     }
 

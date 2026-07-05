@@ -13,7 +13,7 @@ beforeEach(function () {
     $this->collector = new CollectingExporter;
     Telemetry::addExporter($this->collector);
 
-    View::addLocation(__DIR__.'/../fixtures/views');
+    View::addLocation(__DIR__.'/../../fixtures/views');
     (new ViewInstrumentation)->register(app());
 });
 
@@ -56,7 +56,7 @@ it('drops view spans from healthy fast traces in tail mode but keeps the tally',
     $this->refreshApplication();
     config()->set('telemetry.traces.details.mode', 'tail');
     Telemetry::addExporter($collector = new CollectingExporter);
-    View::addLocation(__DIR__.'/../fixtures/views');
+    View::addLocation(__DIR__.'/../../fixtures/views');
     (new ViewInstrumentation)->register(app());
 
     Route::get('/page', fn () => view('page', ['title' => 'Hej']));

@@ -27,9 +27,6 @@ final class PrometheusRenderer
 
     /**
      * @param  list<MetricFamily>  $families
-     */
-    /**
-     * @param  list<MetricFamily>  $families
      * @param  array<string, string>  $resourceLabels  service_name/host_name/… stamped on every series so a single Prometheus scraping many apps can tell them apart
      */
     public function render(array $families, array $resourceLabels = []): string

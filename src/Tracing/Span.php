@@ -238,8 +238,10 @@ final class Span
             return 0.0;
         }
 
-        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec']) * 1000.0
-            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) / 1000.0;
+        // Defensive: getrusage() only returns a partial set of keys on some
+        // platforms (e.g. Windows) — never let a missing key throw here.
+        return (($usage['ru_utime.tv_sec'] ?? 0) + ($usage['ru_stime.tv_sec'] ?? 0)) * 1000.0
+            + (($usage['ru_utime.tv_usec'] ?? 0) + ($usage['ru_stime.tv_usec'] ?? 0)) / 1000.0;
     }
 
     public function hasEnded(): bool

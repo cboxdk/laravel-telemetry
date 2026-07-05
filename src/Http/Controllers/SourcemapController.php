@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Http\Controllers;
 
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Http\Request;
@@ -22,7 +23,7 @@ final class SourcemapController
 {
     public function __invoke(Request $request, TelemetryManager $telemetry): Response
     {
-        $config = (array) config('telemetry.sourcemaps', []);
+        $config = Cast::stringKeyedArray(config('telemetry.sourcemaps', []));
 
         abort_unless($telemetry->enabled() && ($config['enabled'] ?? false), 404);
 
@@ -35,14 +36,14 @@ final class SourcemapController
         );
 
         FailSafe::guard(function () use ($request, $config) {
-            $release = self::slug((string) $request->input('release'));
-            $name = basename((string) $request->input('name'));
+            $release = self::slug(Cast::string($request->input('release')));
+            $name = basename(Cast::string($request->input('name')));
             $map = $request->input('map');
 
             if ($release === '' || $name === '' || ! is_string($map)) {
                 return;
             }
-            if (strlen($map) > (int) ($config['max_bytes'] ?? 20 * 1024 * 1024)) {
+            if (strlen($map) > Cast::int($config['max_bytes'] ?? null, 20 * 1024 * 1024)) {
                 return;
             }
             // Only accept a valid v3 source map.
@@ -51,8 +52,8 @@ final class SourcemapController
                 return;
             }
 
-            $prefix = (string) ($config['prefix'] ?? 'telemetry/sourcemaps');
-            Storage::disk((string) ($config['disk'] ?? 'local'))
+            $prefix = Cast::string($config['prefix'] ?? null, 'telemetry/sourcemaps');
+            Storage::disk(Cast::string($config['disk'] ?? null, 'local'))
                 ->put("{$prefix}/{$release}/{$name}", $map);
         });
 

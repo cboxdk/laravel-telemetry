@@ -34,7 +34,7 @@ it('fingerprints by type + site: same site groups, different type/site differ', 
 it('makes paths project-relative when a base path is given', function () {
     $e = new RuntimeException('x');
 
-    $attrs = ExceptionAttributes::from($e, dirname(__DIR__, 2));
+    $attrs = ExceptionAttributes::from($e, dirname(__DIR__, 3));
 
     expect($attrs['exception.file'])->toStartWith('tests/')
         ->and($attrs['exception.file'])->not->toContain('/Users/');

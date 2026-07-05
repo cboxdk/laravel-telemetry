@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -84,14 +85,14 @@ final class CacheInstrumentation implements ManagesRequestState
         if ($spans) {
             $events->listen(RetrievingKey::class, fn (RetrievingKey $event) => $this->begin($event->storeName, $event->key));
             $events->listen(RetrievingManyKeys::class, function (RetrievingManyKeys $event) {
-                foreach ($event->keys as $key) {
-                    $this->begin($event->storeName, (string) $key);
+                foreach (Cast::array($event->keys) as $key) {
+                    $this->begin($event->storeName, Cast::string($key));
                 }
             });
             $events->listen(WritingKey::class, fn (WritingKey $event) => $this->begin($event->storeName, $event->key));
             $events->listen(WritingManyKeys::class, function (WritingManyKeys $event) {
-                foreach ($event->keys as $key) {
-                    $this->begin($event->storeName, (string) $key);
+                foreach (Cast::array($event->keys) as $key) {
+                    $this->begin($event->storeName, Cast::string($key));
                 }
             });
             $events->listen(ForgettingKey::class, fn (ForgettingKey $event) => $this->begin($event->storeName, $event->key));

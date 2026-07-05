@@ -295,18 +295,6 @@ class TelemetryManager
     }
 
     /**
-     * Add BOUNDED extra labels (plan, tier, team — never ids with
-     * unbounded cardinality) to the http.server.request.duration metric:
-     *
-     *     Telemetry::labelRequestsUsing(fn ($request) => [
-     *         'plan' => $request->user()?->plan ?? 'guest',
-     *     ]);
-     *
-     * Enables p95/p99 per plan/team in PromQL.
-     *
-     * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
-     */
-    /**
      * Name request root spans yourself — essential behind catch-all
      * routes (Statamic, wildcard APIs) where the route pattern names
      * every request identically. Return null to keep the default
@@ -456,6 +444,18 @@ class TelemetryManager
         return is_string($group) ? $group : null;
     }
 
+    /**
+     * Add BOUNDED extra labels (plan, tier, team — never ids with
+     * unbounded cardinality) to the http.server.request.duration metric:
+     *
+     *     Telemetry::labelRequestsUsing(fn ($request) => [
+     *         'plan' => $request->user()?->plan ?? 'guest',
+     *     ]);
+     *
+     * Enables p95/p99 per plan/team in PromQL.
+     *
+     * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
+     */
     public function labelRequestsUsing(?Closure $resolver): void
     {
         $this->requestLabelResolver = $resolver;

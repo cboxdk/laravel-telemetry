@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
@@ -65,7 +66,11 @@ final class ScheduleInstrumentation
             $span = $telemetry->tracer()->startSpan("schedule {$name}", attributes: [
                 'schedule.task' => $name,
                 'schedule.cron' => $event->task->expression,
-                'schedule.timezone' => (string) ($event->task->timezone ?? config('app.timezone')),
+                'schedule.timezone' => match (true) {
+                    $event->task->timezone instanceof \DateTimeZone => $event->task->timezone->getName(),
+                    is_string($event->task->timezone) => $event->task->timezone,
+                    default => Cast::string(config('app.timezone'), 'UTC'),
+                },
                 'schedule.without_overlapping' => $event->task->withoutOverlapping,
                 'schedule.on_one_server' => $event->task->onOneServer,
             ]);

@@ -12,6 +12,11 @@ use Cbox\Telemetry\Tracing\Tracer;
 use Illuminate\Support\Collection;
 
 beforeEach(function () {
+    // OtlpExporter's circuit breaker is deliberately static (survives across
+    // requests within a worker); reset it so another test's failure doesn't
+    // leak into this file's assertions about the breaker's default state.
+    OtlpExporter::resetCircuit();
+
     $this->collector = new CollectingExporter;
     Telemetry::addExporter($this->collector);
 });

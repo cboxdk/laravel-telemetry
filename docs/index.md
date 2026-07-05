@@ -60,5 +60,6 @@ Log::info('Import done', ['rows' => 5021]); // → trace-correlated OTLP log
 - Configuration: every config key explained.
 - Extension points: telemetry providers and custom exporters.
 - Production: Prometheus setup, OTLP setup, the recommended Grafana stack,
-  performance, security, browser/RUM tracing, and the error-tracking/support flow
+  performance, security, opt-in web analytics (session.id, page views, geo/UA),
+  browser/RUM tracing, and the error-tracking/support flow
   (trace ids in Sentry, on error pages and in the response header).

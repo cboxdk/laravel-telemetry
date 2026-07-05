@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http\Middleware;
 
 use Cbox\Telemetry\Support\AnalyticsIdentity;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\ResourceUsage;
@@ -178,7 +179,7 @@ final class TraceRequest
                     $guard = $this->authGuardName();
 
                     $span->setAttributes(array_filter([
-                        'enduser.id' => (string) $user->getAuthIdentifier(),
+                        'enduser.id' => Cast::string($user->getAuthIdentifier()),
                         'enduser.type' => Str::snake(class_basename($user)),
                         'enduser.guard' => $guard,
                     ]));
@@ -201,7 +202,7 @@ final class TraceRequest
             // TraceQL query: { span.session.hash = "..." }.
             if (config('telemetry.instrument.session', true) && $request->hasSession()) {
                 $span->setAttributes([
-                    'session.driver' => (string) config('session.driver', 'unknown'),
+                    'session.driver' => Cast::string(config('session.driver'), 'unknown'),
                     'session.hash' => substr(hash('sha256', $request->session()->getId()), 0, 16),
                 ]);
             }
@@ -420,7 +421,7 @@ final class TraceRequest
         ], static fn ($v) => $v !== null);
 
         if (($user = $request->user()) !== null) {
-            $attributes['enduser.id'] = (string) $user->getAuthIdentifier();
+            $attributes['enduser.id'] = Cast::string($user->getAuthIdentifier());
         }
 
         /** @var array<string, scalar|null> $attributes */
@@ -481,7 +482,7 @@ final class TraceRequest
             return $resolved;
         }
 
-        $salt = (string) (config('telemetry.analytics.session.salt') ?: config('app.key', ''));
+        $salt = Cast::string(config('telemetry.analytics.session.salt')) ?: Cast::string(config('app.key'));
 
         return AnalyticsIdentity::cookielessSession($request, $salt);
     }

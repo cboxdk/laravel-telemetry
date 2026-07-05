@@ -116,7 +116,7 @@ final class Symbolicator
 
             $decoded = json_decode((string) $this->disk->get($path), true);
 
-            return $this->cache[$key] = is_array($decoded) ? $decoded : null;
+            return $this->cache[$key] = is_array($decoded) ? Cast::stringKeyedArray($decoded) : null;
         });
     }
 

@@ -9,7 +9,7 @@ Thanks for considering a contribution!
 3. Run the full check locally:
 
    ```bash
-   composer check   # pint --test, phpstan level 8, pest
+   composer check   # pint --test, phpstan level 9, pest
    ```
 
 4. Open a PR describing **why** as well as what.

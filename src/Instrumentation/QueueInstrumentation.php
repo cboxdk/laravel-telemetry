@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
@@ -120,7 +121,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 // Restore the dispatcher's custom dimensions (team, plan…)
                 // so the job's spans, events and logs carry them too.
                 if (is_array($carried['context'] ?? null)) {
-                    $this->telemetry()->context($carried['context']);
+                    $this->telemetry()->context(Cast::scalarMap($carried['context']));
                 }
             }
 
@@ -278,8 +279,10 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
             });
 
-            $this->telemetry()->flush();
-            $this->telemetry()->resetContext();
+            FailSafe::guard(function () {
+                $this->telemetry()->flush();
+                $this->telemetry()->resetContext();
+            });
         }
     }
 
