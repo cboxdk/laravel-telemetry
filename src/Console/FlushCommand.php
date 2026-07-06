@@ -53,8 +53,18 @@ final class FlushCommand extends Command
             return $this->daemon($telemetry, $shipper);
         }
 
-        $count = $telemetry->flushMetrics();
-        $telemetry->flush();
+        // Guarded like the daemon loop (below) — a failure here must
+        // surface as a clean error + non-zero exit for cron/monitoring
+        // to catch, never an uncaught exception dumped to the console.
+        $count = FailSafe::guard(fn () => $telemetry->flushMetrics());
+
+        if ($count === null) {
+            $this->components->error('Failed to flush metrics — see the configured exception handler for details.');
+
+            return self::FAILURE;
+        }
+
+        FailSafe::guard(fn () => $telemetry->flush());
 
         $this->components->info(sprintf(
             'Flushed %d metric %s to %d exporter(s).',
@@ -64,7 +74,13 @@ final class FlushCommand extends Command
         ));
 
         if ($shipper !== null) {
-            $result = $shipper->ship((int) $this->option('max-batch'));
+            $result = FailSafe::guard(fn () => $shipper->ship((int) $this->option('max-batch')));
+
+            if ($result === null) {
+                $this->components->error('Failed to ship the spool — see the configured exception handler for details.');
+
+                return self::FAILURE;
+            }
 
             $this->components->info(sprintf(
                 'Shipped %d spooled payload(s).%s%s',
@@ -75,7 +91,17 @@ final class FlushCommand extends Command
         }
 
         if ($this->option('wipe')) {
-            $telemetry->registry()->store()->wipe();
+            $wiped = FailSafe::guard(function () use ($telemetry): true {
+                $telemetry->registry()->store()->wipe();
+
+                return true;
+            });
+
+            if ($wiped === null) {
+                $this->components->error('Failed to wipe the metric store.');
+
+                return self::FAILURE;
+            }
 
             $this->components->info('Metric store wiped.');
         }

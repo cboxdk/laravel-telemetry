@@ -45,7 +45,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
 - [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget
 - [Grafana stack](docs/production/grafana-stack.md): recommended backend routing (Tempo/Mimir/Loki), correlation, query starters
-- [Performance](docs/production/performance.md): per-operation cost, tuning
+- [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (vs Nightwatch/Sentry-PHP)
 - [Security](docs/production/security.md): endpoint protection, data leakage
 
 ## Optional

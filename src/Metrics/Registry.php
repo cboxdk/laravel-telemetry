@@ -40,10 +40,16 @@ final class Registry
 
     /**
      * @param  list<float>  $defaultBuckets
+     * @param  (Closure(): ?string)|null  $exemplarTraceId  Resolves the
+     *                                                      current sampled
+     *                                                      trace id for
+     *                                                      histogram
+     *                                                      exemplars.
      */
     public function __construct(
         private readonly MetricStore $store,
         private readonly array $defaultBuckets,
+        private readonly ?Closure $exemplarTraceId = null,
     ) {}
 
     public function counter(string $name, string $description = '', string $unit = ''): Counter
@@ -99,6 +105,7 @@ final class Registry
         return $this->histograms[$name] ??= new Histogram(
             $this->define($name, MetricType::Histogram, $description, $unit, $buckets ?? $this->defaultBuckets),
             $this->store,
+            $this->exemplarTraceId,
         );
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Contracts;
 
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 
@@ -36,8 +37,14 @@ interface MetricStore
 
     /**
      * @param  array<string, string>  $labels
+     * @param  Exemplar|null  $exemplar  A representative sampled-trace
+     *                                   observation — overwrites the
+     *                                   family's single stored exemplar,
+     *                                   never aggregated. Optional: not
+     *                                   every observation happens inside
+     *                                   a sampled trace.
      */
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void;
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void;
 
     /**
      * Merge pre-aggregated histogram data (bucket counts, sum, count) in
@@ -47,7 +54,7 @@ interface MetricStore
      * @param  array<string, string>  $labels
      * @param  list<int>  $bucketCounts  One slot per bound plus overflow.
      */
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void;
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void;
 
     /**
      * Collect every stored metric family (push instruments only —

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Instruments;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Support\FailSafe;
 use Closure;
@@ -16,12 +17,24 @@ use Closure;
  *
  *     $result = Telemetry::histogram('import.duration', unit: 'ms')
  *         ->time(fn () => $importer->run());
+ *
+ * When a sampled trace is active, every observation carries it as an
+ * exemplar — automatically, no call-site changes: click a slow bucket in
+ * Grafana, land on an actual trace that was in it.
  */
 final readonly class Histogram
 {
+    /**
+     * @param  (Closure(): ?string)|null  $exemplarTraceId  Resolves the
+     *                                                      current sampled
+     *                                                      trace id, or
+     *                                                      null outside
+     *                                                      one.
+     */
     public function __construct(
         private MetricDefinition $definition,
         private MetricStore $store,
+        private ?Closure $exemplarTraceId = null,
     ) {}
 
     /**
@@ -29,11 +42,16 @@ final readonly class Histogram
      */
     public function record(float $value, array $labels = []): void
     {
-        FailSafe::guard(fn () => $this->store->recordHistogram(
-            $this->definition,
-            $this->stringify($labels),
-            $value,
-        ));
+        FailSafe::guard(function () use ($value, $labels) {
+            $traceId = $this->exemplarTraceId !== null ? ($this->exemplarTraceId)() : null;
+
+            $this->store->recordHistogram(
+                $this->definition,
+                $this->stringify($labels),
+                $value,
+                $traceId !== null ? new Exemplar($traceId, $value, (int) (microtime(true) * 1e9)) : null,
+            );
+        });
     }
 
     /**

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Stores\ApcuMetricStore;
@@ -47,6 +48,20 @@ it('sets gauges and records histograms', function () {
         ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([1, 0, 1])
         ->and($families['req.duration']->samples[0]->sum)->toBe(505.0)
         ->and($families['req.duration']->samples[0]->count)->toBe(2);
+});
+
+it('keeps the latest exemplar for a histogram series', function () {
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    $this->store->recordHistogram($histogram, [], 5, new Exemplar('trace-1', 5.0, 1_000));
+    $this->store->recordHistogram($histogram, [], 50, new Exemplar('trace-2', 50.0, 2_000));
+    $this->store->recordHistogram($histogram, [], 20); // no exemplar — does not clear the last one
+
+    $sample = $this->store->collect()[0]->samples[0];
+
+    expect($sample->exemplar?->traceId)->toBe('trace-2')
+        ->and($sample->exemplar?->value)->toBe(50.0)
+        ->and($sample->exemplar?->timeUnixNano)->toBe(2000);
 });
 
 it('wipes everything it wrote', function () {

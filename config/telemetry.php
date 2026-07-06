@@ -88,6 +88,13 @@ return [
     'buffer_writes' => env('TELEMETRY_BUFFER_WRITES', true),
 
     'stores' => [
+        // WARNING: `php artisan cache:clear` is not prefix-aware — Laravel's
+        // Redis cache store runs a raw FLUSHDB, and the apcu cache driver
+        // calls apcu_clear_cache() (wipes the whole shared segment for
+        // every worker). If this connection is the SAME Redis database (or
+        // apcu is ALSO your cache driver), a routine cache:clear silently
+        // erases every metric. `telemetry:doctor` checks for this — give
+        // telemetry its own connection/database if it flags a collision.
         'redis' => [
             'connection' => env('TELEMETRY_REDIS_CONNECTION', 'default'),
             'prefix' => env('TELEMETRY_REDIS_PREFIX', 'telemetry'),
@@ -166,10 +173,15 @@ return [
         ],
 
         // IPs (single or CIDR) allowed by the AllowIps middleware.
-        // An empty list allows everyone.
         'allowed_ips' => env('TELEMETRY_ALLOWED_IPS') === null
             ? []
             : explode(',', (string) env('TELEMETRY_ALLOWED_IPS')),
+
+        // Bearer token accepted as an alternative to the IP allowlist —
+        // Prometheus's own scrape_config supports `authorization.credentials`
+        // natively, so a scraper that can't be IP-restricted can still
+        // authenticate. Checked with hash_equals(), never logged.
+        'token' => env('TELEMETRY_PROMETHEUS_TOKEN'),
     ],
 
     /*
@@ -310,6 +322,7 @@ return [
             'browser' => [
                 'fetch' => true,   // instrument fetch + propagate traceparent (same-origin)
                 'errors' => true,  // capture uncaught JS errors as error spans
+                'vitals' => true,  // capture Core Web Vitals (LCP, CLS, INP) via PerformanceObserver
                 'sample' => 1.0,   // client-side head sampling (0-1)
             ],
         ],
@@ -413,12 +426,28 @@ return [
         // Job spans + queue metrics, with trace continuation from dispatch.
         'jobs' => env('TELEMETRY_INSTRUMENT_JOBS', true),
 
+        // OTel span links between a retried job's attempts — a link,
+        // never a parent, since attempt N+1 is a sibling of attempt N
+        // (both children of the original dispatch), not a continuation.
+        // Bridged via the app's own cache (queue.retry_link_store/_ttl)
+        // since a retry can land on a different worker process; a
+        // null/array cache driver just means retries go unlinked.
+        'queue_retry_links' => env('TELEMETRY_INSTRUMENT_QUEUE_RETRY_LINKS', true),
+
         // db.client.* query spans (only recorded inside a sampled trace).
         'queries' => env('TELEMETRY_INSTRUMENT_QUERIES', true),
 
         // Skip query spans faster than this (ms) — a noise floor for
         // N+1-heavy codepaths. 0 records everything.
         'queries_min_duration' => env('TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION', 0),
+
+        // Flag queries that run more than once, identically, in the same
+        // trace — the actual N+1 smell (model.hydrations is a proxy count;
+        // this names the repeated query). Root-span tally + counter +
+        // an OTLP log event carrying the query text, fired once per
+        // distinct query when it crosses the threshold.
+        'query_duplicates' => env('TELEMETRY_INSTRUMENT_QUERY_DUPLICATES', true),
+        'query_duplicates_threshold' => env('TELEMETRY_INSTRUMENT_QUERY_DUPLICATES_THRESHOLD', 3),
 
         // Artisan command spans.
         'commands' => env('TELEMETRY_INSTRUMENT_COMMANDS', false),
@@ -435,6 +464,14 @@ return [
         // Scheduled task spans + schedule.tasks.{processed,failed,skipped}
         // counters and schedule.task.duration histogram.
         'scheduled_tasks' => env('TELEMETRY_INSTRUMENT_SCHEDULED_TASKS', true),
+
+        // CPU profiling via ext-excimer (PECL, not bundled) — batteries
+        // included: enabled by default, a silent no-op without the
+        // extension. Profiling always runs (sampling overhead is low),
+        // but the result is only kept for requests/jobs slower than
+        // `profiling.min_duration_ms` — a "top functions by sample
+        // count" event, not a full pprof export.
+        'profiling' => env('TELEMETRY_INSTRUMENT_PROFILING', true),
 
         // cache.operations{operation, store} counters (hit/miss/write/
         // forget). Off by default — hot caches are chatty.
@@ -511,6 +548,68 @@ return [
         // Off by default: it reads the source file on every reported
         // exception.
         'exception_source' => env('TELEMETRY_INSTRUMENT_EXCEPTION_SOURCE', false),
+
+        // The following auto-activate when the package is installed
+        // (class_exists-guarded) — never a hard dependency.
+
+        // feature.checks{feature,result} + feature.unknown{feature} via
+        // laravel/pennant's own events.
+        'pennant' => env('TELEMETRY_INSTRUMENT_PENNANT', true),
+
+        // Supervisor/master state, long-wait detection, process restarts
+        // and OOM via laravel/horizon's own events. Job-level tracing
+        // already works without this — Horizon workers fire the standard
+        // queue events QueueInstrumentation listens to.
+        'horizon' => env('TELEMETRY_INSTRUMENT_HORIZON', true),
+
+        // reverb.messages{direction}, reverb.channels{event,type} and
+        // reverb.connections.pruned via laravel/reverb's own events.
+        // Channel names and connection ids are never used as labels.
+        'reverb' => env('TELEMETRY_INSTRUMENT_REVERB', true),
+
+        // inertia.request span attribute (from the X-Inertia header) +
+        // inertia.version_mismatches counter — a version mismatch means
+        // Inertia is forcing a full page reload (X-Inertia-Location),
+        // the noisy signal right after a deploy. Pure response
+        // inspection, no inertiajs/inertia-laravel dependency needed.
+        'inertia' => env('TELEMETRY_INSTRUMENT_INERTIA', true),
+
+        // rate_limit.exceeded{limiter} counter from a 429 response — the
+        // driver-agnostic signal (Laravel's RateLimiter fires no event).
+        // Labeled by the `throttle:<name>` route middleware's limiter
+        // name when present, "default" for an inline throttle:60,1 spec.
+        'rate_limiting' => env('TELEMETRY_INSTRUMENT_RATE_LIMITING', true),
+
+        // Inherit the caller's Telemetry::context() dimensions (team,
+        // tenant, plan, …) from an incoming W3C `baggage` header — the
+        // sibling of traceparent. Gated on traces.continue_incoming too:
+        // baggage is caller-supplied, unvalidated data, so it follows
+        // the same trust boundary as continuing the trace itself.
+        // Outgoing: Http::withTraceparent() attaches both headers.
+        'baggage' => env('TELEMETRY_INSTRUMENT_BAGGAGE', true),
+
+        // Livewire component lifecycle via laravel/livewire's own
+        // ComponentHook API. mount/hydrate have no "after" phase in that
+        // API (our hook is one peer listener, not a wrapper) so they're
+        // counters (livewire.components.mounted/hydrated); render/update/
+        // call DO wrap the real work, so those get detail spans
+        // (livewire.render/update/call) — same tail-sampled, root-span-
+        // tallied shape as view rendering.
+        'livewire' => env('TELEMETRY_INSTRUMENT_LIVEWIRE', true),
+
+        // broadcast.count root-span tally + a "broadcast {event}" detail
+        // span per Broadcaster::broadcast() call — driver-agnostic
+        // (Pusher, Ably, Reverb, Redis, Log, …). Reverb's own richer
+        // connection/channel occupancy metrics (instrument.reverb) are
+        // separate and unaffected by this toggle.
+        'broadcasting' => env('TELEMETRY_INSTRUMENT_BROADCASTING', true),
+
+        // storage.operations{disk,operation} counter + a "storage
+        // {operation}" detail span per disk operation (put, get,
+        // delete, copy, move, …) — driver-agnostic (local, S3, whatever
+        // Flysystem supports). Paths are safe on spans (per-occurrence)
+        // but never metric labels — same rule as query text.
+        'filesystem' => env('TELEMETRY_INSTRUMENT_FILESYSTEM', true),
     ],
 
     /*
@@ -525,6 +624,12 @@ return [
 
     'queue' => [
         'propagate' => env('TELEMETRY_QUEUE_PROPAGATE', true),
+
+        // Where the retry-link side channel lives (instrument.
+        // queue_retry_links) — the app's own cache, NOT the telemetry
+        // metric store. null uses the app's default cache store.
+        'retry_link_store' => env('TELEMETRY_QUEUE_RETRY_LINK_STORE'),
+        'retry_link_ttl' => env('TELEMETRY_QUEUE_RETRY_LINK_TTL', 86400),
     ],
 
     /*
@@ -547,6 +652,29 @@ return [
             // 'horizon' => 'horizon',
             // 'reverb' => 'reverb:start',
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CPU Profiling (ext-excimer)
+    |--------------------------------------------------------------------------
+    |
+    | Statistical sampling profiler for slow requests/jobs. Requires the
+    | PECL `excimer` extension — a silent no-op without it, same as
+    | cboxdk/system-metrics.
+    |
+    */
+
+    'profiling' => [
+        // Sampling interval — lower catches more detail, costs more.
+        'period' => env('TELEMETRY_PROFILING_PERIOD', 0.001),
+
+        // Only keep/report a profile for requests/jobs at least this
+        // slow — tail-based, matches traces.details.slow_request_ms.
+        'min_duration_ms' => env('TELEMETRY_PROFILING_MIN_DURATION_MS', 500),
+
+        // Top functions by sample count kept in the profile event.
+        'top_functions' => env('TELEMETRY_PROFILING_TOP_FUNCTIONS', 20),
     ],
 
     /*

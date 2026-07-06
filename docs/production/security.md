@@ -8,8 +8,13 @@ weight: 5
 
 ## The scrape endpoint
 
-- Restrict with `TELEMETRY_ALLOWED_IPS` (CIDR supported) or replace the
-  middleware stack per endpoint with your own auth.
+- **Closed by default outside `local`/`testing`** — the same convention as
+  Horizon/Telescope/Pulse. Open it with `TELEMETRY_ALLOWED_IPS` (CIDR
+  supported), `TELEMETRY_PROMETHEUS_TOKEN` (bearer token, checked with
+  `hash_equals()` — matches Prometheus's own `authorization.credentials`
+  scrape config), or replace the middleware stack per endpoint with your
+  own auth. `telemetry:doctor` reports whether the endpoint is currently
+  `OK`, `OPEN` (dev-only) or `CLOSED`.
 - Use `only` filters to publish a minimal metric set on any endpoint that
   is reachable from less-trusted networks.
 - Set `TELEMETRY_PROMETHEUS_ENABLED=false` if you export via OTLP only —

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
@@ -92,6 +93,20 @@ it('round-trips histograms with buckets, sum and count', function () {
         ->and($this->store->collect()[0]->definition->buckets)->toBe([10.0, 100.0]);
 });
 
+it('keeps the latest exemplar for a histogram series', function () {
+    $definition = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    $this->store->recordHistogram($definition, [], 5, new Exemplar('trace-1', 5.0, 1_000));
+    $this->store->recordHistogram($definition, [], 50, new Exemplar('trace-2', 50.0, 2_000));
+    $this->store->recordHistogram($definition, [], 20); // no exemplar — does not clear the last one
+
+    $sample = $this->store->collect()[0]->samples[0];
+
+    expect($sample->exemplar?->traceId)->toBe('trace-2')
+        ->and($sample->exemplar?->value)->toBe(50.0)
+        ->and($sample->exemplar?->timeUnixNano)->toBe(2000);
+});
+
 it('survives label values containing separators and unicode', function () {
     $definition = new MetricDefinition('log.lines', MetricType::Counter);
     $labels = ['source' => 'a:b|c "d" æøå', 'path' => '/x/{id}'];
@@ -130,6 +145,18 @@ it('aggregates correctly through the write buffer', function () {
         ->and($families['req.duration']->samples[0]->count)->toBe(50)
         ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([10, 40, 0])
         ->and($families['req.duration']->samples[0]->sum)->toBe(1275.0);
+});
+
+it('flushes the buffered exemplar through to the inner store', function () {
+    $buffered = new BufferedMetricStore($this->store);
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    $buffered->recordHistogram($histogram, [], 5, new Exemplar('trace-1', 5.0, 1_000));
+    $buffered->recordHistogram($histogram, [], 50, new Exemplar('trace-2', 50.0, 2_000));
+
+    $sample = $buffered->collect()[0]->samples[0];
+
+    expect($sample->exemplar?->traceId)->toBe('trace-2');
 });
 
 it('records redis command spans but never for the telemetry connections', function () {

@@ -24,5 +24,6 @@ final readonly class HistogramSample
         public array $bucketCounts,
         public float $sum,
         public int $count,
+        public ?Exemplar $exemplar = null,
     ) {}
 }

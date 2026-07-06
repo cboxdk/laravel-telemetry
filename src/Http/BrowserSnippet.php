@@ -38,6 +38,7 @@ final class BrowserSnippet
             .' data-endpoint="'.e($endpoint).'"'
             .' data-fetch="'.(($browser['fetch'] ?? true) ? '1' : '0').'"'
             .' data-errors="'.(($browser['errors'] ?? true) ? '1' : '0').'"'
+            .' data-vitals="'.(($browser['vitals'] ?? true) ? '1' : '0').'"'
             .' data-sample="'.e(Cast::string($browser['sample'] ?? null, '1.0')).'"'
             .$analytics
             .self::sessionAttribute().'></script>';

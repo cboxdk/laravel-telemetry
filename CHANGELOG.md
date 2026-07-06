@@ -7,6 +7,195 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A real overhead benchmark** (`tests/Feature/Benchmark/OverheadBenchmarkTest.php`,
+  `vendor/bin/pest --group=benchmark`, excluded from `composer test`):
+  replaces this project's previously unverified "zero-cost"/"in-memory
+  only" claims with actual measured numbers — full default
+  instrumentation adds under 1ms median per request on the test harness
+  (see docs/production/performance.md for methodology, caveats, and how
+  this compares to Nightwatch's published "<3ms" and Sentry-PHP's
+  documented lack-of-background-threads constraint, which this package
+  shares).
+- **`telemetry:doctor` spool-depth check**: the spool is drained
+  exclusively by `telemetry:flush` — if the daemon dies or was never
+  scheduled, the list just grows until it hits `max_items` and starts
+  silently dropping its oldest entries, with no other warning. Doctor
+  now reports current depth as a fraction of `max_items`, warns above
+  50% full and fails the check above 90%.
+- **Filesystem/Storage instrumentation** (`instrument.filesystem`,
+  default on): `storage.operations{disk,operation}` counter + a
+  `storage {operation}` detail span per disk operation (put, get,
+  delete, copy, move, …) — driver-agnostic (local, S3, whatever
+  Flysystem supports) via a `Factory`/`Filesystem` decorator.
+  Instruments both `Storage::disk('x')->put(...)` and the
+  `Storage::put(...)` default-disk shorthand. Paths are safe on spans
+  (per-occurrence) but never metric labels, same rule as query text.
+  Built carefully after two near-misses in review: routing every
+  unknown manager method through the wrapped disk broke
+  `Storage::fake()` (which calls `set()`/`createLocalDriver()` — real
+  manager methods, not disk operations) — fixed by implementing the
+  `Filesystem` interface's operations explicitly on the manager
+  decorator too, rather than guessing via `__call()`.
+- **OTel span links for queue retries** (`instrument.queue_retry_links`,
+  default on): a retried job's attempt N+1 span now links (not parents)
+  back to attempt N's span — they're siblings, both children of the
+  original dispatch, not a continuation chain. Bridged via the app's
+  own cache (`queue.retry_link_store`/`_ttl`, keyed by the job's stable
+  UUID) since a retry can land on a different worker process; a
+  null/array cache driver just means retries go unlinked, no error.
+  New `Tracing\SpanLink` value object and `Span::links()`/OTLP
+  `links` array serialization — general-purpose infrastructure, not
+  specific to queues, for any future causal-but-non-hierarchical
+  relationship between spans.
+- **W3C Baggage propagation** (`instrument.baggage`, default on):
+  `Telemetry::context()` dimensions (team, tenant, plan, …) now cross a
+  real HTTP service boundary, not just process/job boundaries.
+  `Http::withTraceparent()` attaches a `baggage` header alongside
+  `traceparent`; the receiving app merges an incoming `baggage` header
+  back into its own context, gated on `traces.continue_incoming` too
+  since baggage is caller-supplied, unvalidated data. New
+  `Support\Baggage` class handles the percent-encoded, comma-separated
+  wire format (spec's own 8192-byte/180-member budget enforced on encode).
+- **Vapor/Lambda FaaS resource attributes** (part of `resource_detection`,
+  no separate toggle): `cloud.provider=aws`, `cloud.platform=aws_lambda`,
+  `faas.name`/`.version`/`.instance`/`.max_memory` from AWS Lambda's own
+  runtime env vars — Vapor included, since it runs on Bref's PHP-FPM
+  Lambda layer. `faas.coldstart` is re-evaluated per invocation (true
+  only for the first request served by a given execution environment)
+  even though the rest of the detected resource is memoized for the
+  process. `vapor.detected` flags Vapor specifically.
+- **Rate limiter instrumentation** (`instrument.rate_limiting`, default
+  on): `rate_limit.exceeded{limiter}` counter from a 429 response — the
+  driver-agnostic signal, since Laravel's `RateLimiter` fires no event.
+  Labeled by the `throttle:<name>` route middleware's limiter name when
+  present, `default` for an inline `throttle:60,1` spec, `unknown` with
+  no throttle middleware at all (still counted — any 429 is a rate
+  limit signal, from a custom limiter or not).
+- **Generic broadcasting instrumentation** (`instrument.broadcasting`,
+  default on): `broadcast.count` root-span tally + a `broadcast {event}`
+  detail span per `Broadcaster::broadcast()` call — driver-agnostic
+  (Pusher, Ably, Reverb, Redis, Log, …), via a `Factory`/`Broadcaster`
+  decorator rather than an event listener (Laravel fires no
+  "broadcasting" event). Carries `broadcasting.driver`,
+  `broadcasting.event`, `broadcasting.channel.count` and a bounded
+  `broadcasting.channels` shape (`public`/`private`/`presence`) — never
+  raw channel names. Complements, and is unaffected by, Reverb's own
+  richer connection/channel-occupancy instrumentation.
+- **Livewire component lifecycle** (`instrument.livewire`, default on,
+  auto-activates when `livewire/livewire` is installed): registered via
+  Livewire's own `ComponentHook` API. `mount`/`hydrate` have no "after"
+  phase in that API — the hook is one peer listener among Livewire's own
+  internal ones, not a wrapper around them — so those are counters
+  (`livewire.components.mounted`/`.hydrated`). `render`/`update`/`call`
+  DO wrap the real work (Livewire invokes a returned closure once the
+  phase finishes), so those get real detail spans
+  (`livewire.render`/`.update`/`.call`), same tail-sampled,
+  root-span-tallied shape as view rendering — nested naturally under
+  whatever page or request is currently tracing.
+- **Inertia.js awareness** (`instrument.inertia`, default on): `inertia.request`
+  span attribute from the `X-Inertia` header, plus an `inertia.version_mismatches`
+  counter and `inertia.version_mismatch` span attribute when the response
+  carries `X-Inertia-Location` — Inertia's own signal that it's forcing a
+  full page reload after an asset-version bump. Pure response inspection;
+  no dependency on `inertiajs/inertia-laravel` being installed.
+- **Histogram exemplars** (no config toggle — follows `traces.sample_rate`):
+  every observation made inside a sampled trace carries that trace's id,
+  bridging a slow Prometheus bucket to the actual trace that landed in
+  it. One exemplar per histogram series (the most recent sampled
+  observation), not one per bucket — a deliberate simplification of the
+  full spec that needed no store schema rewrite. Only renders when the
+  scraper negotiates OpenMetrics via `Accept: application/openmetrics-text`
+  (the classic text format has no grammar for it); the default scrape
+  response is unchanged.
+- **CPU profiling via ext-excimer** (`instrument.profiling`, default on,
+  a silent no-op without the PECL `excimer` extension): tail-based, like
+  `traces.details.mode`. Excimer's own sampling keeps overhead low, so
+  profiling always runs on a sampled trace, but the result — a bounded
+  "top functions by sample count" `profile.captured` event — is only kept
+  for requests/jobs slower than `profiling.min_duration_ms` (default
+  500ms). Not a full pprof export; the package has no opinion on a
+  profiling backend, this is enough to see where a slow unit of work
+  spent its CPU without one. `telemetry:doctor` reports whether the
+  extension is active.
+- **Core Web Vitals in the browser RUM script** (`ingest.spans.browser.vitals`,
+  default on): `web_vitals.lcp_ms`, `web_vitals.cls` and a simplified
+  `web_vitals.inp_ms` (worst single interaction observed, not the full
+  spec's high-percentile calculation) via `PerformanceObserver`, shipped
+  as one `web-vitals` span at page hide/unload — LCP/CLS are not final
+  until then, so reporting on `load` would be wrong. No dependency added;
+  still the zero-build script.
+- **N+1 / duplicate query detection** (`instrument.query_duplicates`,
+  default on): flags a query that runs identically more than once in the
+  same trace — `model.hydrations` was already an N+1 *proxy* (a raw
+  hydration count); this names the actual repeated query. Laravel's
+  `QueryExecuted::$sql` is already parameterized (bindings are separate),
+  so the raw SQL text is a solid fingerprint without normalization.
+  `db.query.duplicate.count` root-span tally, `db.queries.duplicated{connection}`
+  counter, and a `db.query.duplicate_detected` OTLP log event carrying
+  the query text — fires once per distinct query, at the configurable
+  threshold crossing (`instrument.query_duplicates_threshold`, default
+  3), not once per repeat.
+- **Horizon, Reverb and Pennant instrumentation** — auto-activates when
+  the package is installed (`class_exists`-guarded, never a hard
+  dependency):
+  - `laravel/horizon`: `horizon.supervisor.processes`/`.paused` and
+    `horizon.master.paused`/`.supervisors` gauges pushed from the
+    supervisor/master heartbeat; `horizon.long_wait.detected` (counter +
+    OTLP log event), `horizon.process.restarts{type}`,
+    `horizon.process.out_of_memory{type}` (counter + event), and
+    `horizon.jobs.migrated`. Job-level tracing already worked without
+    this — Horizon workers fire the standard queue events
+    `QueueInstrumentation` listens to; this class deliberately does not
+    duplicate that with Horizon's own per-operation Redis events.
+  - `laravel/reverb`: `reverb.messages{direction,app}`,
+    `reverb.channels{event,type}` and `reverb.connections.pruned{app}`,
+    plus live occupancy — `reverb.connections.active{app}` and
+    `reverb.channels.subscribers{app,type}` — read directly from Reverb's
+    own `MetricsHandler` (no HTTP round trip, since this runs inside the
+    `reverb:start` process already) and sampled off existing message/
+    connection traffic, throttled to once per 15s per app. Channel names
+    and connection ids are never used as labels — only the bounded
+    channel type (public/private/presence) and the operator-configured
+    app id.
+  - `laravel/pennant`: `feature.checks{feature,result}` (every
+    `Feature::active()`/`value()` check, cache hit or fresh) and
+    `feature.unknown{feature}`. The scope (usually a user/tenant model)
+    is never used as a label.
+  - New config: `instrument.horizon`, `instrument.reverb`,
+    `instrument.pennant` (all default `true`).
+- **`telemetry:doctor` now flags a cache/metric-store collision**:
+  `php artisan cache:clear` is not prefix-aware — Laravel's Redis cache
+  store runs a raw `FLUSHDB`, and the apcu driver calls
+  `apcu_clear_cache()` (wipes the whole shared segment machine-wide). If
+  telemetry's store shares the same Redis database or apcu segment as
+  your cache, a routine cache clear silently empties every metric.
+  `telemetry:doctor` now detects and warns about this.
+
+### Fixed
+
+- **`telemetry:flush`'s cron/one-shot path was unguarded**, unlike the
+  daemon loop which wraps every equivalent call in `FailSafe::guard`.
+  A Redis outage during a scheduled `telemetry:flush` run could dump a
+  raw stack trace to the console instead of a clean error. Now guarded
+  consistently with the daemon path, failing with a clear message and
+  a non-zero exit code (so cron/monitoring still catches it) rather
+  than an uncaught exception.
+
+### Changed (breaking security hardening)
+
+- The Prometheus scrape endpoint is now **closed by default outside
+  `local`/`testing`** — the same convention as Horizon/Telescope/Pulse.
+  Previously an empty `allowed_ips` meant "allow everyone"; now it means
+  "closed" unless the app is running in `local`/`testing`. Open it with
+  `TELEMETRY_ALLOWED_IPS` (unchanged), the new `TELEMETRY_PROMETHEUS_TOKEN`
+  bearer token (checked with `hash_equals()`, matches Prometheus's own
+  `authorization.credentials` scrape config), or your own middleware.
+  **If you rely on the endpoint being open in production without an IP
+  allowlist, set `TELEMETRY_PROMETHEUS_TOKEN` before upgrading** —
+  `telemetry:doctor` reports `CLOSED` when a scrape would now 403.
+
 ## [0.1.0-alpha.15] - 2026-07-05
 
 ### Changed

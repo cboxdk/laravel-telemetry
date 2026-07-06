@@ -6,12 +6,16 @@ namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanLink;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Queue\Events\JobFailed;
@@ -43,6 +47,9 @@ final class QueueInstrumentation implements ManagesRequestState
     /** @var array<int, ResourceUsage> keyed by span object id */
     private array $jobUsage = [];
 
+    /** @var array<int, CpuProfiler> keyed by span object id */
+    private array $jobProfiles = [];
+
     public function __construct(private readonly Container $container) {}
 
     /**
@@ -51,6 +58,58 @@ final class QueueInstrumentation implements ManagesRequestState
     private function telemetry(): TelemetryManager
     {
         return $this->container->make(TelemetryManager::class);
+    }
+
+    /**
+     * The app's own default cache — a small side channel for "the
+     * previous attempt's span id", NOT the telemetry metric store. It
+     * has to be something that survives across potentially different
+     * worker processes (a retry can land on any worker), which rules
+     * out in-memory state; the app's cache is the one thing every
+     * Laravel install already has configured for exactly this shape of
+     * problem. A null/array cache driver degrades this to a no-op —
+     * fine, retries just go unlinked, same as no cache being reachable.
+     */
+    private function retryLinkCache(): CacheRepository
+    {
+        return $this->container->make(CacheFactory::class)->store(
+            Cast::string(config('telemetry.queue.retry_link_store')) ?: null,
+        );
+    }
+
+    private function retryLinkKey(string $uuid): string
+    {
+        return "telemetry:queue-retry-link:{$uuid}";
+    }
+
+    /**
+     * The previous attempt's span, as a link — never a parent, since the
+     * new attempt is a sibling (both children of the original dispatch),
+     * not a continuation. Job uuids are stable across retries of the
+     * same dispatch, so this is the only identifier that reliably
+     * bridges attempts that may land on different worker processes.
+     *
+     * @return list<SpanLink>
+     */
+    private function retryLink(JobProcessing $event): array
+    {
+        if (! config('telemetry.instrument.queue_retry_links', true) || $event->job->attempts() <= 1) {
+            return [];
+        }
+
+        $uuid = $event->job->uuid();
+
+        if (! is_string($uuid) || $uuid === '') {
+            return [];
+        }
+
+        $previous = FailSafe::guard(fn () => $this->retryLinkCache()->get($this->retryLinkKey($uuid)));
+
+        if (! is_array($previous) || ! is_string($previous['traceId'] ?? null) || ! is_string($previous['spanId'] ?? null)) {
+            return [];
+        }
+
+        return [new SpanLink($previous['traceId'], $previous['spanId'], ['queue.retry' => true])];
     }
 
     public function register(QueueManager $queue, Dispatcher $events, bool $propagate, bool $instrument): void
@@ -161,6 +220,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 $event->job->resolveName().' process',
                 SpanKind::Consumer,
                 $attributes,
+                $this->retryLink($event),
             );
 
             $this->jobSpans[] = $span;
@@ -171,6 +231,12 @@ final class QueueInstrumentation implements ManagesRequestState
             // inside a request that is already being measured.
             if ($event->connectionName !== 'sync' && config('telemetry.instrument.resources', true)) {
                 $this->jobUsage[spl_object_id($span)] = ResourceUsage::start();
+            }
+
+            if ($event->connectionName !== 'sync' && config('telemetry.instrument.profiling', true) && $span->sampled) {
+                $this->jobProfiles[spl_object_id($span)] = CpuProfiler::start(
+                    Cast::float(config('telemetry.profiling.period'), 0.001),
+                );
             }
         });
     }
@@ -192,7 +258,22 @@ final class QueueInstrumentation implements ManagesRequestState
      */
     private function jobReleased(JobReleasedAfterException $event): void
     {
-        FailSafe::guard(fn () => $this->currentJobSpan()?->setStatus(SpanStatus::Error, 'released for retry'));
+        FailSafe::guard(function () use ($event) {
+            $span = $this->currentJobSpan();
+            $span?->setStatus(SpanStatus::Error, 'released for retry');
+
+            if ($span !== null && config('telemetry.instrument.queue_retry_links', true)) {
+                $uuid = $event->job->uuid();
+
+                if (is_string($uuid) && $uuid !== '') {
+                    $this->retryLinkCache()->put(
+                        $this->retryLinkKey($uuid),
+                        ['traceId' => $span->traceId, 'spanId' => $span->spanId],
+                        Cast::int(config('telemetry.queue.retry_link_ttl'), 86400),
+                    );
+                }
+            }
+        });
 
         $this->completeJob(
             job: $event->job->resolveName(),
@@ -251,6 +332,13 @@ final class QueueInstrumentation implements ManagesRequestState
 
                 $span->end();
 
+                $profile = $this->jobProfiles[spl_object_id($span)] ?? null;
+                unset($this->jobProfiles[spl_object_id($span)]);
+
+                if ($profile !== null) {
+                    $this->reportProfile($profile, $span->durationMs(), $job, $queue ?? 'default');
+                }
+
                 $this->telemetry()
                     ->histogram('queue.job.duration', description: 'Queue job processing duration', unit: 'ms')
                     ->record($span->durationMs(), $labels);
@@ -291,9 +379,26 @@ final class QueueInstrumentation implements ManagesRequestState
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
     }
 
+    private function reportProfile(CpuProfiler $profile, float $durationMs, string $job, string $queue): void
+    {
+        $top = $profile->stop(Cast::int(config('telemetry.profiling.top_functions'), 20));
+
+        if ($top === null || $durationMs < Cast::float(config('telemetry.profiling.min_duration_ms'), 500.0)) {
+            return;
+        }
+
+        $this->telemetry()->event('profile.captured', [
+            'job.name' => $job,
+            'queue' => $queue,
+            'duration_ms' => round($durationMs, 2),
+            'profile.top_functions' => json_encode($top, JSON_UNESCAPED_SLASHES) ?: '[]',
+        ]);
+    }
+
     public function flushRequestState(): void
     {
         $this->jobSpans = [];
         $this->jobUsage = [];
+        $this->jobProfiles = [];
     }
 }

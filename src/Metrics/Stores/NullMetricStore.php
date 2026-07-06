@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 
 /**
@@ -18,9 +19,9 @@ final class NullMetricStore implements MetricStore
 
     public function addGauge(MetricDefinition $definition, array $labels, float $delta): void {}
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void {}
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void {}
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void {}
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void {}
 
     public function collect(): array
     {

@@ -7,9 +7,10 @@ start at `docs/getting-started/api-reference.md` for the public API.
 
 ```bash
 composer check          # pint --test + phpstan (level 9, 1G) + pest — run before every commit
-composer test           # pest only
+composer test           # pest only (excludes --group=benchmark)
 vendor/bin/pest --group=redis   # integration tests (needs local Redis)
 php -d apc.enable_cli=1 vendor/bin/pest --group=apcu
+vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production/performance.md
 ```
 
 ## Architecture map

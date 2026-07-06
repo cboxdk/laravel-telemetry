@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Registry;
@@ -39,16 +40,16 @@ final class CountingStore implements MetricStore
         $this->inner->addGauge($definition, $labels, $delta);
     }
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
         $this->writes++;
-        $this->inner->recordHistogram($definition, $labels, $value);
+        $this->inner->recordHistogram($definition, $labels, $value, $exemplar);
     }
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
         $this->writes++;
-        $this->inner->mergeHistogram($definition, $labels, $bucketCounts, $sum, $count);
+        $this->inner->mergeHistogram($definition, $labels, $bucketCounts, $sum, $count, $exemplar);
     }
 
     public function collect(): array
@@ -101,6 +102,21 @@ it('aggregates histogram observations into one merged inner write', function () 
         ->and($sample->bucketCounts)->toBe([2, 1, 1])
         ->and($sample->count)->toBe(4)
         ->and($sample->sum)->toBe(5063.0);
+});
+
+it('keeps the latest exemplar when buffering histogram observations', function () {
+    $counting = new CountingStore;
+    $buffered = new BufferedMetricStore($counting);
+
+    $definition = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    $buffered->recordHistogram($definition, [], 5, new Exemplar('trace-1', 5.0, 1_000));
+    $buffered->recordHistogram($definition, [], 8); // no exemplar — does not clear the last one
+    $buffered->recordHistogram($definition, [], 50, new Exemplar('trace-2', 50.0, 2_000));
+
+    $buffered->flushBuffer();
+
+    expect($counting->collect()[0]->samples[0]->exemplar?->traceId)->toBe('trace-2');
 });
 
 it('folds gauge sets and deltas in order', function () {

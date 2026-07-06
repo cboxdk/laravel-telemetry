@@ -116,6 +116,14 @@ final readonly class OtlpSerializer
             ], $span->events());
         }
 
+        if ($span->links() !== []) {
+            $data['links'] = array_map(fn ($link): array => array_filter([
+                'traceId' => $link->traceId,
+                'spanId' => $link->spanId,
+                'attributes' => $this->attributes($link->attributes) ?: null,
+            ], static fn ($value) => $value !== null), $span->links());
+        }
+
         return $data;
     }
 

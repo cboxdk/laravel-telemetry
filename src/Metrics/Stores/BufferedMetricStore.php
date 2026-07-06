@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\Labels;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 
@@ -28,7 +29,7 @@ final class BufferedMetricStore implements MetricStore
     /** @var array<string, array{definition: MetricDefinition, series: array<string, array{set: float|null, add: float}>}> */
     private array $gauges = [];
 
-    /** @var array<string, array{definition: MetricDefinition, series: array<string, array{bucketCounts: list<int>, sum: float, count: int}>}> */
+    /** @var array<string, array{definition: MetricDefinition, series: array<string, array{bucketCounts: list<int>, sum: float, count: int, exemplar: Exemplar|null}>}> */
     private array $histograms = [];
 
     private int $pending = 0;
@@ -80,7 +81,7 @@ final class BufferedMetricStore implements MetricStore
         $this->bumpPending();
     }
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
         $bounds = $definition->buckets ?? [];
         $bucketIndex = $this->bucketIndex($bounds, $value);
@@ -91,10 +92,10 @@ final class BufferedMetricStore implements MetricStore
             $bucketCounts[] = $i === $bucketIndex ? 1 : 0;
         }
 
-        $this->mergeHistogram($definition, $labels, $bucketCounts, $value, 1);
+        $this->mergeHistogram($definition, $labels, $bucketCounts, $value, 1, $exemplar);
     }
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
         $series = Labels::encode($labels);
 
@@ -103,6 +104,7 @@ final class BufferedMetricStore implements MetricStore
             'bucketCounts' => array_fill(0, count($definition->buckets ?? []) + 1, 0),
             'sum' => 0.0,
             'count' => 0,
+            'exemplar' => null,
         ];
 
         $entry = &$this->histograms[$definition->name]['series'][$series];
@@ -115,6 +117,10 @@ final class BufferedMetricStore implements MetricStore
 
         $entry['sum'] += $sum;
         $entry['count'] += $count;
+
+        if ($exemplar !== null) {
+            $entry['exemplar'] = $exemplar;
+        }
 
         $this->bumpPending();
     }
@@ -148,6 +154,7 @@ final class BufferedMetricStore implements MetricStore
                     $entry['bucketCounts'],
                     $entry['sum'],
                     $entry['count'],
+                    $entry['exemplar'],
                 );
             }
         }

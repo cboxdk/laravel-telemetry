@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Exporters\Prometheus\PrometheusRenderer;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
@@ -91,6 +92,48 @@ it('escapes label values', function () {
 
 it('renders nothing for an empty family list', function () {
     expect((new PrometheusRenderer)->render([]))->toBe('');
+});
+
+it('omits exemplars from the classic text format', function () {
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('req.duration', MetricType::Histogram, unit: 'ms', buckets: [10.0, 100.0]),
+            [new HistogramSample(['route' => '/'], [10.0, 100.0], [2, 1, 1], 5065.0, 4, new Exemplar('abc123', 42.0, 1_700_000_000_000_000_000))],
+        ),
+    ]);
+
+    expect($output)->not->toContain('trace_id')
+        ->not->toContain('# EOF');
+});
+
+it('renders an exemplar on the bucket the observation landed in, in OpenMetrics format', function () {
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('req.duration', MetricType::Histogram, unit: 'ms', buckets: [10.0, 100.0]),
+            [new HistogramSample(['route' => '/'], [10.0, 100.0], [2, 1, 1], 5065.0, 4, new Exemplar('abc123', 42.0, 1_700_000_000_000_000_000))],
+        ),
+    ], openMetrics: true);
+
+    expect($output)
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="10"} 2'."\n")
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="100"} 3 # {trace_id="abc123"} 42 1700000000')
+        ->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4'."\n")
+        ->toEndWith("# EOF\n");
+});
+
+it('renders an exemplar on the +Inf bucket when the value exceeds every bound', function () {
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('req.duration', MetricType::Histogram, unit: 'ms', buckets: [10.0, 100.0]),
+            [new HistogramSample(['route' => '/'], [10.0, 100.0], [2, 1, 1], 5065.0, 4, new Exemplar('overflow-trace', 999.0, 1_700_000_000_000_000_000))],
+        ),
+    ], openMetrics: true);
+
+    expect($output)->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4 # {trace_id="overflow-trace"} 999 1700000000');
+});
+
+it('emits # EOF for an empty family list in OpenMetrics format', function () {
+    expect((new PrometheusRenderer)->render([], openMetrics: true))->toBe("# EOF\n");
 });
 
 it('stamps resource identity labels on every scraped series', function () {

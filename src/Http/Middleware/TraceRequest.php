@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http\Middleware;
 
 use Cbox\Telemetry\Support\AnalyticsIdentity;
+use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\ResourceUsage;
@@ -36,6 +38,8 @@ final class TraceRequest
 
     private const USAGE_KEY = 'cbox.telemetry.usage';
 
+    private const PROFILE_KEY = 'cbox.telemetry.profile';
+
     /** Memory-peak buckets: 4 MB … 1 GB. */
     private const MEMORY_BUCKETS = [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824];
 
@@ -65,6 +69,18 @@ final class TraceRequest
                     $request->headers->get('traceparent'),
                     trustSampling: (bool) config('telemetry.traces.trust_incoming_sampling', true),
                 );
+            }
+
+            // W3C baggage: inherit the CALLER's Telemetry::context()
+            // dimensions (team, tenant, plan, …), not just the trace id —
+            // gated on the same trust boundary as continuing the trace
+            // itself, since baggage is caller-supplied, unvalidated data.
+            if (config('telemetry.instrument.baggage', true) && config('telemetry.traces.continue_incoming')) {
+                $baggage = Baggage::parse($request->headers->get('baggage'));
+
+                if ($baggage !== []) {
+                    $this->telemetry->context($baggage);
+                }
             }
 
             $span = $this->telemetry->tracer()->startSpan(
@@ -103,6 +119,12 @@ final class TraceRequest
 
             if (config('telemetry.instrument.resources', true)) {
                 $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
+            }
+
+            if (config('telemetry.instrument.profiling', true) && $span->sampled) {
+                $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
+                    Cast::float(config('telemetry.profiling.period'), 0.001),
+                ));
             }
         });
 
@@ -194,6 +216,21 @@ final class TraceRequest
                         'enduser.guard' => $remembered['guard'],
                     ]));
                 }
+            }
+
+            // Inertia awareness: a request span attribute plus a counter
+            // for version-mismatch reloads — pure response inspection,
+            // no dependency on inertiajs/inertia-laravel being installed.
+            if (config('telemetry.instrument.inertia', true)) {
+                $this->annotateInertia($request, $response, $span);
+            }
+
+            // Rate limiting: a 429 response is the driver-agnostic signal
+            // (Laravel's RateLimiter fires no event) — works for
+            // ThrottleRequests AND any custom limiter that returns 429.
+            if (config('telemetry.instrument.rate_limiting', true) && $response->getStatusCode() === 429) {
+                $this->telemetry->counter('rate_limit.exceeded', 'Requests rejected for exceeding a rate limit')
+                    ->inc(1, ['limiter' => $this->rateLimiterName($request)]);
             }
 
             // Session dimension: the driver and a HASH of the id — never
@@ -302,6 +339,12 @@ final class TraceRequest
 
             $span->end();
 
+            $profile = $request->attributes->get(self::PROFILE_KEY);
+
+            if ($profile instanceof CpuProfiler) {
+                $this->reportProfile($profile, $span->durationMs(), $labels);
+            }
+
             $this->telemetry
                 ->histogram('http.server.request.duration', description: 'HTTP server request duration', unit: 'ms')
                 ->record($span->durationMs(), $labels);
@@ -381,6 +424,60 @@ final class TraceRequest
         });
 
         return is_string($guard) && $guard !== '' ? $guard : null;
+    }
+
+    /**
+     * `inertia.request` when the client's own XHR navigation sent the
+     * `X-Inertia` header (the initial full-page load never does). A
+     * matching `X-Inertia-Location` on the response means Inertia's own
+     * middleware detected an asset-version mismatch and is forcing a
+     * full page reload — worth a counter, since a spike right after a
+     * deploy is expected but a sustained rate means the client-side
+     * asset version never settles.
+     */
+    private function annotateInertia(Request $request, Response $response, Span $span): void
+    {
+        if ($request->headers->get('X-Inertia') !== 'true') {
+            return;
+        }
+
+        $span->setAttribute('inertia.request', true);
+
+        if ($response->headers->has('X-Inertia-Location')) {
+            $span->setAttribute('inertia.version_mismatch', true);
+            $this->telemetry->counter('inertia.version_mismatches', 'Inertia asset-version mismatches forcing a full page reload')->inc();
+        }
+    }
+
+    /**
+     * The `throttle:<name>` route middleware's limiter name — the one
+     * label RateLimiter::for() callbacks are actually registered under.
+     * An inline spec (`throttle:60,1`, bare `throttle`) has no name to
+     * give, so it's bucketed as "default" rather than the raw numbers
+     * (unbounded per-route tuning would otherwise leak into the label).
+     */
+    private function rateLimiterName(Request $request): string
+    {
+        $route = $request->route();
+        $middleware = is_object($route) && method_exists($route, 'gatherMiddleware') ? $route->gatherMiddleware() : [];
+
+        foreach ($middleware as $entry) {
+            if (! is_string($entry) || ! str_starts_with($entry, 'throttle')) {
+                continue;
+            }
+
+            $params = str_contains($entry, ':') ? substr($entry, strpos($entry, ':') + 1) : '';
+
+            if ($params === '') {
+                return 'default';
+            }
+
+            $name = explode(',', $params)[0];
+
+            return is_numeric($name) ? 'default' : $name;
+        }
+
+        return 'unknown';
     }
 
     /**
@@ -514,5 +611,23 @@ final class TraceRequest
         }
 
         return '/{unmatched}';
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $labels
+     */
+    private function reportProfile(CpuProfiler $profile, float $durationMs, array $labels): void
+    {
+        $top = $profile->stop(Cast::int(config('telemetry.profiling.top_functions'), 20));
+
+        if ($top === null || $durationMs < Cast::float(config('telemetry.profiling.min_duration_ms'), 500.0)) {
+            return;
+        }
+
+        $this->telemetry->event('profile.captured', [
+            'http.route' => Cast::string($labels['http.route'] ?? null),
+            'duration_ms' => round($durationMs, 2),
+            'profile.top_functions' => json_encode($top, JSON_UNESCAPED_SLASHES) ?: '[]',
+        ]);
     }
 }

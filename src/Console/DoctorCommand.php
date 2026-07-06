@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
+use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
@@ -24,7 +25,7 @@ final class DoctorCommand extends Command
 
     protected $description = 'Verify the telemetry configuration, store and exporters';
 
-    public function handle(TelemetryManager $telemetry, MetricStore $store): int
+    public function handle(TelemetryManager $telemetry, MetricStore $store, Spool $spool): int
     {
         if (! $telemetry->enabled()) {
             $this->components->warn('Telemetry is DISABLED (TELEMETRY_ENABLED=false). Nothing else to check.');
@@ -35,8 +36,11 @@ final class DoctorCommand extends Command
         $this->components->info('Telemetry is enabled.');
 
         $healthy = $this->checkStore($store);
+        $this->checkCacheCollision();
+        $this->checkProfiling();
         $healthy = $this->checkPrometheus() && $healthy;
         $healthy = $this->checkOtlp() && $healthy;
+        $healthy = $this->checkSpool($spool) && $healthy;
 
         if ($healthy) {
             $this->components->info('All checks passed.');
@@ -88,14 +92,75 @@ final class DoctorCommand extends Command
 
         /** @var list<string> $allowedIps */
         $allowedIps = config('telemetry.prometheus.allowed_ips', []);
+        $hasToken = Cast::string(config('telemetry.prometheus.token')) !== '';
 
-        if ($allowedIps === []) {
-            $this->components->twoColumnDetail("Prometheus [{$paths}]", '<fg=yellow>OPEN — no IP allowlist (set TELEMETRY_ALLOWED_IPS in production)</>');
-        } else {
+        if ($allowedIps !== []) {
             $this->components->twoColumnDetail("Prometheus [{$paths}]", '<fg=green>OK — allowlist: '.implode(', ', $allowedIps).'</>');
+        } elseif ($hasToken) {
+            $this->components->twoColumnDetail("Prometheus [{$paths}]", '<fg=green>OK — bearer token configured</>');
+        } elseif (app()->environment('local', 'testing')) {
+            $this->components->twoColumnDetail("Prometheus [{$paths}]", '<fg=yellow>OPEN — no allowlist or token, but running in '.app()->environment().'</>');
+        } else {
+            $this->components->twoColumnDetail("Prometheus [{$paths}]", '<fg=red>CLOSED — no TELEMETRY_ALLOWED_IPS or TELEMETRY_PROMETHEUS_TOKEN set outside local/testing; every scrape will 403</>');
         }
 
         return true;
+    }
+
+    /**
+     * `php artisan cache:clear` flushes the CURRENT cache store's entire
+     * backing storage — `RedisStore::flush()` is a raw `FLUSHDB` (not
+     * prefix-scoped), and `apcu_clear_cache()` wipes the whole shared
+     * memory segment for every worker on the machine. Neither is aware
+     * of telemetry's key prefix. If the metric store shares the same
+     * Redis database or the same APCu segment as the app's cache, a
+     * routine cache:clear silently destroys every metric. This is
+     * informational, not a failure — the setup still works, it's just
+     * one `cache:clear` away from an empty dashboard.
+     */
+    private function checkCacheCollision(): void
+    {
+        $store = Cast::string(config('telemetry.store'), 'redis');
+        $cacheStore = Cast::string(config('cache.default'));
+        $cacheDriver = Cast::string(config("cache.stores.{$cacheStore}.driver"));
+
+        if ($store === 'apcu' && $cacheDriver === 'apcu') {
+            $this->components->twoColumnDetail(
+                'Cache collision',
+                '<fg=yellow>apcu_clear_cache() (via `cache:clear`) wipes the WHOLE APCu segment, telemetry included — no prefix can protect it</>',
+            );
+
+            return;
+        }
+
+        if ($store === 'redis' && $cacheDriver === 'redis') {
+            $telemetryConnection = Cast::string(config('telemetry.stores.redis.connection'), 'default');
+            $cacheConnection = Cast::string(config("cache.stores.{$cacheStore}.connection"), 'default');
+
+            if (config("database.redis.{$telemetryConnection}") === config("database.redis.{$cacheConnection}")) {
+                $this->components->twoColumnDetail(
+                    'Cache collision',
+                    "<fg=yellow>telemetry and the [{$cacheStore}] cache store share the same Redis database — `cache:clear` runs FLUSHDB and wipes all metrics. Use a separate TELEMETRY_REDIS_CONNECTION</>",
+                );
+            }
+        }
+    }
+
+    private function checkProfiling(): void
+    {
+        if (! config('telemetry.instrument.profiling', true)) {
+            $this->components->twoColumnDetail('CPU profiling', 'disabled');
+
+            return;
+        }
+
+        if (extension_loaded('excimer')) {
+            $this->components->twoColumnDetail('CPU profiling', '<fg=green>OK — ext-excimer loaded</>');
+
+            return;
+        }
+
+        $this->components->twoColumnDetail('CPU profiling', 'off — ext-excimer not installed (optional)');
     }
 
     private function checkOtlp(): bool
@@ -131,5 +196,48 @@ final class DoctorCommand extends Command
         $this->components->twoColumnDetail("OTLP [{$endpoint}]", '<fg=red>FAILED — '.($result->reason ?? 'unknown').'</>');
 
         return false;
+    }
+
+    /**
+     * The spool is drained EXCLUSIVELY by `telemetry:flush` (cron or
+     * `--daemon`) — nothing else touches it. A depth close to
+     * max_items is the one-invocation signal that the drain isn't
+     * keeping up (or was never scheduled at all): past max_items the
+     * spool silently drops its oldest entries with no other warning.
+     */
+    private function checkSpool(Spool $spool): bool
+    {
+        if (! config('telemetry.otlp.spool.enabled', false)) {
+            $this->components->twoColumnDetail('OTLP spool', 'disabled');
+
+            return true;
+        }
+
+        try {
+            $depth = $spool->size();
+        } catch (Throwable $e) {
+            $this->components->twoColumnDetail('OTLP spool', '<fg=red>FAILED — '.$e->getMessage().'</>');
+
+            return false;
+        }
+
+        $maxItems = Cast::int(config('telemetry.otlp.spool.max_items'), 20000);
+        $ratio = $maxItems > 0 ? $depth / $maxItems : 0.0;
+
+        if ($ratio >= 0.9) {
+            $this->components->twoColumnDetail('OTLP spool', "<fg=red>{$depth}/{$maxItems} — near capacity, oldest entries are being dropped. Is `telemetry:flush --daemon` running, or scheduled via cron?</>");
+
+            return false;
+        }
+
+        if ($ratio >= 0.5) {
+            $this->components->twoColumnDetail('OTLP spool', "<fg=yellow>{$depth}/{$maxItems} — over half full. Verify telemetry:flush is actually running/scheduled.</>");
+
+            return true;
+        }
+
+        $this->components->twoColumnDetail('OTLP spool', "<fg=green>OK — {$depth}/{$maxItems}</>");
+
+        return true;
     }
 }

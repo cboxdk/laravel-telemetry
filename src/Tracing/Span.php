@@ -24,6 +24,9 @@ final class Span
     /** @var list<SpanEvent> */
     private array $events = [];
 
+    /** @var list<SpanLink> */
+    private array $links;
+
     private bool $customName = false;
 
     private ?int $recordedException = null;
@@ -56,6 +59,9 @@ final class Span
      * @param  Closure(Span): void  $onEnd
      * @param  int|null  $startUnixNano  Backdated start for spans recorded
      *                                   after the fact (e.g. query events).
+     * @param  list<SpanLink>  $links  Causal references to related but
+     *                                 non-ancestor spans (e.g. a retried
+     *                                 job's previous attempt).
      */
     public function __construct(
         public readonly string $traceId,
@@ -67,10 +73,12 @@ final class Span
         array $attributes,
         private readonly Closure $onEnd,
         ?int $startUnixNano = null,
+        array $links = [],
     ) {
         $this->attributes = $attributes;
         $this->startUnixNano = $startUnixNano ?? (int) (microtime(true) * 1e9);
         $this->startMonotonic = hrtime(true);
+        $this->links = $links;
     }
 
     public function markDetail(): self
@@ -268,6 +276,14 @@ final class Span
     public function events(): array
     {
         return $this->events;
+    }
+
+    /**
+     * @return list<SpanLink>
+     */
+    public function links(): array
+    {
+        return $this->links;
     }
 
     /**

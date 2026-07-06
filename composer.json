@@ -33,7 +33,11 @@
     "require-dev": {
         "cboxdk/system-metrics": "^3.0",
         "larastan/larastan": "^3.0",
+        "laravel/horizon": "^5.47",
+        "laravel/pennant": "^1.24",
         "laravel/pint": "^1.14",
+        "laravel/reverb": "^1.10",
+        "livewire/livewire": "^3.0",
         "nunomaduro/collision": "^8.8",
         "orchestra/testbench": "^10.0|^11.0",
         "pestphp/pest": "^4.0",
@@ -46,8 +50,13 @@
     "suggest": {
         "ext-apcu": "Required when using the apcu metric store.",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
+        "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export.",
         "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans.",
-        "geoip2/geoip2": "Resolve client.geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped."
+        "geoip2/geoip2": "Resolve client.geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",
+        "laravel/horizon": "Supervisor/master state, long-wait detection, process restarts and OOM metrics when Horizon runs your queues.",
+        "laravel/reverb": "WebSocket message/channel/connection metrics when Reverb is your broadcasting server.",
+        "laravel/pennant": "Feature flag check counters (feature.checks, feature.unknown).",
+        "livewire/livewire": "Component lifecycle: mount/hydrate counters + render/update/call detail spans."
     },
     "autoload": {
         "psr-4": {
@@ -73,7 +82,7 @@
         "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
         "format": "vendor/bin/pint",
         "format:check": "vendor/bin/pint --test",
-        "test": "vendor/bin/pest",
+        "test": "php -d memory_limit=512M vendor/bin/pest --exclude-group=benchmark",
         "test-coverage": "vendor/bin/pest --coverage",
         "check": [
             "@format:check",

@@ -31,13 +31,18 @@ scrapes a route; traces and events go straight to any OTLP backend as
 spec-stable HTTP JSON.
 
 - ✅ Pure Composer package — deploys anywhere Laravel runs
-- ✅ Prometheus scrape endpoint(s) with IP allowlisting and metric filters
+- ✅ Prometheus scrape endpoint(s), closed by default outside local/testing
+  (IP allowlist or bearer token — same convention as Horizon/Telescope),
+  with metric filters
 - ✅ Real OTLP (`/v1/traces`, `/v1/metrics`, `/v1/logs`) without the SDK
 - ✅ `telemetry` log channel: Laravel logs become trace-correlated OTLP log
   records (severity-mapped, feedback-loop safe)
 - ✅ Auto-instrumentation: requests, queue jobs (full W3C trace propagation
   into workers), DB queries, commands — plus `Http::withTraceparent()` for
   outbound calls
+- ✅ Auto-detects Horizon, Reverb and Pennant when installed — supervisor
+  state/long-wait detection, WebSocket message/channel metrics, and
+  feature-flag check counters, no extra config
 - ✅ `Telemetry::fake()` with assertions for counters, gauges, histograms,
   spans and events
 - ✅ Provider contract so packages publish telemetry without coupling

@@ -121,3 +121,30 @@ it('histograms can time closures', function () {
         ->and($family->type())->toBe(MetricType::Histogram)
         ->and($family->samples[0]->count)->toBe(1);
 });
+
+it('attaches an exemplar resolved from the injected closure', function () {
+    $registry = new Registry(new ArrayMetricStore, [10, 100, 1000], fn () => 'trace-abc');
+
+    $registry->histogram('checkout.duration')->record(5.0);
+
+    $sample = $registry->collect()[0]->samples[0];
+
+    expect($sample->exemplar?->traceId)->toBe('trace-abc')
+        ->and($sample->exemplar?->value)->toBe(5.0);
+});
+
+it('records no exemplar when the resolver returns null (unsampled or no active span)', function () {
+    $registry = new Registry(new ArrayMetricStore, [10, 100, 1000], fn () => null);
+
+    $registry->histogram('checkout.duration')->record(5.0);
+
+    expect($registry->collect()[0]->samples[0]->exemplar)->toBeNull();
+});
+
+it('records no exemplar when no resolver is configured', function () {
+    $registry = registry();
+
+    $registry->histogram('checkout.duration')->record(5.0);
+
+    expect($registry->collect()[0]->samples[0]->exemplar)->toBeNull();
+});

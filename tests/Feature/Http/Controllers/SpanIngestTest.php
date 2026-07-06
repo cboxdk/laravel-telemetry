@@ -141,7 +141,8 @@ it('renders the browser snippet (script + config) when ingest is enabled', funct
         ->toContain('browser.js')
         ->toContain('data-endpoint=')
         ->toContain('data-fetch="1"')
-        ->toContain('data-errors="1"');
+        ->toContain('data-errors="1"')
+        ->toContain('data-vitals="1"');
 });
 
 it('renders nothing when ingest is disabled', function () {
@@ -174,7 +175,9 @@ it('serves the zero-build RUM script with cache headers', function () {
         ->and($res->headers->get('Content-Type'))->toContain('javascript')
         ->and($res->headers->get('Cache-Control'))->toContain('max-age')
         ->and($res->getContent())->toContain('traceparent')
-        ->and($res->getContent())->toContain('sendBeacon');
+        ->and($res->getContent())->toContain('sendBeacon')
+        ->and($res->getContent())->toContain('largest-contentful-paint')
+        ->and($res->getContent())->toContain('layout-shift');
 });
 
 it('404s the RUM script when ingest is disabled', function () {

@@ -132,8 +132,11 @@ final class Tracer
 
     /**
      * @param  array<string, scalar|null>  $attributes
+     * @param  list<SpanLink>  $links  Causal references to related but
+     *                                 non-ancestor spans (e.g. a retried
+     *                                 job's previous attempt).
      */
-    public function startSpan(string $name, SpanKind $kind = SpanKind::Internal, array $attributes = []): Span
+    public function startSpan(string $name, SpanKind $kind = SpanKind::Internal, array $attributes = [], array $links = []): Span
     {
         $parent = $this->currentSpan();
 
@@ -152,6 +155,7 @@ final class Tracer
             sampled: $this->sampled,
             attributes: $attributes,
             onEnd: fn (Span $span) => $this->finish($span),
+            links: $links,
         );
 
         if ($this->measureSpanResources && $span->sampled) {

@@ -6,6 +6,68 @@ weight: 4
 
 # Performance
 
+## Measured overhead
+
+The claims above ("zero-cost when disabled", "in-memory only") were
+qualitative until now. `tests/Feature/Benchmark/OverheadBenchmarkTest.php`
+(tagged `--group=benchmark`, excluded from `composer test`/CI) drives a
+tight in-process loop through the real HTTP kernel — same middleware
+stack, same termination path a production request takes — with no
+network or Redis involved (array metric store, null exporter), so the
+number reflects this package's OWN code, not a collector's reachability.
+Run it yourself: `vendor/bin/pest --group=benchmark`.
+
+Two consecutive runs, 300 requests per scenario (30 discarded as
+warm-up), median request time:
+
+| Scenario | Median | Delta vs disabled |
+|---|---|---|
+| `TELEMETRY_ENABLED=false` (baseline) | 51.4–51.9 ms | — |
+| Enabled, array store, no exporter | 51.8–52.5 ms | +0.4–0.6 ms |
+| Enabled, array store, null exporter | 52.1–52.5 ms | +0.6–0.7 ms |
+| Enabled, tail-sampling mode, null exporter (closest to defaults) | 52.2–52.8 ms | +0.8–0.9 ms |
+
+**Read this as an order of magnitude, not a precise SLA.** The ~51ms
+absolute baseline is dominated by Testbench's own per-request test
+harness cost (config/container work Testbench does on every simulated
+request) — not representative of an already-booted PHP-FPM worker or
+Octane, where a real request's baseline is far lower. The number that
+matters is the **delta**: full default instrumentation (request span +
+route/user/session enrichment, query/view/model/cache listeners,
+buffered metric writes, resource capture) adds under **1ms** per
+request on this harness, with meaningful run-to-run jitter (the
+harness's own p95/max swing 25+ ms from GC and machine noise — measure
+median, not max, for signal). Exporting over the network is a
+separate, already-bounded cost: OTLP posts run at terminate with a
+`timeout`/`connect_timeout` of 3s/1s, and a down collector trips the
+per-process circuit breaker after one failure so it costs one timeout
+per cooldown window, not per request (see below).
+
+### How this compares
+
+Two comparison points, for context rather than a strict benchmark
+(different architectures, not run in the same harness):
+
+- **[Laravel Nightwatch](https://nightwatch.laravel.com/docs/guides/faqs)**
+  claims "typically less than 3ms per request", achieved by running its
+  agent as a **separate process** — the app fires-and-forgets a TCP
+  payload and the request path stays unblocked from the actual
+  telemetry work. This package's spool (`TELEMETRY_OTLP_SPOOL=true` +
+  `telemetry:flush --daemon`) is the closest equivalent: requests do one
+  `RPUSH` and return, and a separate daemon process ships the batches —
+  the same shape, Redis standing in for Nightwatch's socket.
+- **[Sentry's PHP SDK docs](https://docs.sentry.io/platforms/php/guides/laravel/performance/)**
+  note that its performance-monitoring feature does add response time,
+  and recommend a local Relay process to absorb it — [a maintainer
+  clarified](https://github.com/getsentry/sentry-docs/issues/11337) this
+  is specific to PHP: unlike Sentry's SDKs on other platforms, **PHP has
+  no background threads**, so in-process work cannot be silently
+  deferred inside the same request the way it can in Node or Python.
+  This package inherits the same constraint (see "Hot-path guarantees"
+  below) — direct OTLP export at terminate does real, synchronous work
+  in the request; the spool is this package's answer to the same
+  problem Sentry's Relay solves.
+
 ## Per-operation cost
 
 | Operation | Cost |
@@ -27,8 +89,17 @@ weight: 4
   have very chatty request/DB patterns; the request span and duration
   histogram remain.
 - **Use a dedicated Redis connection** so telemetry writes never queue
-  behind cache/queue traffic (and vice versa).
-- **APCu store** removes the network hop entirely on single-node setups.
+  behind cache/queue traffic (and vice versa) — and, more importantly,
+  so `php artisan cache:clear` can't destroy your metrics. Neither
+  `RedisStore::flush()` (a raw `FLUSHDB`, not prefix-scoped) nor
+  `apcu_clear_cache()` (wipes the whole shared segment machine-wide)
+  know anything about telemetry's key prefix. If the metric store shares
+  a Redis database with your cache, or you use the apcu driver for both,
+  a routine cache clear silently empties every dashboard.
+  `telemetry:doctor` checks for this and flags it.
+- **APCu store** removes the network hop entirely on single-node setups —
+  but see the cache:clear warning above; there is no way to protect an
+  apcu-backed metric store from `apcu_clear_cache()`.
 
 ## Write buffering
 

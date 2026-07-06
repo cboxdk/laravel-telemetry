@@ -140,7 +140,9 @@ it:
 { span.messaging.origin.name = "POST /demo/orders" }
 ```
 
-Context clears automatically between requests and jobs.
+Context clears automatically between requests and jobs. It also crosses
+a real HTTP service boundary via the W3C `baggage` header — see
+[Context propagation](#context-propagation) below.
 
 ## Metric dimensions (bounded!)
 
@@ -182,6 +184,34 @@ Http::withTraceparent()->post($url, $payload);
 ```
 
 The macro is a no-op when no trace is active.
+
+`Telemetry::context()` dimensions travel the same way — the macro also
+attaches a W3C `baggage` header (`team.id=42,plan=pro`, percent-encoded)
+whenever context is set, so a downstream SERVICE inherits the SAME
+custom dimensions, not just the trace id. The receiving app merges an
+incoming `baggage` header back into its own context
+(`instrument.baggage`, default on) — gated on `traces.continue_incoming`
+too, since baggage is caller-supplied, unvalidated data and should
+follow the same trust boundary as continuing the trace itself.
+
+## Span links (retries)
+
+Not every causal relationship is a parent. A retried job's attempt N+1
+is a SIBLING of attempt N — both are children of the original dispatch
+span, not a continuation of one another — so nesting them as
+parent/child would misrepresent the shape. Instead
+(`instrument.queue_retry_links`, default on), attempt N+1's span carries
+an OTel span **link** back to attempt N's span:
+
+```traceql
+{ span.queue.retry = true }
+```
+
+The link is bridged via the app's own cache (`queue.retry_link_store`/
+`queue.retry_link_ttl`, default 86400s), keyed by the job's stable
+UUID — a retry can land on a different worker process, so this can't be
+in-memory state. A `null`/`array` cache driver just means retries go
+unlinked, same graceful degradation as everything else here.
 
 ## The trace id as a support reference
 

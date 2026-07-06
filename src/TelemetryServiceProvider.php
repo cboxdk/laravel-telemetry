@@ -29,16 +29,22 @@ use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\Http\Middleware\FlushBrowserIngest;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
+use Cbox\Telemetry\Instrumentation\BroadcastingInstrumentation;
 use Cbox\Telemetry\Instrumentation\BusInstrumentation;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
+use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
+use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
+use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
+use Cbox\Telemetry\Instrumentation\PennantInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
+use Cbox\Telemetry\Instrumentation\ReverbInstrumentation;
 use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
 use Cbox\Telemetry\Instrumentation\TransactionInstrumentation;
 use Cbox\Telemetry\Instrumentation\ViewInstrumentation;
@@ -50,6 +56,7 @@ use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
+use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExceptionAttributes;
 use Cbox\Telemetry\Support\FailSafe;
@@ -78,8 +85,12 @@ use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Laravel\Horizon\Events\SupervisorLooped;
 use Laravel\Octane\Events\RequestReceived;
 use Laravel\Octane\Events\TickReceived;
+use Laravel\Pennant\Events\FeatureRetrieved;
+use Laravel\Reverb\Events\MessageSent;
+use Livewire\Livewire;
 use Monolog\Level;
 use Monolog\Logger;
 
@@ -118,7 +129,18 @@ class TelemetryServiceProvider extends ServiceProvider
             /** @var list<float> $buckets */
             $buckets = $app->make('config')->get('telemetry.default_buckets', []);
 
-            return new Registry($app->make(MetricStore::class), $buckets);
+            return new Registry(
+                $app->make(MetricStore::class),
+                $buckets,
+                // Lazy: Tracer isn't resolved until a histogram is actually
+                // recorded, long after both singletons exist — no circular
+                // dependency at construction time.
+                function () use ($app): ?string {
+                    $span = $app->make(Tracer::class)->currentSpan();
+
+                    return $span !== null && $span->sampled ? $span->traceId : null;
+                },
+            );
         });
 
         $this->app->singleton(Tracer::class, function (Application $app) {
@@ -289,8 +311,11 @@ class TelemetryServiceProvider extends ServiceProvider
     }
 
     /**
-     * Http::withTraceparent() attaches the current W3C trace context to an
-     * outbound request, so the downstream service continues the trace:
+     * Http::withTraceparent() attaches the current W3C trace context — AND
+     * baggage (Telemetry::context() dimensions), its standard sibling
+     * header — to an outbound request, so the downstream service
+     * continues the trace with the SAME custom dimensions, not just the
+     * trace id:
      *
      *     Http::withTraceparent()->post($url, $payload);
      */
@@ -304,11 +329,14 @@ class TelemetryServiceProvider extends ServiceProvider
 
         PendingRequest::macro('withTraceparent', function () use ($app) {
             /** @var PendingRequest $this */
-            $traceparent = $app->make(TelemetryManager::class)->traceparent();
+            $telemetry = $app->make(TelemetryManager::class);
+            $traceparent = $telemetry->traceparent();
+            $baggage = Baggage::encode($telemetry->contextAttributes());
 
-            return $traceparent === null
-                ? $this
-                : $this->withHeaders(['traceparent' => $traceparent]);
+            return $this->withHeaders(array_filter([
+                'traceparent' => $traceparent,
+                'baggage' => $baggage,
+            ], static fn (?string $value): bool => $value !== null));
         });
     }
 
@@ -605,9 +633,13 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
+        $config = $this->app->make('config');
+
         $this->app->make(QueryInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
-            Cast::float($this->app->make('config')->get('telemetry.instrument.queries_min_duration'), 0.0),
+            Cast::float($config->get('telemetry.instrument.queries_min_duration'), 0.0),
+            (bool) $config->get('telemetry.instrument.query_duplicates', true),
+            Cast::int($config->get('telemetry.instrument.query_duplicates_threshold'), 3),
         );
     }
 
@@ -756,6 +788,33 @@ class TelemetryServiceProvider extends ServiceProvider
 
         if ($config->get('telemetry.instrument.exceptions', true)) {
             $this->registerExceptionReporting();
+        }
+
+        if ($config->get('telemetry.instrument.pennant', true) && class_exists(FeatureRetrieved::class)) {
+            $this->app->singleton(PennantInstrumentation::class);
+            $this->app->make(PennantInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.horizon', true) && class_exists(SupervisorLooped::class)) {
+            $this->app->singleton(HorizonInstrumentation::class);
+            $this->app->make(HorizonInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.reverb', true) && class_exists(MessageSent::class)) {
+            $this->app->singleton(ReverbInstrumentation::class);
+            $this->app->make(ReverbInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.livewire', true) && class_exists(Livewire::class)) {
+            Livewire::componentHook(LivewireInstrumentation::class);
+        }
+
+        if ($config->get('telemetry.instrument.broadcasting', true)) {
+            (new BroadcastingInstrumentation)->register($this->app);
+        }
+
+        if ($config->get('telemetry.instrument.filesystem', true)) {
+            (new FilesystemInstrumentation)->register($this->app);
         }
     }
 

@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exceptions\ApcuUnavailable;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\Labels;
 use Cbox\Telemetry\Metrics\MetricDefinition;
@@ -59,7 +60,7 @@ final class ApcuMetricStore implements MetricStore
         $this->addFloat($this->valueKey(MetricType::Gauge, $definition->name, $series), $delta);
     }
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
         $series = Labels::encode($labels);
         $bounds = $definition->buckets ?? [];
@@ -71,9 +72,13 @@ final class ApcuMetricStore implements MetricStore
         $this->addInt("{$base}:b{$bucket}", 1);
         $this->addFloat("{$base}:sum", $value);
         $this->addInt("{$base}:count", 1);
+
+        if ($exemplar !== null) {
+            apcu_store("{$base}:exemplar", $this->encodeExemplar($exemplar));
+        }
     }
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
         $series = Labels::encode($labels);
         $base = $this->valueKey(MetricType::Histogram, $definition->name, $series);
@@ -93,6 +98,38 @@ final class ApcuMetricStore implements MetricStore
         if ($count > 0) {
             $this->addInt("{$base}:count", $count);
         }
+
+        if ($exemplar !== null) {
+            apcu_store("{$base}:exemplar", $this->encodeExemplar($exemplar));
+        }
+    }
+
+    private function encodeExemplar(Exemplar $exemplar): string
+    {
+        return json_encode([
+            't' => $exemplar->traceId,
+            'v' => $exemplar->value,
+            'n' => $exemplar->timeUnixNano,
+        ]) ?: '{}';
+    }
+
+    private function decodeExemplar(mixed $raw): ?Exemplar
+    {
+        if (! is_string($raw)) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+
+        if (! is_array($decoded) || ! is_string($decoded['t'] ?? null) || $decoded['t'] === '') {
+            return null;
+        }
+
+        return new Exemplar(
+            traceId: $decoded['t'],
+            value: is_numeric($decoded['v'] ?? null) ? (float) $decoded['v'] : 0.0,
+            timeUnixNano: is_numeric($decoded['n'] ?? null) ? (int) $decoded['n'] : 0,
+        );
     }
 
     public function collect(): array
@@ -152,6 +189,7 @@ final class ApcuMetricStore implements MetricStore
                     bucketCounts: $bucketCounts,
                     sum: is_int($sum) ? $this->toFloat($sum) : 0.0,
                     count: is_int($count) ? $count : 0,
+                    exemplar: $this->decodeExemplar(apcu_fetch("{$base}:exemplar")),
                 );
             }
 

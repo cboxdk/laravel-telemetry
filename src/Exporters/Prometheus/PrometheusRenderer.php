@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Exporters\Prometheus;
 
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
@@ -26,10 +27,17 @@ final class PrometheusRenderer
     public const MIME_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 
     /**
+     * Exemplars (the histogram → trace id bridge) are only valid in
+     * OpenMetrics — the classic text format has no grammar for a trailing
+     * `# {...}` on a sample line, so a scraper on MIME_TYPE never sees them.
+     */
+    public const OPENMETRICS_MIME_TYPE = 'application/openmetrics-text; version=1.0.0; charset=utf-8';
+
+    /**
      * @param  list<MetricFamily>  $families
      * @param  array<string, string>  $resourceLabels  service_name/host_name/… stamped on every series so a single Prometheus scraping many apps can tell them apart
      */
-    public function render(array $families, array $resourceLabels = []): string
+    public function render(array $families, array $resourceLabels = [], bool $openMetrics = false): string
     {
         $this->resourceLabels = $resourceLabels;
         $output = [];
@@ -55,11 +63,17 @@ final class PrometheusRenderer
 
             foreach ($family->samples as $sample) {
                 if ($sample instanceof HistogramSample) {
-                    array_push($output, ...$this->renderHistogram($name, $sample));
+                    array_push($output, ...$this->renderHistogram($name, $sample, $openMetrics));
                 } elseif ($sample instanceof Sample) {
                     $output[] = $name.$this->renderLabels($sample->labels).' '.$this->formatValue($sample->value);
                 }
             }
+        }
+
+        if ($openMetrics) {
+            $output[] = '# EOF';
+
+            return implode("\n", $output)."\n";
         }
 
         return $output === [] ? '' : implode("\n", $output)."\n";
@@ -121,26 +135,67 @@ final class PrometheusRenderer
     /**
      * @return list<string>
      */
-    private function renderHistogram(string $name, HistogramSample $sample): array
+    private function renderHistogram(string $name, HistogramSample $sample, bool $openMetrics = false): array
     {
         $lines = [];
         $cumulative = 0;
+        $exemplarBucket = $openMetrics ? $this->exemplarBucketIndex($sample) : null;
 
         foreach ($sample->bounds as $index => $bound) {
             $cumulative += $sample->bucketCounts[$index] ?? 0;
 
-            $lines[] = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => $this->formatValue($bound)]).' '.$cumulative;
+            $line = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => $this->formatValue($bound)]).' '.$cumulative;
+
+            if ($index === $exemplarBucket && $sample->exemplar !== null) {
+                $line .= ' '.$this->renderExemplar($sample->exemplar);
+            }
+
+            $lines[] = $line;
         }
 
         // The +Inf bucket must never be below the cumulated buckets, even
         // when non-atomic stores let count lag momentarily.
         $total = max($sample->count, $cumulative + ($sample->bucketCounts[count($sample->bounds)] ?? 0));
 
-        $lines[] = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => '+Inf']).' '.$total;
+        $infLine = $name.'_bucket'.$this->renderLabels($sample->labels, ['le' => '+Inf']).' '.$total;
+
+        if ($exemplarBucket === count($sample->bounds) && $sample->exemplar !== null) {
+            $infLine .= ' '.$this->renderExemplar($sample->exemplar);
+        }
+
+        $lines[] = $infLine;
         $lines[] = $name.'_sum'.$this->renderLabels($sample->labels).' '.$this->formatValue($sample->sum);
         $lines[] = $name.'_count'.$this->renderLabels($sample->labels).' '.$total;
 
         return $lines;
+    }
+
+    /**
+     * The bucket the exemplar's own observation landed in — the first
+     * bound at or above its value, or the +Inf slot (index === count of
+     * bounds) when it exceeds every bound.
+     */
+    private function exemplarBucketIndex(HistogramSample $sample): ?int
+    {
+        if ($sample->exemplar === null) {
+            return null;
+        }
+
+        foreach ($sample->bounds as $index => $bound) {
+            if ($sample->exemplar->value <= $bound) {
+                return $index;
+            }
+        }
+
+        return count($sample->bounds);
+    }
+
+    private function renderExemplar(Exemplar $exemplar): string
+    {
+        $seconds = $exemplar->timeUnixNano / 1_000_000_000;
+
+        return '# {trace_id="'.$this->escapeLabelValue($exemplar->traceId).'"} '
+            .$this->formatValue($exemplar->value).' '.$this->formatValue($seconds);
     }
 
     /**

@@ -6,7 +6,10 @@ use Cbox\Telemetry\Support\ResourceDetector;
 
 afterEach(function () {
     ResourceDetector::flush();
-    foreach (['K8S_POD_NAME', 'POD_NAME', 'K8S_POD_NAMESPACE', 'POD_NAMESPACE', 'K8S_NODE_NAME', 'AWS_REGION', 'HOSTNAME', 'OTEL_RESOURCE_ATTRIBUTES'] as $k) {
+    foreach ([
+        'K8S_POD_NAME', 'POD_NAME', 'K8S_POD_NAMESPACE', 'POD_NAMESPACE', 'K8S_NODE_NAME', 'AWS_REGION', 'HOSTNAME', 'OTEL_RESOURCE_ATTRIBUTES',
+        'AWS_LAMBDA_FUNCTION_NAME', 'AWS_LAMBDA_FUNCTION_VERSION', 'AWS_LAMBDA_LOG_STREAM_NAME', 'AWS_LAMBDA_FUNCTION_MEMORY_SIZE', 'VAPOR_SSM_PATH',
+    ] as $k) {
         putenv($k);
     }
 });
@@ -64,4 +67,54 @@ it('returns an empty map with nothing to detect', function () {
     ResourceDetector::flush();
 
     expect(ResourceDetector::detect())->toBeArray();
+});
+
+it('maps AWS Lambda runtime env vars to faas.* and cloud.platform', function () {
+    putenv('AWS_LAMBDA_FUNCTION_NAME=my-app-production-http');
+    putenv('AWS_LAMBDA_FUNCTION_VERSION=$LATEST');
+    putenv('AWS_LAMBDA_LOG_STREAM_NAME=2024/01/01/[1]abc123');
+    putenv('AWS_LAMBDA_FUNCTION_MEMORY_SIZE=512');
+    ResourceDetector::flush();
+
+    $attrs = ResourceDetector::detect();
+
+    expect($attrs['cloud.provider'])->toBe('aws')
+        ->and($attrs['cloud.platform'])->toBe('aws_lambda')
+        ->and($attrs['faas.name'])->toBe('my-app-production-http')
+        ->and($attrs['faas.version'])->toBe('$LATEST')
+        ->and($attrs['faas.instance'])->toBe('2024/01/01/[1]abc123')
+        ->and($attrs['faas.max_memory'])->toBe((string) (512 * 1024 * 1024));
+});
+
+it('flags Vapor specifically via VAPOR_SSM_PATH', function () {
+    putenv('AWS_LAMBDA_FUNCTION_NAME=my-app-production-http');
+    putenv('VAPOR_SSM_PATH=/vapor/my-app/production');
+    ResourceDetector::flush();
+
+    expect(ResourceDetector::detect()['vapor.detected'])->toBe('true');
+});
+
+it('never claims Lambda without AWS_LAMBDA_FUNCTION_NAME', function () {
+    putenv('VAPOR_SSM_PATH=/vapor/my-app/production');
+    ResourceDetector::flush();
+
+    expect(ResourceDetector::detect())
+        ->not->toHaveKey('faas.name')
+        ->not->toHaveKey('vapor.detected');
+});
+
+it('marks only the first detect() call in the process as a cold start', function () {
+    putenv('AWS_LAMBDA_FUNCTION_NAME=my-app-production-http');
+    ResourceDetector::flush();
+
+    expect(ResourceDetector::detect()['faas.coldstart'])->toBe('true')
+        ->and(ResourceDetector::detect()['faas.coldstart'])->toBe('false');
+});
+
+it('lets an explicit cloud.provider env var win over the aws inference', function () {
+    putenv('AWS_LAMBDA_FUNCTION_NAME=my-app-production-http');
+    putenv('OTEL_RESOURCE_ATTRIBUTES=cloud.provider=custom');
+    ResourceDetector::flush();
+
+    expect(ResourceDetector::detect()['cloud.provider'])->toBe('custom');
 });

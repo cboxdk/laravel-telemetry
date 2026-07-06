@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\Labels;
 use Cbox\Telemetry\Metrics\MetricDefinition;
@@ -68,7 +69,7 @@ final class RedisMetricStore implements MetricStore
         $this->connection()->hincrbyfloat($key, Labels::encode($labels), $delta);
     }
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
         $key = $this->familyKey(MetricType::Histogram, $definition->name);
         $series = base64_encode(Labels::encode($labels));
@@ -80,9 +81,13 @@ final class RedisMetricStore implements MetricStore
         $connection->hincrby($key, "{$series}:b{$bucket}", 1);
         $connection->hincrbyfloat($key, "{$series}:sum", $value);
         $connection->hincrby($key, "{$series}:count", 1);
+
+        if ($exemplar !== null) {
+            $connection->hset($key, "{$series}:exemplar", $this->encodeExemplar($exemplar));
+        }
     }
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
         $key = $this->familyKey(MetricType::Histogram, $definition->name);
         $series = base64_encode(Labels::encode($labels));
@@ -104,6 +109,34 @@ final class RedisMetricStore implements MetricStore
         if ($count > 0) {
             $connection->hincrby($key, "{$series}:count", $count);
         }
+
+        if ($exemplar !== null) {
+            $connection->hset($key, "{$series}:exemplar", $this->encodeExemplar($exemplar));
+        }
+    }
+
+    private function encodeExemplar(Exemplar $exemplar): string
+    {
+        return json_encode([
+            't' => $exemplar->traceId,
+            'v' => $exemplar->value,
+            'n' => $exemplar->timeUnixNano,
+        ]) ?: '{}';
+    }
+
+    private function decodeExemplar(string $raw): ?Exemplar
+    {
+        $decoded = json_decode($raw, true);
+
+        if (! is_array($decoded) || ! is_string($decoded['t'] ?? null) || $decoded['t'] === '') {
+            return null;
+        }
+
+        return new Exemplar(
+            traceId: $decoded['t'],
+            value: is_numeric($decoded['v'] ?? null) ? (float) $decoded['v'] : 0.0,
+            timeUnixNano: is_numeric($decoded['n'] ?? null) ? (int) $decoded['n'] : 0,
+        );
     }
 
     /**
@@ -217,7 +250,7 @@ final class RedisMetricStore implements MetricStore
         $bounds = $definition->buckets ?? [];
         $bucketSlots = count($bounds) + 1;
 
-        /** @var array<string, array{bucketCounts: list<int>, sum: float, count: int}> $series */
+        /** @var array<string, array{bucketCounts: list<int>, sum: float, count: int, exemplar: Exemplar|null}> $series */
         $series = [];
 
         foreach ($fields as $field => $value) {
@@ -238,12 +271,15 @@ final class RedisMetricStore implements MetricStore
                 'bucketCounts' => array_fill(0, $bucketSlots, 0),
                 'sum' => 0.0,
                 'count' => 0,
+                'exemplar' => null,
             ];
 
             if ($suffix === 'sum') {
                 $series[$encoded]['sum'] = (float) $value;
             } elseif ($suffix === 'count') {
                 $series[$encoded]['count'] = (int) $value;
+            } elseif ($suffix === 'exemplar') {
+                $series[$encoded]['exemplar'] = $this->decodeExemplar($value);
             } elseif (str_starts_with($suffix, 'b')) {
                 $index = (int) substr($suffix, 1);
 
@@ -262,6 +298,7 @@ final class RedisMetricStore implements MetricStore
                 bucketCounts: $data['bucketCounts'],
                 sum: $data['sum'],
                 count: $data['count'],
+                exemplar: $data['exemplar'],
             );
         }
 

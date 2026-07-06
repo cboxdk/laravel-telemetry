@@ -30,6 +30,31 @@ it('sends no traceparent header when no trace is active', function () {
     Http::assertSent(fn (Request $request) => ! $request->hasHeader('traceparent'));
 });
 
+it('attaches baggage from Telemetry::context() alongside the traceparent', function () {
+    Http::fake(['example.com/*' => Http::response(['ok' => true])]);
+
+    $span = Telemetry::span('outbound.work');
+    Telemetry::context(['team.id' => 42, 'plan' => 'pro']);
+
+    Http::withTraceparent()->get('https://example.com/api');
+
+    Http::assertSent(fn (Request $request) => $request->header('baggage')[0] === 'team.id=42,plan=pro');
+
+    $span->end();
+});
+
+it('sends no baggage header with no context set', function () {
+    Http::fake(['example.com/*' => Http::response(['ok' => true])]);
+
+    $span = Telemetry::span('outbound.work');
+
+    Http::withTraceparent()->get('https://example.com/api');
+
+    Http::assertSent(fn (Request $request) => ! $request->hasHeader('baggage'));
+
+    $span->end();
+});
+
 it('reports its configuration in artisan about', function () {
     $this->artisan('about')
         ->expectsOutputToContain('Telemetry')

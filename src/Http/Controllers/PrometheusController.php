@@ -34,9 +34,22 @@ final class PrometheusController
             ));
         }
 
-        return new Response($renderer->render($families, $this->resourceLabels($telemetry)), 200, [
-            'Content-Type' => PrometheusRenderer::MIME_TYPE,
+        $openMetrics = $this->wantsOpenMetrics($request);
+
+        return new Response($renderer->render($families, $this->resourceLabels($telemetry), $openMetrics), 200, [
+            'Content-Type' => $openMetrics ? PrometheusRenderer::OPENMETRICS_MIME_TYPE : PrometheusRenderer::MIME_TYPE,
         ]);
+    }
+
+    /**
+     * Prometheus negotiates OpenMetrics via its scrape Accept header
+     * (`application/openmetrics-text;version=1.0.0;...`) when exemplar
+     * storage is enabled server-side. Exemplars have no grammar in the
+     * classic text format, so they only ever render here.
+     */
+    private function wantsOpenMetrics(Request $request): bool
+    {
+        return str_contains($request->headers->get('Accept') ?? '', 'application/openmetrics-text');
     }
 
     /**

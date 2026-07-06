@@ -9,6 +9,7 @@ use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Sample;
+use Cbox\Telemetry\Tracing\SpanLink;
 use Cbox\Telemetry\Tracing\Tracer;
 
 function serializer(): OtlpSerializer
@@ -36,6 +37,32 @@ it('serializes spans with hex ids, string nanos and integer enums', function () 
 
     // The whole payload must be JSON-encodable.
     expect(json_encode($payload))->toBeString();
+});
+
+it('serializes span links with hex ids and attributes', function () {
+    $tracer = new Tracer;
+
+    $span = $tracer->startSpan('retry', links: [new SpanLink('a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5', 'a0b1c2d3e4f5a6b7', ['queue.retry' => true])]);
+    $span->end();
+
+    $payload = serializer()->traces($tracer->drain());
+    $data = $payload['resourceSpans'][0]['scopeSpans'][0]['spans'][0];
+
+    expect($data['links'][0]['traceId'])->toBe('a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5')
+        ->and($data['links'][0]['spanId'])->toBe('a0b1c2d3e4f5a6b7')
+        ->and($data['links'][0]['attributes'][0])->toBe(['key' => 'queue.retry', 'value' => ['boolValue' => true]]);
+});
+
+it('omits the links key entirely for a span with no links', function () {
+    $tracer = new Tracer;
+
+    $span = $tracer->startSpan('no-links');
+    $span->end();
+
+    $payload = serializer()->traces($tracer->drain());
+    $data = $payload['resourceSpans'][0]['scopeSpans'][0]['spans'][0];
+
+    expect($data)->not->toHaveKey('links');
 });
 
 it('serializes resource attributes as OTLP keyvalues', function () {

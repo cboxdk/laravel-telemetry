@@ -9,8 +9,10 @@ use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 
 beforeEach(function () {
@@ -58,6 +60,118 @@ it('records the request duration histogram with low-cardinality labels', functio
     expect($sample->count)->toBe(2)
         ->and($sample->labels['http.route'])->toBe('/users/{id}')
         ->and($sample->labels['http.response.status_code'])->toBe('200');
+});
+
+it('tags inertia requests with a span attribute', function () {
+    $this->get('/users/7', ['X-Inertia' => 'true'])->assertOk();
+
+    $spans = requestSpans($this->collector);
+
+    expect($spans[0]->attributes()['inertia.request'])->toBeTrue()
+        ->and($spans[0]->attributes())->not->toHaveKey('inertia.version_mismatch');
+});
+
+it('leaves non-inertia requests untouched', function () {
+    $this->get('/users/7')->assertOk();
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('inertia.request');
+});
+
+it('counts an inertia version mismatch as a forced full reload', function () {
+    Route::get('/inertia-stale', fn () => response('', 409)->header('X-Inertia-Location', '/inertia-stale'));
+
+    $this->get('/inertia-stale', ['X-Inertia' => 'true'])->assertStatus(409);
+
+    $spans = requestSpans($this->collector);
+
+    expect($spans[0]->attributes()['inertia.request'])->toBeTrue()
+        ->and($spans[0]->attributes()['inertia.version_mismatch'])->toBeTrue();
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['inertia.version_mismatches']->samples[0]->value)->toBe(1.0);
+});
+
+it('can disable inertia awareness', function () {
+    config()->set('telemetry.instrument.inertia', false);
+
+    $this->get('/users/7', ['X-Inertia' => 'true'])->assertOk();
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('inertia.request');
+});
+
+it('counts a rate limit exceeded response by its named limiter', function () {
+    RateLimiter::for('test-limiter', fn () => Limit::perMinute(1));
+    Route::get('/limited', fn () => 'ok')->middleware('throttle:test-limiter');
+
+    $this->get('/limited')->assertOk();
+    $this->get('/limited')->assertStatus(429);
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['rate_limit.exceeded']->samples[0]->labels['limiter'])->toBe('test-limiter')
+        ->and($families['rate_limit.exceeded']->samples[0]->value)->toBe(1.0);
+});
+
+it('buckets an inline throttle spec as the default limiter', function () {
+    Route::get('/limited-inline', fn () => 'ok')->middleware('throttle:1,1');
+
+    $this->get('/limited-inline')->assertOk();
+    $this->get('/limited-inline')->assertStatus(429);
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['rate_limit.exceeded']->samples[0]->labels['limiter'])->toBe('default');
+});
+
+it('counts any 429 even without route middleware, labeled unknown', function () {
+    Route::get('/manual-429', fn () => response('', 429));
+
+    $this->get('/manual-429')->assertStatus(429);
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['rate_limit.exceeded']->samples[0]->labels['limiter'])->toBe('unknown');
+});
+
+it('does not count non-429 responses', function () {
+    $this->get('/users/7')->assertOk();
+
+    expect(collect(Telemetry::collect())->keyBy(fn ($family) => $family->name()))->not->toHaveKey('rate_limit.exceeded');
+});
+
+it('can disable rate limit instrumentation', function () {
+    config()->set('telemetry.instrument.rate_limiting', false);
+    Route::get('/manual-429-disabled', fn () => response('', 429));
+
+    $this->get('/manual-429-disabled')->assertStatus(429);
+
+    expect(collect(Telemetry::collect())->keyBy(fn ($family) => $family->name()))->not->toHaveKey('rate_limit.exceeded');
+});
+
+it('inherits the callers baggage as context dimensions', function () {
+    $this->get('/users/7', ['baggage' => 'team.id=42,plan=pro']);
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['team.id'])->toBe('42')
+        ->and($span->attributes()['plan'])->toBe('pro');
+});
+
+it('ignores baggage when incoming trace continuation is off', function () {
+    config()->set('telemetry.traces.continue_incoming', false);
+
+    $this->get('/users/7', ['baggage' => 'team.id=42']);
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('team.id');
+});
+
+it('can disable baggage ingestion independently', function () {
+    config()->set('telemetry.instrument.baggage', false);
+
+    $this->get('/users/7', ['baggage' => 'team.id=42']);
+
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('team.id');
 });
 
 it('continues an incoming traceparent as a child span', function () {
@@ -368,3 +482,41 @@ it('tags request spans with the session driver and a hashed session id', functio
         ->and($attributes['session.hash'])->not->toBe($sessionId)
         ->and(str_contains($sessionId, $attributes['session.hash']))->toBeFalse();
 });
+
+it('never breaks a request when profiling is enabled but ext-excimer is absent', function () {
+    if (extension_loaded('excimer')) {
+        $this->markTestSkipped('This asserts the no-extension path; excimer is loaded here.');
+    }
+
+    config()->set('telemetry.instrument.profiling', true);
+
+    $this->get('/users/7')->assertOk();
+
+    $events = collect($this->collector->batches())->flatMap(fn ($b) => $b->events);
+
+    expect(requestSpans($this->collector))->toHaveCount(1)
+        ->and($events->where('name', 'profile.captured'))->toBeEmpty();
+});
+
+it('captures a profile event for a slow request when excimer is available', function () {
+    if (! extension_loaded('excimer')) {
+        $this->markTestSkipped('ext-excimer is not installed.');
+    }
+
+    config()->set('telemetry.instrument.profiling', true);
+    config()->set('telemetry.profiling.min_duration_ms', 1);
+
+    Route::get('/slow', function () {
+        usleep(5000);
+
+        return 'ok';
+    });
+
+    $this->get('/slow')->assertOk();
+    Telemetry::flush();
+
+    $event = collect($this->collector->batches())->flatMap(fn ($b) => $b->events)->firstWhere('name', 'profile.captured');
+
+    expect($event)->not->toBeNull()
+        ->and($event->attributes['profile.top_functions'])->toBeString();
+})->group('excimer');

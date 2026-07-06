@@ -53,18 +53,28 @@ the traceparent meta **and** a bundled, zero-dependency RUM script:
 That script (served from your app, cached) roots the browser trace on the
 server trace, records a `document.load` span, instruments `fetch`
 (propagating `traceparent` to **same-origin** calls so backend spans join
-the trace — cross-origin is skipped to avoid CORS preflight), and captures
-uncaught JS errors as error spans. Tune it in config:
+the trace — cross-origin is skipped to avoid CORS preflight), captures
+uncaught JS errors as error spans, and reports Core Web Vitals. Tune it in
+config:
 
 ```php
 'ingest' => ['spans' => [
     'browser' => [
         'fetch' => true,    // instrument fetch + propagate traceparent
         'errors' => true,   // capture uncaught errors
+        'vitals' => true,   // report LCP/CLS/INP as a web-vitals span
         'sample' => 1.0,    // client-side head sampling (0–1)
     ],
 ]],
 ```
+
+**Web Vitals** (`vitals`): via `PerformanceObserver`, where supported —
+`web_vitals.lcp_ms` (Largest Contentful Paint), `web_vitals.cls`
+(Cumulative Layout Shift), `web_vitals.inp_ms` (a simplified
+Interaction to Next Paint — the worst single interaction observed, not
+the spec's high-percentile-across-all-interactions). LCP and CLS are not
+final until the page starts to close, so they ship as one `web-vitals`
+span at page hide/unload, alongside the final flush — not on `load`.
 
 Publish it to your own build/CDN instead of serving it live:
 `php artisan vendor:publish --tag=telemetry-assets`.

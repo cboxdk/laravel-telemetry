@@ -82,6 +82,15 @@ Cron mode still works with the spool — `telemetry:flush` (no flags)
 drains it once per run. Without the spool, spans export directly at
 terminate and only metrics need the scheduler, as above.
 
+**Watch the drain, not just the daemon process.** The spool is drained
+*exclusively* by `telemetry:flush` — nothing else touches it. If the
+daemon dies (or cron was never scheduled) the list just grows until it
+hits `max_items` and starts silently dropping its oldest entries; there
+is no other warning. `php artisan telemetry:doctor` reports current
+depth as a fraction of `max_items` and fails the check above 90% full
+(warns above 50%) — run it from your deploy pipeline or an uptime check,
+not just once at setup.
+
 ## Latency budget
 
 Trace export happens after the response is sent (terminable middleware),

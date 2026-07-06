@@ -4,10 +4,12 @@
  * Roots the browser trace on the server trace (<meta name="traceparent">),
  * records a page-load span, instruments fetch (propagating W3C traceparent
  * to same-origin calls so backend spans join the trace), and optionally
- * captures uncaught errors. Spans are batched and shipped with sendBeacon.
+ * captures uncaught errors and Core Web Vitals. Spans are batched and
+ * shipped with sendBeacon.
  *
  * Configured via data-* on its own <script> tag (see the @telemetryBrowser
- * Blade directive): data-endpoint, data-fetch, data-errors, data-sample.
+ * Blade directive): data-endpoint, data-fetch, data-errors, data-vitals,
+ * data-sample.
  */
 (function () {
   'use strict';
@@ -20,6 +22,7 @@
 
   var doFetch = script.getAttribute('data-fetch') !== '0';
   var doErrors = script.getAttribute('data-errors') !== '0';
+  var doVitals = script.getAttribute('data-vitals') !== '0';
   var sample = parseFloat(script.getAttribute('data-sample') || '1');
   // The shared analytics session.id, propagated from the server (only when
   // analytics is enabled). Stamped on every span so browser and server share
@@ -93,6 +96,58 @@
     setTimeout(flush, 0);
   });
 
+  // --- Core Web Vitals ---
+  // LCP/CLS only settle once the page stops changing — observed
+  // throughout the page's life, reported once at hide/unload alongside
+  // the final flush (not on 'load', where they are not yet final).
+  var vitals = {};
+  if (doVitals && window.PerformanceObserver) {
+    try {
+      new PerformanceObserver(function (list) {
+        var entries = list.getEntries();
+        var last = entries[entries.length - 1];
+        if (last) vitals.lcp = Math.round(last.startTime);
+      }).observe({ type: 'largest-contentful-paint', buffered: true });
+    } catch (e) { /* unsupported */ }
+
+    try {
+      vitals.cls = 0;
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (entry) {
+          if (!entry.hadRecentInput) vitals.cls += entry.value;
+        });
+      }).observe({ type: 'layout-shift', buffered: true });
+    } catch (e) { /* unsupported */ }
+
+    // Simplified INP: the worst single interaction latency observed —
+    // the full spec's "high percentile across all interactions" needs
+    // more bookkeeping than a zero-build script should carry.
+    try {
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (entry) {
+          var duration = Math.round(entry.duration);
+          if (vitals.inp === undefined || duration > vitals.inp) vitals.inp = duration;
+        });
+      }).observe({ type: 'event', buffered: true, durationThreshold: 40 });
+    } catch (e) { /* unsupported */ }
+  }
+
+  var vitalsReported = false;
+  function reportVitals() {
+    if (!doVitals || vitalsReported) return;
+    vitalsReported = true;
+
+    var attrs = { 'http.url': location.href };
+    var has = false;
+    if (vitals.lcp !== undefined) { attrs['web_vitals.lcp_ms'] = vitals.lcp; has = true; }
+    if (vitals.cls !== undefined) { attrs['web_vitals.cls'] = Math.round(vitals.cls * 1000) / 1000; has = true; }
+    if (vitals.inp !== undefined) { attrs['web_vitals.inp_ms'] = vitals.inp; has = true; }
+    if (!has) return;
+
+    var now = performance.timeOrigin + performance.now();
+    span('web-vitals', 'internal', now, now, attrs);
+  }
+
   // --- fetch instrumentation ---
   if (doFetch && window.fetch) {
     var orig = window.fetch;
@@ -146,9 +201,10 @@
     });
   }
 
-  // Ship on the way out — the reliable moment for RUM.
+  // Ship on the way out — the reliable moment for RUM (and for Web
+  // Vitals specifically: LCP/CLS are not final until here).
   addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') flush();
+    if (document.visibilityState === 'hidden') { reportVitals(); flush(); }
   });
-  addEventListener('pagehide', flush);
+  addEventListener('pagehide', function () { reportVitals(); flush(); });
 })();

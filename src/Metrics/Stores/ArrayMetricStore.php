@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\Labels;
 use Cbox\Telemetry\Metrics\MetricDefinition;
@@ -24,7 +25,7 @@ final class ArrayMetricStore implements MetricStore
     /** @var array<string, array{definition: MetricDefinition, series: array<string, float>}> */
     private array $gauges = [];
 
-    /** @var array<string, array{definition: MetricDefinition, series: array<string, array{bucketCounts: list<int>, sum: float, count: int}>}> */
+    /** @var array<string, array{definition: MetricDefinition, series: array<string, array{bucketCounts: list<int>, sum: float, count: int, exemplar: Exemplar|null}>}> */
     private array $histograms = [];
 
     /** @var array<string, int> first-write timestamps (unix nanos) */
@@ -59,7 +60,7 @@ final class ArrayMetricStore implements MetricStore
         $this->gauges[$definition->name]['series'][$key] += $delta;
     }
 
-    public function recordHistogram(MetricDefinition $definition, array $labels, float $value): void
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
         $key = Labels::encode($labels);
         $bounds = $definition->buckets ?? [];
@@ -70,15 +71,20 @@ final class ArrayMetricStore implements MetricStore
             'bucketCounts' => array_fill(0, count($bounds) + 1, 0),
             'sum' => 0.0,
             'count' => 0,
+            'exemplar' => null,
         ];
 
         $series = &$this->histograms[$definition->name]['series'][$key];
         $series['bucketCounts'][$this->bucketIndex($bounds, $value)]++;
         $series['sum'] += $value;
         $series['count']++;
+
+        if ($exemplar !== null) {
+            $series['exemplar'] = $exemplar;
+        }
     }
 
-    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count): void
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
         $key = Labels::encode($labels);
         $bounds = $definition->buckets ?? [];
@@ -89,6 +95,7 @@ final class ArrayMetricStore implements MetricStore
             'bucketCounts' => array_fill(0, count($bounds) + 1, 0),
             'sum' => 0.0,
             'count' => 0,
+            'exemplar' => null,
         ];
 
         $series = &$this->histograms[$definition->name]['series'][$key];
@@ -101,6 +108,10 @@ final class ArrayMetricStore implements MetricStore
 
         $series['sum'] += $sum;
         $series['count'] += $count;
+
+        if ($exemplar !== null) {
+            $series['exemplar'] = $exemplar;
+        }
     }
 
     public function collect(): array
@@ -128,6 +139,7 @@ final class ArrayMetricStore implements MetricStore
                     bucketCounts: $series['bucketCounts'],
                     sum: $series['sum'],
                     count: $series['count'],
+                    exemplar: $series['exemplar'],
                 );
             }
 
