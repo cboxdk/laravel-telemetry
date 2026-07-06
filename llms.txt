@@ -48,8 +48,3 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Grafana stack](docs/production/grafana-stack.md): recommended backend routing (Tempo/Mimir/Loki), correlation, query starters
 - [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (vs Nightwatch/Sentry-PHP)
 - [Security](docs/production/security.md): endpoint protection, data leakage
-
-## Optional
-
-- [ADRs](docs/adr/0001-runtime-model.md): why no collector, why own core, why Redis
-- [Prior art](docs/research/prior-art.md): survey of the PHP telemetry ecosystem

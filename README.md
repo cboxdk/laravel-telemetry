@@ -113,9 +113,6 @@ Full documentation lives in [`docs/`](docs/index.md):
   [browser/RUM tracing](docs/production/browser-tracing.md),
   [error tracking](docs/production/error-tracking.md)
 
-Design decisions (and the prior-art survey behind them) are recorded in
-[`docs/adr/`](docs/adr/0001-runtime-model.md).
-
 ## Publishing telemetry from your package
 
 ```php

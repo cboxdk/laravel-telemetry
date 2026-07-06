@@ -44,11 +44,6 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
    Histograms: non-cumulative bucket counts + overflow slot (Prometheus
    renderer accumulates at render time).
 
-Architecture decisions are recorded in `docs/adr/` (runtime model, own
-core vs OTel SDK, API shape) with the ecosystem survey in
-`docs/research/prior-art.md`. Read the relevant ADR before proposing
-structural changes; ADR conclusions are not to be silently reversed.
-
 ## Conventions
 
 - PHP ^8.3, `declare(strict_types=1)` everywhere, final classes by default,

@@ -68,9 +68,3 @@ tests); every *recording* and *export* path is wrapped and reports through
 `Telemetry::handleExceptionsUsing()` (default: Laravel's `report()`).
 A failing observable-gauge callback drops only its own family, never the
 scrape.
-
-## Design decisions
-
-The full reasoning — including the prior-art survey of the PHP telemetry
-ecosystem — lives in [`docs/adr`](../adr/0001-runtime-model.md) and
-[`docs/research/prior-art.md`](../research/prior-art.md).
