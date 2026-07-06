@@ -6,8 +6,11 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+afterEach(fn () => TrustProxies::flushState());
 
 beforeEach(function () {
     $this->collector = new CollectingExporter;
@@ -74,6 +77,38 @@ it('stamps client.geo.* from a geo hook (e.g. CF-IPCountry)', function () {
     $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
 
     expect(analyticsServerSpan($this->collector)->attributes()['client.geo.country'])->toBe('DK');
+});
+
+it('stamps client.geo.country from the built-in Cloudflare header when trusted', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.geo.enabled', true);
+    $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1']);
+    TrustProxies::at('127.0.0.1');
+
+    $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
+
+    expect(analyticsServerSpan($this->collector)->attributes()['client.geo.country'])->toBe('DK');
+});
+
+it('does not trust the Cloudflare header from an untrusted origin', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.geo.enabled', true);
+
+    $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
+
+    expect(analyticsServerSpan($this->collector)->attributes())->not->toHaveKey('client.geo.country');
+});
+
+it('lets a geo hook win over the built-in Cloudflare header', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.geo.enabled', true);
+    $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1']);
+    TrustProxies::at('127.0.0.1');
+    Telemetry::resolveClientGeoUsing(fn () => ['client.geo.country' => 'ZZ']);
+
+    $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
+
+    expect(analyticsServerSpan($this->collector)->attributes()['client.geo.country'])->toBe('ZZ');
 });
 
 it('computes a cookieless session id that is stable per day and rotates', function () {

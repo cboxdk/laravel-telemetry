@@ -243,6 +243,80 @@ it('ingests browser analytics events as unsampled OTLP log records', function ()
         ->and($signup->traceId)->toBeNull();
 });
 
+function ingestWith(array $payload, array $headers, array $config = []): Response
+{
+    $request = Request::create('/telemetry/spans', 'POST', content: json_encode($payload));
+    $request->headers->set('Content-Type', 'application/json');
+
+    foreach ($headers as $key => $value) {
+        $request->headers->set($key, $value);
+    }
+
+    $route = new Route('POST', '/telemetry/spans', []);
+    $route->defaults('telemetryIngest', $config + ['enabled' => true, 'max_spans' => 128, 'max_attributes' => 32, 'sample_rate' => 1.0]);
+    $request->setRouteResolver(fn () => $route);
+
+    $response = (new SpanIngestController)($request, app(TelemetryManager::class));
+    app(FlushBrowserIngest::class)->terminate($request, $response);
+
+    return $response;
+}
+
+it('enriches ingested browser spans with server-side Cloudflare geo', function () {
+    config()->set('telemetry.analytics.geo.enabled', true);
+    Request::setTrustedProxies(['127.0.0.1'], Request::HEADER_X_FORWARDED_FOR);
+
+    ingestWith(['spans' => [browserSpan()]], ['CF-IPCountry' => 'DK']);
+
+    expect(ingestedSpans($this->collector)[0]->attributes()['client.geo.country'])->toBe('DK');
+
+    Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
+});
+
+it('enriches ingested browser events with server geo and parsed User-Agent', function () {
+    config()->set('telemetry.analytics.geo.enabled', true);
+    config()->set('telemetry.analytics.user_agent', true);
+    Request::setTrustedProxies(['127.0.0.1'], Request::HEADER_X_FORWARDED_FOR);
+
+    ingestWith(
+        ['events' => [['name' => 'page_view', 'sessionId' => 'v1', 'time' => (int) (microtime(true) * 1000)]]],
+        [
+            'CF-IPCountry' => 'DK',
+            'User-Agent' => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1 Safari/604.1',
+        ],
+    );
+
+    $attrs = ingestedEvents($this->collector)[0]->attributes;
+    expect($attrs['client.geo.country'])->toBe('DK')
+        ->and($attrs['user_agent.name'])->toBe('Safari')
+        ->and($attrs['os.name'])->toBe('iOS')
+        ->and($attrs['device.type'])->toBe('mobile');
+
+    Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
+});
+
+it('lets server-side geo win over a spoofed client geo attribute', function () {
+    config()->set('telemetry.analytics.geo.enabled', true);
+    Request::setTrustedProxies(['127.0.0.1'], Request::HEADER_X_FORWARDED_FOR);
+
+    ingestWith(
+        ['spans' => [browserSpan(['attributes' => ['client.geo.country' => 'US']])]],
+        ['CF-IPCountry' => 'DK'],
+    );
+
+    expect(ingestedSpans($this->collector)[0]->attributes()['client.geo.country'])->toBe('DK');
+
+    Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
+});
+
+it('does not enrich geo from an untrusted ingest origin', function () {
+    config()->set('telemetry.analytics.geo.enabled', true);
+
+    ingestWith(['spans' => [browserSpan()]], ['CF-IPCountry' => 'DK']);
+
+    expect(ingestedSpans($this->collector)[0]->attributes())->not->toHaveKey('client.geo.country');
+});
+
 it('drops analytics events with no usable name and caps the count', function () {
     $response = ingestEventsPayload([
         ['name' => 'ok_event', 'time' => (int) (microtime(true) * 1000)],

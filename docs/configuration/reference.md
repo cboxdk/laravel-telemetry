@@ -218,8 +218,9 @@ can be analysed. Off by default; changes nothing when disabled. See
 | `analytics.enabled` | `TELEMETRY_ANALYTICS` | `false` |
 | `analytics.page_views` | `TELEMETRY_ANALYTICS_PAGE_VIEWS` | `true` — unsampled `analytics.page_view` event per top-level document load |
 | `analytics.session.salt` | `TELEMETRY_ANALYTICS_SALT` | — the daily-rotating, salted hash that keeps the built-in `session.id` cookieless; override entirely via `Telemetry::resolveSessionUsing()` |
-| `analytics.geo.enabled` | `TELEMETRY_ANALYTICS_GEO` | `false` — country/continent from the client IP via an optional MaxMind database (`composer require geoip2/geoip2`); `Telemetry::resolveClientGeoUsing()` (e.g. Cloudflare `CF-IPCountry`) always wins |
-| `analytics.geo.database` | `TELEMETRY_ANALYTICS_GEO_DB` | — path to the MaxMind `.mmdb` file |
+| `analytics.geo.enabled` | `TELEMETRY_ANALYTICS_GEO` | `false` — resolve `client.geo.country` at collection time. Precedence: `Telemetry::resolveClientGeoUsing()` hook → Cloudflare `CF-IPCountry` → MaxMind database. Applies to server page views and the browser ingest endpoint |
+| `analytics.geo.cloudflare` | `TELEMETRY_ANALYTICS_GEO_CF` | `true` — prefer Cloudflare's `CF-IPCountry` header (free, no database). Only trusted when the request is from a trusted proxy — set Laravel `TrustProxies` to the immediate hop (CF ranges if CF connects directly, or your load balancer in a `CF→LB→app` chain); spoofable and ignored otherwise |
+| `analytics.geo.database` | `TELEMETRY_ANALYTICS_GEO_DB` | — path to the MaxMind `.mmdb` file (`composer require geoip2/geoip2`) |
 | `analytics.user_agent` | `TELEMETRY_ANALYTICS_UA` | `false` — parse `user_agent.original` into low-cardinality `user_agent.name`/`os.name`/`device.type` (families only, never versions) |
 
 ## Browser span ingest (optional)

@@ -113,9 +113,15 @@ is also propagated to the browser (via the `@telemetryBrowser` directive's
 ## Client geo — `resolveClientGeoUsing()`
 
 Only active when `telemetry.analytics.enabled` is on. Supplies
-`client.geo.*` (and may override `client.address`) for the request span —
-e.g. straight from Cloudflare's edge headers, so no geo database is needed
-and the raw IP can be dropped:
+`client.geo.*` (and may override `client.address`) for the request span and
+the browser ingest endpoint. This hook always **wins** over the built-in
+resolution.
+
+> Plain Cloudflare `CF-IPCountry` is built in — just set
+> `TELEMETRY_ANALYTICS_GEO=true` (see
+> [Analytics → Geo](../production/analytics.md#geo-without-a-database)) and
+> configure `TrustProxies`. Reach for this hook only for a custom edge,
+> extra fields (region/city), or your own logic:
 
 ```php
 Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([

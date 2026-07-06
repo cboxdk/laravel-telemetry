@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http\Controllers;
 
 use Cbox\Telemetry\Events\TelemetryEvent;
+use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -23,6 +25,12 @@ use Illuminate\Http\Response;
  * every input is bounded hard: capped span count, strict hex ids, capped
  * names/attributes, sane timestamps. Invalid spans are dropped, not
  * fatal. Values pass through the redaction engine before export.
+ *
+ * Geo and User-Agent are enriched server-side from the ingest request
+ * itself — the browser cannot know its own country, but this request
+ * carries the visitor's CF-IPCountry and User-Agent. Stamping them here
+ * (authoritative, spoof-resistant) beats trusting the client, so it wins
+ * over any same-named client attribute. See {@see ClientGeo}.
  *
  * The built spans/events are stashed on the request rather than exported
  * inline — Http\Middleware\FlushBrowserIngest (auto-attached to this
@@ -58,7 +66,11 @@ final class SpanIngestController
             return new Response('', 204);
         }
 
-        FailSafe::guard(function () use ($request, $config) {
+        // Resolved once from THIS server request (its CF-IPCountry / UA),
+        // then stamped on every browser span and event below.
+        $enrichment = FailSafe::guard(fn (): array => self::enrichment($request, $telemetry)) ?? [];
+
+        FailSafe::guard(function () use ($request, $config, $enrichment) {
             $input = $request->json('spans');
 
             if (! is_array($input)) {
@@ -72,7 +84,7 @@ final class SpanIngestController
             $spans = [];
 
             foreach (array_slice($input, 0, $maxSpans) as $raw) {
-                $span = self::build(is_array($raw) ? $raw : [], $maxAttrs, $now);
+                $span = self::build(is_array($raw) ? $raw : [], $maxAttrs, $now, $enrichment);
 
                 if ($span !== null) {
                     $spans[] = $span;
@@ -87,7 +99,7 @@ final class SpanIngestController
         // Analytics events (SPA page views, engagement, custom track()) —
         // re-emitted as unsampled OTLP log records so they are never
         // undercounted, on the same event stream as the server's page views.
-        FailSafe::guard(function () use ($request, $config) {
+        FailSafe::guard(function () use ($request, $config, $enrichment) {
             $input = $request->json('events');
 
             if (! is_array($input)) {
@@ -101,7 +113,7 @@ final class SpanIngestController
             $events = [];
 
             foreach (array_slice($input, 0, $max) as $raw) {
-                $event = self::buildEvent(is_array($raw) ? $raw : [], $maxAttrs, $now);
+                $event = self::buildEvent(is_array($raw) ? $raw : [], $maxAttrs, $now, $enrichment);
 
                 if ($event !== null) {
                     $events[] = $event;
@@ -117,11 +129,31 @@ final class SpanIngestController
     }
 
     /**
+     * Geo + User-Agent for the browser payload, resolved from THIS server
+     * request. Geo follows the shared {@see ClientGeo} precedence (hook →
+     * trusted CF-IPCountry → MaxMind, gated on analytics.geo.enabled);
+     * user_agent.* is parsed when analytics.user_agent is on.
+     *
+     * @return array<string, scalar|null>
+     */
+    private static function enrichment(Request $request, TelemetryManager $telemetry): array
+    {
+        $geo = ClientGeo::resolve($request, $telemetry);
+
+        $ua = config('telemetry.analytics.user_agent', false)
+            ? UserAgentParser::parse($request->userAgent())
+            : [];
+
+        return [...$geo, ...$ua];
+    }
+
+    /**
      * Build a bounded analytics event from an untrusted browser payload.
      *
      * @param  array<mixed>  $raw
+     * @param  array<string, scalar|null>  $enrichment  server-resolved geo/UA
      */
-    private static function buildEvent(array $raw, int $maxAttrs, int $nowNano): ?TelemetryEvent
+    private static function buildEvent(array $raw, int $maxAttrs, int $nowNano, array $enrichment): ?TelemetryEvent
     {
         $name = self::str($raw['name'] ?? null);
 
@@ -149,6 +181,9 @@ final class SpanIngestController
         $attributes['analytics.event'] = $name;
         $attributes['browser'] = true;
 
+        // Server-side geo/UA win over any same-named client attribute.
+        $attributes = [...$attributes, ...$enrichment];
+
         if (($session = self::str($raw['sessionId'] ?? null)) !== null) {
             $attributes['session.id'] = mb_substr($session, 0, self::MAX_VALUE);
         }
@@ -166,8 +201,9 @@ final class SpanIngestController
 
     /**
      * @param  array<mixed>  $raw
+     * @param  array<string, scalar|null>  $enrichment  server-resolved geo/UA
      */
-    private static function build(array $raw, int $maxAttrs, int $nowNano): ?Span
+    private static function build(array $raw, int $maxAttrs, int $nowNano, array $enrichment): ?Span
     {
         $traceId = self::str($raw['traceId'] ?? null);
         $spanId = self::str($raw['spanId'] ?? null);
@@ -198,6 +234,9 @@ final class SpanIngestController
 
         $attributes = self::attributes(is_array($raw['attributes'] ?? null) ? $raw['attributes'] : [], $maxAttrs);
         $attributes['browser'] = true;
+
+        // Server-side geo/UA win over any same-named client attribute.
+        $attributes = [...$attributes, ...$enrichment];
 
         $span = new Span(
             traceId: $traceId,

@@ -60,18 +60,62 @@ change. Disable with `TELEMETRY_ANALYTICS_PAGE_VIEWS=false`.
 
 ## Geo, without a database
 
-Supply `client.geo.*` straight from your edge (e.g. Cloudflare), so no geo
-database is needed and the raw IP can be dropped
-([hook](../extension-points/hooks.md#client-geo--resolveclientgeousing)):
+Country is resolved at collection time so the raw IP can be dropped
+afterwards, with a fixed precedence: a **hook** wins, then **Cloudflare's
+`CF-IPCountry`** header, then an optional **MaxMind** database.
+
+### Cloudflare (built-in, no database)
+
+If you serve through Cloudflare, `client.geo.country` comes free on every
+plan from the `CF-IPCountry` edge header — no MaxMind database to ship or
+update, and no per-request lookup. Just enable geo:
+
+```dotenv
+TELEMETRY_ANALYTICS_GEO=true
+# TELEMETRY_ANALYTICS_GEO_CF=true   # on by default
+```
+
+> **Trust your ingress, or this is spoofable.** `CF-*` headers are only
+> trusted when the request arrives through a trusted proxy — otherwise anyone
+> hitting your origin directly can send `CF-IPCountry: DK`. Configure Laravel's
+> [`TrustProxies`](https://laravel.com/docs/requests#configuring-trusted-proxies)
+> with **the immediate hop the app actually sees**: the Cloudflare ranges if
+> CF connects to your app directly, or your **load balancer** in a
+> `Cloudflare → LB → app` chain — after the LB, `REMOTE_ADDR` is the LB, so
+> you trust the LB, *not* the CF ranges. Without trusted proxies the header is
+> ignored — a safe no-op, not a hole. `XX` (unknown) and `T1` (Tor) are
+> dropped, not stored as countries.
+>
+> Trusting the immediate hop is the same model as `X-Forwarded-For`: it proves
+> the request came through your infra, not that Cloudflare set the header. Make
+> sure your edge is the only ingress (the LB rejects non-Cloudflare traffic or
+> strips inbound `CF-*`). For a topology-independent guarantee use
+> [Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/)
+> or verify a CF-set secret in a `resolveClientGeoUsing()` hook.
+
+This also covers the browser ingest endpoint: the browser can't know its own
+country, but the ingest request is server-side and carries the visitor's
+`CF-IPCountry`, so browser spans and events are stamped with geo at ingest —
+no client cooperation, no database. The `User-Agent` is parsed server-side
+the same way (`analytics.user_agent`), so nearly all enrichment happens in
+one place.
+
+### A custom edge or provider (hook)
+
+Source `client.geo.*` from any header or logic — the hook always wins
+([details](../extension-points/hooks.md#client-geo--resolveclientgeousing)):
 
 ```php
 Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
     'client.geo.country' => $request->header('CF-IPCountry'),
+    'client.geo.region'  => $request->header('CF-Region'),
 ]));
 ```
 
-No edge? Turn on the **built-in** MaxMind resolver (the hook still wins when
-set). Install the optional package and point at a GeoLite2 database:
+### MaxMind (built-in, no edge)
+
+No edge geo? Turn on the built-in MaxMind resolver. Install the optional
+package and point at a GeoLite2 database:
 
 ```bash
 composer require geoip2/geoip2   # optional — a composer "suggest"

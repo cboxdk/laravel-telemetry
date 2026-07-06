@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Built-in Cloudflare geo, and server-side geo/UA enrichment at browser
+  ingest.** With `TELEMETRY_ANALYTICS_GEO=true`, `client.geo.country` now
+  resolves from Cloudflare's `CF-IPCountry` edge header with no MaxMind
+  database and no per-request lookup — free on every plan. Precedence is
+  `resolveClientGeoUsing()` hook → `CF-IPCountry` → MaxMind. The header is
+  only trusted when the request arrives through a trusted proxy — set Laravel
+  `TrustProxies` to the immediate hop (your Cloudflare ranges, or your load
+  balancer in a `CF → LB → app` chain); it is spoofable and ignored
+  otherwise, and the `XX`/`T1` sentinels are dropped. Toggle with
+  `TELEMETRY_ANALYTICS_GEO_CF` (default on). The browser ingest endpoint now
+  enriches browser spans and events with geo and parsed `user_agent.*` from
+  the server-side ingest request — the browser can't know its own country,
+  but the ingest request carries it — so nearly all enrichment happens in
+  one server-side place.
+
 - **Livewire update requests are named after their component.** Livewire's
   update endpoint is a catch-all — every component update POSTs to the same
   URL, so `http.route` identified nothing. The Livewire instrumentation now

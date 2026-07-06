@@ -382,12 +382,24 @@ return [
             'salt' => env('TELEMETRY_ANALYTICS_SALT'),
         ],
 
-        // Country/continent from the client IP, resolved at collection time
-        // via an OPTIONAL MaxMind database (composer suggest: geoip2/geoip2),
-        // so the raw IP can be dropped afterwards. A resolveClientGeoUsing()
-        // hook (e.g. Cloudflare CF-IPCountry) always wins over this.
+        // Country from the client, resolved at collection time so the raw IP
+        // can be dropped afterwards. Precedence: a resolveClientGeoUsing()
+        // hook wins, then Cloudflare's CF-IPCountry edge header (free, no
+        // database), then an OPTIONAL MaxMind database (composer suggest:
+        // geoip2/geoip2). Applies to both the server page view and the
+        // browser ingest endpoint.
         'geo' => [
             'enabled' => env('TELEMETRY_ANALYTICS_GEO', false),
+
+            // Prefer Cloudflare's CF-IPCountry header (ISO country, every
+            // plan) over a MaxMind lookup. Only trusted when the request
+            // arrives through a trusted proxy — CF-* headers are spoofable on
+            // a directly-reachable origin. Set Laravel's TrustProxies to the
+            // immediate hop the app sees: the Cloudflare ranges if CF connects
+            // directly, or your load balancer in a CF -> LB -> app chain (the
+            // LB, not the CF ranges). A safe no-op otherwise.
+            'cloudflare' => env('TELEMETRY_ANALYTICS_GEO_CF', true),
+
             'database' => env('TELEMETRY_ANALYTICS_GEO_DB'),
         ],
 

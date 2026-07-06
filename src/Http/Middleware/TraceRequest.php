@@ -7,9 +7,9 @@ namespace Cbox\Telemetry\Http\Middleware;
 use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
-use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
@@ -541,21 +541,16 @@ final class TraceRequest
     }
 
     /**
-     * `client.geo.*` for the request: a registered hook wins (e.g. Cloudflare
-     * edge headers); otherwise the optional built-in MaxMind resolver when
-     * `analytics.geo` is enabled (a no-op without the geoip2/geoip2 package).
+     * `client.geo.*` for the request: a registered hook wins, then the
+     * built-in Cloudflare CF-IPCountry header (trusted-proxy gated), then the
+     * optional MaxMind resolver — all when `analytics.geo` is enabled. See
+     * {@see ClientGeo} for the shared precedence.
      *
      * @return array<string, scalar|null>
      */
     private function analyticsGeo(Request $request): array
     {
-        $geo = $this->telemetry->resolveClientGeo($request);
-
-        if ($geo !== [] || ! config('telemetry.analytics.geo.enabled', false)) {
-            return $geo;
-        }
-
-        return app(GeoResolver::class)->resolve($request->ip());
+        return ClientGeo::resolve($request, $this->telemetry);
     }
 
     /**
