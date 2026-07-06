@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`enduser.id` on exception records**: the structured exception record
+  now carries the authenticated user's id (guests omit it), so issue
+  tooling can count affected users per error group, Sentry-style.
+
+### Fixed
+
+- **Unbounded recursion in `FailSafe` during `report()`**: the default
+  failure handler is `report()`, and the exception subscriber runs *inside*
+  `report()` — so a guarded path that kept failing while an exception was
+  being reported (e.g. the `enduser.id` auth lookup with the database down)
+  re-entered the subscriber on every cycle and recursed until memory
+  exhaustion. `FailSafe::handle()` now carries a re-entrancy latch: a
+  telemetry failure that occurs while another telemetry failure is already
+  being reported is swallowed instead of re-reported.
+
 ## [0.1.0-alpha.17] - 2026-07-06
 
 ### Added

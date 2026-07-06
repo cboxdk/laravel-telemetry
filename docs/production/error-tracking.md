@@ -93,6 +93,9 @@ Each record carries:
   the throw site, `vendor/` frames skipped) so identical failures group
   into one *issue* instead of merging by class. Machine-independent, so a
   fingerprint is stable across hosts and deploys.
+- `enduser.id` — the authenticated user's id (guests omit it), so an
+  issues UI can say "affects N users" per group. Resolved fail-safe: an
+  unbootable auth container mid-failure never breaks the record.
 - the ambient [context](../core-concepts/traces.md#custom-dimensions-context)
   (team, tenant, user, trace id).
 - optionally `exception.source` — the code around the throw site — when
