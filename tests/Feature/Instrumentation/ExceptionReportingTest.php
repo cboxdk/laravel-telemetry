@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Collection;
 
 beforeEach(function () {
@@ -33,6 +34,32 @@ it('emits a structured, fingerprinted exception record on report()', function ()
         ->and($event->attributes)->toHaveKey('exception.line');
 
     expect(collect(Telemetry::collect())->keyBy(fn ($f) => $f->name()))->toHaveKey('exceptions.reported');
+});
+
+it('stamps the authenticated user on the exception record', function () {
+    $user = new class extends User
+    {
+        protected $table = 'users';
+
+        public function getAuthIdentifier()
+        {
+            return 42;
+        }
+    };
+
+    auth()->setUser($user);
+
+    report(new RuntimeException('who hit it'));
+    Telemetry::flush();
+
+    expect(exceptionEvents($this->collector)->first()->attributes['enduser.id'])->toBe('42');
+});
+
+it('omits enduser.id for guests', function () {
+    report(new RuntimeException('anonymous'));
+    Telemetry::flush();
+
+    expect(exceptionEvents($this->collector)->first()->attributes)->not->toHaveKey('enduser.id');
 });
 
 it('carries ambient context onto the exception record', function () {

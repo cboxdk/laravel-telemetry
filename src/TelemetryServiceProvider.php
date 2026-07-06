@@ -849,6 +849,19 @@ class TelemetryServiceProvider extends ServiceProvider
                             (bool) $config->get('telemetry.instrument.exception_source', false),
                         );
 
+                        // Who hit it: the authenticated user, so issue
+                        // tooling can say "affects N users" (Sentry-style).
+                        // Guarded — auth may be unbootable mid-failure.
+                        $userId = FailSafe::guard(static function () use ($app): ?string {
+                            $user = $app->make('auth')->user();
+
+                            return $user !== null ? Cast::string($user->getAuthIdentifier()) : null;
+                        });
+
+                        if (is_string($userId) && $userId !== '') {
+                            $attributes['enduser.id'] = $userId;
+                        }
+
                         // Trace waterfall: annotate the active span WITHOUT
                         // failing it (report() may be a handled + recovered
                         // path). Deduped so a failed job isn't recorded twice.
