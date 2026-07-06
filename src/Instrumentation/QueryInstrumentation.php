@@ -58,6 +58,15 @@ final class QueryInstrumentation
         $telemetry->tracer()->bumpStat('db.query.count', 1);
         $telemetry->tracer()->bumpStat('db.query.time_ms', (float) $event->time);
 
+        // Fleet-level counter — the database twin of redis.commands, so a
+        // dashboard can show DB activity per host without depending on
+        // tail-sampled traces. Bounded labels (configured connections × a
+        // handful of drivers); query text never becomes a label.
+        $telemetry->counter('db.queries', 'Database queries executed')->inc(1, [
+            'connection' => $event->connectionName,
+            'driver' => $event->connection->getDriverName(),
+        ]);
+
         if ($this->detectDuplicates) {
             $this->detectDuplicate($telemetry, $event);
         }

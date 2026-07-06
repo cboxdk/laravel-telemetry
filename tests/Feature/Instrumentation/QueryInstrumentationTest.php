@@ -32,6 +32,21 @@ function runQuery(Dispatcher $events, string $sql = 'select * from "users" where
     $events->dispatch(new QueryExecuted($sql, [1], 1.0, $connection));
 }
 
+it('counts every query on the db.queries counter with connection and driver', function () {
+    registerQueryDuplicates($this->events);
+
+    Telemetry::span('request', function () {
+        runQuery($this->events);
+        runQuery($this->events, 'select * from "orders"');
+    });
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($f) => $f->name());
+
+    expect($families['db.queries']->samples[0]->value)->toBe(2.0)
+        ->and($families['db.queries']->samples[0]->labels['connection'])->not->toBeEmpty()
+        ->and($families['db.queries']->samples[0]->labels['driver'])->not->toBeEmpty();
+});
+
 it('flags a query that repeats past the threshold, exactly once', function () {
     registerQueryDuplicates($this->events);
 

@@ -32,6 +32,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Multi-tenant SaaS](docs/cookbook/multi-tenant-saas.md): tenant labels, cardinality budget, fleet gauges
 - [Queue monitoring](docs/cookbook/queue-monitoring.md): depth, in-flight, oldest-job age, alerts
 - [External services](docs/cookbook/external-services.md): outbound API instrumentation, distributed traces
+- [Deploy annotations](docs/cookbook/deploy-annotations.md): telemetry:deploy wired into Forge/Envoyer/GitHub Actions, id/notes filled from the deploy script's own git access
 
 ## Reference
 

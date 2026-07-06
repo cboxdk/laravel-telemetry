@@ -183,3 +183,7 @@ glance. `--id=v1.2.3 --notes="hotfix"` overrides the auto-detected git
 sha and adds a note. Every signal also carries `deployment.id` as a
 resource attribute, so "which deploy is this trace from" is always
 answerable.
+
+See [Cookbook: Deploy annotations](../cookbook/deploy-annotations.md)
+for copy-paste Forge/Envoyer/GitHub Actions deploy-script snippets that
+fill `--id`/`--notes` from the actual commit being deployed.

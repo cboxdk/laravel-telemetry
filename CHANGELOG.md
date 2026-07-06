@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`db.queries` counter** (`db_queries_total{connection,driver}`): every
+  executed query, labeled by the configured connection and its driver —
+  the database twin of `redis.commands`, so dashboards can show per-host
+  database activity without depending on tail-sampled traces. Bounded
+  labels; query text never becomes a label.
+
+- **Cookbook: Deploy annotations** — copy-paste Forge/Envoyer/GitHub
+  Actions deploy-script snippets for `telemetry:deploy`, filling
+  `--id`/`--notes` from the actual commit being deployed. `--id` already
+  auto-detects the git sha without shelling out (`Support\GitVersion`);
+  `--notes` has no equivalent, since the commit message can be
+  delta-packed and isn't worth parsing git's pack format for. Rather
+  than shelling out to `git log` in the deploy script, the recipe uses
+  each platform's own deployment variables (Forge's
+  `$FORGE_DEPLOY_COMMIT`/`$FORGE_DEPLOY_MESSAGE` env vars, Envoyer's
+  `{{ sha }}`/`{{ message }}` template syntax, GitHub Actions'
+  `github.sha`/`github.event.head_commit.message`) — no git CLI or
+  `.git` presence assumption needed in any of them.
+
 ## [0.1.0-alpha.16] - 2026-07-06
 
 ### Added
