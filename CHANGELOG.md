@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Livewire update requests are named after their component.** Livewire's
+  update endpoint is a catch-all — every component update POSTs to the same
+  URL, so `http.route` identified nothing. The Livewire instrumentation now
+  collects the component names as they mount/hydrate, and the request
+  middleware names the logical route `livewire:{component}` (batched
+  updates: `livewire:batch`) — on the span, the span name and the request
+  metric label — the same way a CMS resolver replaces its `/{segments?}`
+  catch-all. The root span carries the full list in `livewire.components`.
+  An app's own `resolveRouteUsing()` still wins.
+
 ## [0.2.0] - 2026-07-06
 
 First tagged release without a pre-release suffix: the public API

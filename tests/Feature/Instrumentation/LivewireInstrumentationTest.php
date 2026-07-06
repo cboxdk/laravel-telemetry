@@ -111,3 +111,10 @@ it('creates no detail spans outside a sampled trace, but keeps counting mounts',
         ->and(livewireSpans($this->collector, 'livewire.call'))->toBeEmpty()
         ->and(livewireFamilies()['livewire.components.mounted']->samples[0]->value)->toBe(1.0);
 });
+
+it('collects touched component names on the request for route naming', function () {
+    Livewire::test('counter')->call('increment');
+
+    // TraceRequest::terminate() derives "livewire:counter" from this.
+    expect(request()->attributes->get('telemetry.livewire.components'))->toContain('counter');
+});

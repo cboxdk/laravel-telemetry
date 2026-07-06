@@ -28,6 +28,14 @@ use Livewire\ComponentHook;
 final class LivewireInstrumentation extends ComponentHook
 {
     /**
+     * Request attribute collecting the component names touched during this
+     * request. TraceRequest::terminate() derives the logical route for
+     * Livewire update requests from it ("livewire:{component}"), the same
+     * way a CMS resolver replaces its catch-all.
+     */
+    public const COMPONENTS_KEY = 'telemetry.livewire.components';
+
+    /**
      * @param  array<string, mixed>  $params
      */
     public function mount(array $params, mixed $parent): void
@@ -35,6 +43,8 @@ final class LivewireInstrumentation extends ComponentHook
         FailSafe::guard(function (): void {
             $this->telemetry()->counter('livewire.components.mounted', 'Livewire components mounted')
                 ->inc(1, ['livewire.component' => $this->componentName()]);
+
+            $this->collectComponent();
         });
     }
 
@@ -43,6 +53,8 @@ final class LivewireInstrumentation extends ComponentHook
         FailSafe::guard(function (): void {
             $this->telemetry()->counter('livewire.components.hydrated', 'Livewire components hydrated on a subsequent request')
                 ->inc(1, ['livewire.component' => $this->componentName()]);
+
+            $this->collectComponent();
         });
     }
 
@@ -110,6 +122,24 @@ final class LivewireInstrumentation extends ComponentHook
         $component = $this->component;
 
         return is_object($component) && method_exists($component, 'getName') ? (string) $component->getName() : 'unknown';
+    }
+
+    /**
+     * Remember this component on the current request, so the request
+     * middleware can name the route after it. Bounded: names are the
+     * registered component aliases, and a batched update carries a handful.
+     */
+    private function collectComponent(): void
+    {
+        $components = request()->attributes->get(self::COMPONENTS_KEY, []);
+
+        if (! is_array($components)) {
+            return;
+        }
+
+        if (! in_array($name = $this->componentName(), $components, true)) {
+            request()->attributes->set(self::COMPONENTS_KEY, [...$components, $name]);
+        }
     }
 
     private function telemetry(): TelemetryManager

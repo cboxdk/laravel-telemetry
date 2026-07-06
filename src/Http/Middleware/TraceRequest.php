@@ -168,7 +168,12 @@ final class TraceRequest
             // literal route template for catch-all frameworks (a CMS's
             // "/{segments?}" identifies nothing) via resolveRouteUsing().
             // The override MUST be bounded — it becomes a metric label.
-            $route = $this->telemetry->resolveRoute($request, $response) ?? $template;
+            // Livewire's update endpoint gets the same treatment built in:
+            // "POST /livewire/update" identifies nothing either, so it is
+            // named after the component(s) the request actually touched.
+            $route = $this->telemetry->resolveRoute($request, $response)
+                ?? $this->livewireRoute($request, $span)
+                ?? $template;
 
             // Naming precedence: an explicit updateName() during the
             // request wins; then the app's nameRequestsUsing() resolver;
@@ -611,6 +616,48 @@ final class TraceRequest
         }
 
         return '/{unmatched}';
+    }
+
+    /**
+     * The logical route for Livewire's update endpoint: every component
+     * update POSTs to the same URL, so the literal route identifies
+     * nothing. LivewireInstrumentation collects the component names as
+     * they hydrate/mount; a single-component request (the common case)
+     * becomes "livewire:{component}", a batched one "livewire:batch" —
+     * bounded either way, because component aliases are a fixed set and
+     * batch compositions are not enumerated. The span carries the full
+     * list in livewire.components regardless.
+     */
+    private function livewireRoute(Request $request, Span $span): ?string
+    {
+        // Mirrors LivewireInstrumentation::COMPONENTS_KEY — inlined so this
+        // middleware never loads that class (its parent, Livewire's
+        // ComponentHook, only exists when livewire/livewire is installed).
+        $components = $request->attributes->get('telemetry.livewire.components');
+
+        if (! is_array($components) || $components === [] || ! $this->isLivewireUpdateRoute($request)) {
+            return null;
+        }
+
+        /** @var list<string> $components */
+        $span->setAttribute('livewire.components', implode(',', $components));
+
+        return count($components) === 1 ? 'livewire:'.$components[0] : 'livewire:batch';
+    }
+
+    private function isLivewireUpdateRoute(Request $request): bool
+    {
+        $route = $request->route();
+
+        if (! is_object($route)) {
+            return false;
+        }
+
+        if (method_exists($route, 'named') && $route->named('livewire.update')) {
+            return true;
+        }
+
+        return method_exists($route, 'uri') && str_ends_with('/'.ltrim($route->uri(), '/'), '/livewire/update');
     }
 
     /**

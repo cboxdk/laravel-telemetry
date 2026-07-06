@@ -382,6 +382,73 @@ it('lets the app name request spans behind catch-all routes', function () {
         ->and($span->attributes()['http.route'])->toBe('/{page}');
 });
 
+it('names livewire update requests after the component', function () {
+    Route::post('/livewire/update', function () {
+        // What LivewireInstrumentation collects as components hydrate.
+        request()->attributes->set('telemetry.livewire.components', ['trace-drawer']);
+
+        return 'ok';
+    })->name('livewire.update');
+
+    $this->post('/livewire/update');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.route'])->toBe('livewire:trace-drawer')
+        ->and($span->name)->toBe('POST livewire:trace-drawer')
+        ->and($span->attributes()['livewire.components'])->toBe('trace-drawer')
+        ->and($span->attributes()['http.route.template'])->toBe('/livewire/update');
+
+    // The metric label follows, so route tables group per component.
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['http.server.request.duration']->samples[0]->labels['http.route'])->toBe('livewire:trace-drawer');
+});
+
+it('names batched livewire updates livewire:batch and keeps the full list on the span', function () {
+    Route::post('/livewire/update', function () {
+        request()->attributes->set('telemetry.livewire.components', ['drawer', 'sidebar']);
+
+        return 'ok';
+    })->name('livewire.update');
+
+    $this->post('/livewire/update');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.route'])->toBe('livewire:batch')
+        ->and($span->attributes()['livewire.components'])->toBe('drawer,sidebar');
+});
+
+it('leaves other routes alone even when components rendered during the request', function () {
+    Route::get('/page-with-components', function () {
+        request()->attributes->set('telemetry.livewire.components', ['nav']);
+
+        return 'ok';
+    });
+
+    $this->get('/page-with-components');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.route'])->toBe('/page-with-components')
+        ->and($span->attributes())->not->toHaveKey('livewire.components');
+});
+
+it('lets resolveRouteUsing win over the built-in livewire naming', function () {
+    Route::post('/livewire/update', function () {
+        request()->attributes->set('telemetry.livewire.components', ['drawer']);
+
+        return 'ok';
+    })->name('livewire.update');
+
+    Telemetry::resolveRouteUsing(fn () => 'custom:route');
+
+    $this->post('/livewire/update');
+
+    expect(requestSpans($this->collector)[0]->attributes()['http.route'])->toBe('custom:route');
+});
+
 it('lets an instrumentation override the logical route behind a catch-all', function () {
     Route::get('/{page}', fn (string $page) => 'cms')->where('page', '.*');
 
