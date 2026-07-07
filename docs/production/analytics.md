@@ -54,9 +54,11 @@ even when the full trace is tail-sampled away. It still carries the
 
 Each event is a flat, one-row-per-view shape: `session.id`, `url.path`,
 `http.route`, `http.response.status_code`, `user_agent.original`, the
-referrer, `enduser.id`, `client.geo.*`, plus a `telemetry.stream="analytics"`
-marker so an OTel Collector can route it to ClickHouse without any app
-change. Disable with `TELEMETRY_ANALYTICS_PAGE_VIEWS=false`.
+referrer, `enduser.id`, `client.geo.*`, optional `analytics.utm.*` /
+`analytics.click_id` (see [Campaign attribution](#campaign-attribution)),
+plus a `telemetry.stream="analytics"` marker so an OTel Collector can route it
+to ClickHouse without any app change. Disable with
+`TELEMETRY_ANALYTICS_PAGE_VIEWS=false`.
 
 ## Geo, without a database
 
@@ -137,6 +139,37 @@ low-cardinality `user_agent.name` / `os.name` / `device.type` (mobile /
 tablet / desktop / bot) at collection time — dependency-free, families only
 (never versions), so they stay safe group-by dimensions. Leave it off to keep
 the raw UA for query-time parsing instead.
+
+## Campaign attribution
+
+Turn on `TELEMETRY_ANALYTICS_UTM` to capture where a visit came from, from the
+landing URL's query — added to `analytics.page_view` (server and browser):
+
+```dotenv
+TELEMETRY_ANALYTICS_UTM=true
+```
+
+- **`analytics.utm.source` / `medium` / `campaign` / `content` / `term`** —
+  the standard `utm_*` parameters. Values are lowercased, trimmed and
+  length-capped; a key appears only when its parameter is present and
+  non-empty.
+- **`analytics.click_id`** — the **name** of the paid ad-network click-id
+  parameter present (`gclid`, `gbraid`, `wbraid`, `msclkid`, `dclid`,
+  `ttclid`, `twclid`, `yclid`; first match in that order wins), **never its
+  value**. The value is per-click and unbounded — storing it would be a
+  cardinality bomb — so only the low-cardinality network name is kept, enough
+  to segment paid vs. organic. `fbclid` is deliberately **not** treated as a
+  click-id: Meta appends it to organic clicks too, so it is not a reliable
+  paid signal.
+
+Server page views read the parameters straight from the request. Browser
+(SPA) page views read them from the landing `url.full` the SDK sends with the
+event — never from the ingest request's own URL. Off by default and strictly
+additive.
+
+> **Cardinality note.** `utm_source`/`medium`/`campaign` are low-cardinality by
+> nature. `utm_content` and `utm_term` can be higher (per-ad, per-keyword) — on
+> a Loki backend, keep an eye on campaign volume before grouping by them.
 
 ## Browser analytics
 

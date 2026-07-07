@@ -222,6 +222,7 @@ can be analysed. Off by default; changes nothing when disabled. See
 | `analytics.geo.cloudflare` | `TELEMETRY_ANALYTICS_GEO_CF` | `true` — prefer Cloudflare's `CF-IPCountry` header (free, no database). Only trusted when the request is from a trusted proxy — set Laravel `TrustProxies` to the immediate hop (CF ranges if CF connects directly, or your load balancer in a `CF→LB→app` chain); spoofable and ignored otherwise |
 | `analytics.geo.database` | `TELEMETRY_ANALYTICS_GEO_DB` | — path to the MaxMind `.mmdb` file (`composer require geoip2/geoip2`) |
 | `analytics.user_agent` | `TELEMETRY_ANALYTICS_UA` | `false` — parse `user_agent.original` into low-cardinality `user_agent.name`/`os.name`/`device.type` (families only, never versions) |
+| `analytics.utm` | `TELEMETRY_ANALYTICS_UTM` | `false` — capture campaign attribution from the landing URL: `analytics.utm.source`/`medium`/`campaign`/`content`/`term`, plus a low-cardinality `analytics.click_id` (the paid ad-network param NAME — `gclid`/`msclkid`/… — never its value; `fbclid` excluded). Applies to server and browser page views |
 
 ## Browser span ingest (optional)
 

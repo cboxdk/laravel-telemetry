@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Http\Controllers;
 
 use Cbox\Telemetry\Events\TelemetryEvent;
+use Cbox\Telemetry\Support\CampaignAttribution;
 use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\UserAgentParser;
@@ -180,6 +181,14 @@ final class SpanIngestController
         $attributes['analytics.source'] = 'browser';
         $attributes['analytics.event'] = $name;
         $attributes['browser'] = true;
+
+        // Campaign attribution from the client-sent landing URL (never this
+        // ingest request's own URL) — analytics.utm.* + a low-cardinality
+        // analytics.click_id, when analytics.utm is on. Additive: the client
+        // cannot forge a bounded value it doesn't already control.
+        if (config('telemetry.analytics.utm', false)) {
+            $attributes = [...$attributes, ...CampaignAttribution::fromUrl(self::str($attributes['url.full'] ?? null))];
+        }
 
         // Server-side geo/UA win over any same-named client attribute.
         $attributes = [...$attributes, ...$enrichment];

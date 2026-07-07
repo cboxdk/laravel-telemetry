@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Http\Middleware;
 
 use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Support\Baggage;
+use Cbox\Telemetry\Support\CampaignAttribution;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
@@ -527,7 +528,24 @@ final class TraceRequest
         }
 
         /** @var array<string, scalar|null> $attributes */
-        $this->telemetry->event('analytics.page_view', [...$attributes, ...$geo]);
+        $this->telemetry->event('analytics.page_view', [...$attributes, ...$geo, ...$this->utmAttributes($request)]);
+    }
+
+    /**
+     * `analytics.utm.*` + a low-cardinality `analytics.click_id` from the
+     * landing URL's query, when `analytics.utm` is on. See
+     * {@see CampaignAttribution} for the exact keys and the click-id
+     * allowlist. Off by default and strictly additive.
+     *
+     * @return array<string, string>
+     */
+    private function utmAttributes(Request $request): array
+    {
+        if (! config('telemetry.analytics.utm', false)) {
+            return [];
+        }
+
+        return CampaignAttribution::fromQuery($request->query());
     }
 
     /**

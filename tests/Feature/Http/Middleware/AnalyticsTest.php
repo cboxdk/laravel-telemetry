@@ -190,6 +190,57 @@ it('can disable page_view events while keeping session.id', function () {
         ->and(analyticsServerSpan($this->collector)->attributes())->toHaveKey('session.id');
 });
 
+it('captures analytics.utm.* and the click-id NAME when analytics.utm is on', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.utm', true);
+    Route::get('/land', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/land?utm_source=X&utm_medium=CPC&utm_campaign=Summer&gclid=abc123');
+
+    $attrs = analyticsEvents($this->collector, 'analytics.page_view')[0]->attributes;
+    expect($attrs['analytics.utm.source'])->toBe('x')          // lowercased + trimmed
+        ->and($attrs['analytics.utm.medium'])->toBe('cpc')
+        ->and($attrs['analytics.utm.campaign'])->toBe('summer')
+        ->and($attrs['analytics.click_id'])->toBe('gclid')     // the NAME, never abc123
+        ->and($attrs)->not->toHaveKey('analytics.utm.content')
+        ->and($attrs)->not->toHaveKey('analytics.utm.term');
+});
+
+it('picks the first click-id in precedence order and never leaks the value', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.utm', true);
+    Route::get('/land', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/land?msclkid=zzz&gclid=abc123');
+
+    $attrs = analyticsEvents($this->collector, 'analytics.page_view')[0]->attributes;
+    expect($attrs['analytics.click_id'])->toBe('gclid')        // gclid outranks msclkid
+        ->and(implode('|', array_map('strval', $attrs)))->not->toContain('abc123');
+});
+
+it('does not treat fbclid as a paid click-id', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.utm', true);
+    Route::get('/land', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/land?fbclid=organic-too');
+
+    expect(analyticsEvents($this->collector, 'analytics.page_view')[0]->attributes)
+        ->not->toHaveKey('analytics.click_id');
+});
+
+it('captures no utm/click-id attributes when the flag is off', function () {
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.utm', false);
+    Route::get('/land', fn () => response('<html></html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/land?utm_source=x&gclid=abc123');
+
+    $attrs = analyticsEvents($this->collector, 'analytics.page_view')[0]->attributes;
+    expect($attrs)->not->toHaveKey('analytics.utm.source')
+        ->and($attrs)->not->toHaveKey('analytics.click_id');
+});
+
 it('stamps parsed user_agent.* when analytics.user_agent is on', function () {
     config()->set('telemetry.analytics.enabled', true);
     config()->set('telemetry.analytics.user_agent', true);

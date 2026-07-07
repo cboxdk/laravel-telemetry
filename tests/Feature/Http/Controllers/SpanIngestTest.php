@@ -317,6 +317,37 @@ it('does not enrich geo from an untrusted ingest origin', function () {
     expect(ingestedSpans($this->collector)[0]->attributes())->not->toHaveKey('client.geo.country');
 });
 
+it('derives analytics.utm.* + click-id from the browser-sent landing url when analytics.utm is on', function () {
+    config()->set('telemetry.analytics.utm', true);
+
+    ingestEventsPayload([[
+        'name' => 'page_view',
+        'sessionId' => 'v1',
+        'time' => (int) (microtime(true) * 1000),
+        'attributes' => ['url.full' => 'https://shop.test/land?utm_source=Newsletter&utm_medium=email&gclid=abc123'],
+    ]]);
+
+    $attrs = ingestedEvents($this->collector)[0]->attributes;
+    expect($attrs['analytics.utm.source'])->toBe('newsletter')
+        ->and($attrs['analytics.utm.medium'])->toBe('email')
+        ->and($attrs['analytics.click_id'])->toBe('gclid');
+});
+
+it('does not derive utm from the landing url when the flag is off', function () {
+    config()->set('telemetry.analytics.utm', false);
+
+    ingestEventsPayload([[
+        'name' => 'page_view',
+        'sessionId' => 'v1',
+        'time' => (int) (microtime(true) * 1000),
+        'attributes' => ['url.full' => 'https://shop.test/land?utm_source=x&gclid=abc123'],
+    ]]);
+
+    $attrs = ingestedEvents($this->collector)[0]->attributes;
+    expect($attrs)->not->toHaveKey('analytics.utm.source')
+        ->and($attrs)->not->toHaveKey('analytics.click_id');
+});
+
 it('drops analytics events with no usable name and caps the count', function () {
     $response = ingestEventsPayload([
         ['name' => 'ok_event', 'time' => (int) (microtime(true) * 1000)],

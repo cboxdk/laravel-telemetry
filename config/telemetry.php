@@ -408,6 +408,13 @@ return [
         // versions). Off by default — leave the raw UA for query-time if you
         // prefer.
         'user_agent' => env('TELEMETRY_ANALYTICS_UA', false),
+
+        // Capture campaign attribution from the landing URL's query: utm_source/
+        // medium/campaign/content/term as analytics.utm.*, plus a low-cardinality
+        // analytics.click_id (the paid ad-network param NAME — gclid/msclkid/… — never
+        // its unbounded value). utm_content/term are higher cardinality than the rest;
+        // on a Loki backend keep an eye on campaign volume (see the cardinality note).
+        'utm' => env('TELEMETRY_ANALYTICS_UTM', false),
     ],
 
     /*

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-07
+
+### Added
+
+- **Campaign attribution on analytics page views (`TELEMETRY_ANALYTICS_UTM`,
+  default off).** With `telemetry.analytics.utm` enabled, the
+  `analytics.page_view` event now carries the landing URL's UTM parameters as
+  `analytics.utm.source` / `medium` / `campaign` / `content` / `term` (values
+  lowercased, trimmed and length-capped; a key appears only when its param is
+  present and non-empty), plus a low-cardinality `analytics.click_id` — the
+  NAME of the paid ad-network click-id parameter present (`gclid`, `gbraid`,
+  `wbraid`, `msclkid`, `dclid`, `ttclid`, `twclid`, `yclid`, first match
+  wins), never its unbounded value. `fbclid` is deliberately excluded — Meta
+  appends it to organic clicks too, so it is not a reliable paid signal. This
+  applies to both the server page view and the browser analytics ingest: the
+  browser SDK now sends the landing `url.full` on page-view events, and the
+  ingest endpoint derives the same keys from it (never from the ingest
+  request's own URL). Strictly additive — nothing is stamped when the flag is
+  off. See `Support\CampaignAttribution`.
+
 ## [0.2.1] - 2026-07-07
 
 ### Added
