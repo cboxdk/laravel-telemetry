@@ -32,8 +32,16 @@ use Illuminate\Filesystem\FilesystemManager;
  * and bypasses `resolve()`, so faked disks are instrumented too. The
  * default-disk shorthand (`Storage::put(...)`) routes through the parent's
  * `@mixin` `__call` to `disk()`, so it is covered as well.
+ *
+ * Deliberately NOT `final` — it replaces the 'filesystem' binding, so a
+ * final class would break the standard `Storage::shouldReceive(...)` /
+ * `Storage::partialMock()` test pattern (Mockery cannot partial-mock a
+ * final class). Laravel's own FilesystemManager is non-final for the same
+ * reason. Treat it as internal; do not extend it yourself.
+ *
+ * @internal
  */
-final class InstrumentedFilesystemManager extends FilesystemManager
+class InstrumentedFilesystemManager extends FilesystemManager
 {
     public function __construct(
         Application $app,

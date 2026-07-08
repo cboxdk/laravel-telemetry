@@ -7,6 +7,7 @@ use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Mockery\Exception;
 
 beforeEach(function () {
     $this->collector = new CollectingExporter;
@@ -121,6 +122,20 @@ it('stays a real FilesystemManager for afterResolving(FilesystemManager::class) 
 
     expect($samples['put']->value)->toBe(1.0)
         ->and($samples['put']->labels['disk'])->toBe('local');
+});
+
+it('supports Storage::shouldReceive() / partialMock() on the instrumented binding', function () {
+    // The instrumented manager replaces the 'filesystem' binding, so it must
+    // stay non-final: Facade::shouldReceive() / partialMock() build a Mockery
+    // partial mock of the resolved instance, which fails outright on a final
+    // class ("marked final and its methods cannot be replaced"). This is the
+    // standard app testing pattern and must keep working.
+    expect(fn () => Storage::partialMock())->not->toThrow(Exception::class);
+
+    expect(fn () => Storage::shouldReceive('exists')->with('x')->andReturnTrue())
+        ->not->toThrow(Exception::class);
+
+    expect(Storage::exists('x'))->toBeTrue();
 });
 
 it('records an exception and rethrows on a failing operation', function () {

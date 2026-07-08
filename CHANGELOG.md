@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-08
+
+### Fixed
+
+- **`Storage::shouldReceive(...)` / `Storage::partialMock()` broke in app
+  test suites (regression from 0.3.1).** Because `InstrumentedFilesystemManager`
+  replaces the `'filesystem'` binding, marking it `final` meant Mockery could
+  no longer build a partial mock of the resolved instance — the standard
+  Laravel facade-mocking pattern failed with *"is marked final and its methods
+  cannot be replaced"*. The class is now non-final (Laravel's own
+  `FilesystemManager` is non-final for exactly this reason); it is marked
+  `@internal` instead to signal "don't extend this yourself".
+
 ## [0.3.1] - 2026-07-08
 
 ### Fixed
@@ -888,7 +901,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.0...v0.2.1
