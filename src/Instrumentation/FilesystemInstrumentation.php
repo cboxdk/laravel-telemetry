@@ -6,8 +6,8 @@ namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
-use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Filesystem\Factory;
+use Illuminate\Contracts\Foundation\Application;
 
 /**
  * Driver-agnostic filesystem/storage instrumentation: `storage.operations`
@@ -20,18 +20,23 @@ use Illuminate\Contracts\Filesystem\Factory;
  * alias-timing hazard here: extend() targets the real binding key from
  * the start, no forced pre-resolve needed (forcing one was tried for
  * broadcasting and had to be reverted — see BroadcastingInstrumentation).
+ *
+ * The replacement must be a genuine FilesystemManager subclass (see
+ * {@see InstrumentedFilesystemManager}) so `instanceof FilesystemManager`
+ * still holds for consumers that type-hint it — hence it is constructed
+ * from the application, not from the already-resolved manager instance.
  */
 final class FilesystemInstrumentation
 {
-    public function register(Container $container): void
+    public function register(Application $app): void
     {
-        FailSafe::guard(function () use ($container): void {
-            $container->extend('filesystem', function (Factory $manager, Container $app) {
+        FailSafe::guard(function () use ($app): void {
+            $app->extend('filesystem', function (Factory $manager) use ($app): Factory {
                 if ($manager instanceof InstrumentedFilesystemManager) {
                     return $manager;
                 }
 
-                return new InstrumentedFilesystemManager($manager, $app->make(TelemetryManager::class));
+                return new InstrumentedFilesystemManager($app, $app->make(TelemetryManager::class));
             });
         });
     }

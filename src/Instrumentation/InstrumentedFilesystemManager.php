@@ -5,178 +5,55 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\TelemetryManager;
-use Illuminate\Contracts\Filesystem\Factory;
 use Illuminate\Contracts\Filesystem\Filesystem;
-use Illuminate\Http\File;
-use Illuminate\Http\UploadedFile;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Filesystem\FilesystemManager;
 
 /**
- * Factory decorator: wraps whatever `disk()` resolves in an
- * InstrumentedFilesystem, driver-agnostic.
+ * Instrumented drop-in for Laravel's FilesystemManager.
  *
- * Every `Filesystem` operation is ALSO implemented explicitly here,
- * delegating to `$this->disk()->method(...)` — this is what makes the
- * `Storage::put(...)` default-disk shorthand instrumented too, not just
- * explicit `Storage::disk('x')->put(...)` calls (Laravel's own
- * FilesystemManager gets this via `__call()`; explicit methods here
- * instead keep every call properly typed rather than dynamically
- * dispatched).
+ * It MUST be a real subclass of {@see FilesystemManager}, not a
+ * standalone decorator: Laravel aliases `FilesystemManager::class` to the
+ * 'filesystem' binding, so any consumer that type-hints
+ * `FilesystemManager`, injects it, or registers
+ * `afterResolving(FilesystemManager::class, …)` (sentry-laravel's storage
+ * integration does exactly this) receives — and type-checks — whatever
+ * the 'filesystem' key resolves to. A wrapper that only implemented the
+ * `Factory`/`Filesystem` contracts failed that `instanceof` check and
+ * crashed the app on boot with a TypeError.
  *
- * `__call()` is reserved for real manager-level methods beyond the
- * Factory interface — `set()` (crucially what `Storage::fake()` uses to
- * inject a disk), `createLocalDriver()` (which `fake()` also calls
- * directly), `forgetDisk()`, `purge()`, `extend()`, and anything else
- * FilesystemManager adds in the future. An earlier draft routed
- * anything unknown through `disk()`, assuming it must be a disk
- * operation — that broke `Storage::fake()` outright. Forwarding
- * unmatched calls straight to the real manager is the safe default.
+ * All real manager behaviour (driver creation, the disk cache, custom
+ * creators, `set()`/`Storage::fake()`, `forgetDisk()`, `purge()`, …) is
+ * inherited untouched. The only override is `disk()`: whatever the parent
+ * resolves is wrapped in {@see InstrumentedFilesystem} so every operation
+ * feeds the `storage.operations{disk,operation}` counter and a detail
+ * span. Wrapping at `disk()` (rather than the protected `resolve()`) is
+ * deliberate — `Storage::fake()` injects its disk straight into the cache
+ * and bypasses `resolve()`, so faked disks are instrumented too. The
+ * default-disk shorthand (`Storage::put(...)`) routes through the parent's
+ * `@mixin` `__call` to `disk()`, so it is covered as well.
  */
-final readonly class InstrumentedFilesystemManager implements Factory, Filesystem
+final class InstrumentedFilesystemManager extends FilesystemManager
 {
     public function __construct(
-        private Factory $manager,
-        private TelemetryManager $telemetry,
-    ) {}
+        Application $app,
+        private readonly TelemetryManager $telemetry,
+    ) {
+        parent::__construct($app);
+    }
 
+    /**
+     * @param  \UnitEnum|string|null  $name
+     */
     public function disk($name = null): Filesystem
     {
-        $disk = $this->manager->disk($name);
+        $disk = parent::disk($name);
 
         if ($disk instanceof InstrumentedFilesystem) {
             return $disk;
         }
 
         return new InstrumentedFilesystem($disk, $this->telemetry, $this->diskName($name));
-    }
-
-    public function path($path): string
-    {
-        return $this->disk()->path($path);
-    }
-
-    public function exists($path): bool
-    {
-        return $this->disk()->exists($path);
-    }
-
-    public function get($path): ?string
-    {
-        return $this->disk()->get($path);
-    }
-
-    public function readStream($path)
-    {
-        return $this->disk()->readStream($path);
-    }
-
-    public function put($path, $contents, $options = []): bool
-    {
-        return $this->disk()->put($path, $contents, $options);
-    }
-
-    /**
-     * @param  File|UploadedFile|array<array-key, mixed>|null  $file
-     * @param  mixed  $options
-     */
-    public function putFile($path, $file = null, $options = [])
-    {
-        return $this->disk()->putFile($path, $file, $options);
-    }
-
-    /**
-     * @param  File|UploadedFile|string|array<array-key, mixed>|null  $file
-     * @param  string|array<array-key, mixed>|null  $name
-     * @param  mixed  $options
-     */
-    public function putFileAs($path, $file, $name = null, $options = [])
-    {
-        return $this->disk()->putFileAs($path, $file, $name, $options);
-    }
-
-    /**
-     * @param  array<array-key, mixed>  $options
-     */
-    public function writeStream($path, $resource, array $options = []): bool
-    {
-        return $this->disk()->writeStream($path, $resource, $options);
-    }
-
-    public function getVisibility($path): string
-    {
-        return $this->disk()->getVisibility($path);
-    }
-
-    public function setVisibility($path, $visibility): bool
-    {
-        return $this->disk()->setVisibility($path, $visibility);
-    }
-
-    public function prepend($path, $data): bool
-    {
-        return $this->disk()->prepend($path, $data);
-    }
-
-    public function append($path, $data): bool
-    {
-        return $this->disk()->append($path, $data);
-    }
-
-    /**
-     * @param  string|array<int, string>  $paths
-     */
-    public function delete($paths): bool
-    {
-        return $this->disk()->delete($paths);
-    }
-
-    public function copy($from, $to): bool
-    {
-        return $this->disk()->copy($from, $to);
-    }
-
-    public function move($from, $to): bool
-    {
-        return $this->disk()->move($from, $to);
-    }
-
-    public function size($path): int
-    {
-        return $this->disk()->size($path);
-    }
-
-    public function lastModified($path): int
-    {
-        return $this->disk()->lastModified($path);
-    }
-
-    public function files($directory = null, $recursive = false): array
-    {
-        return $this->disk()->files($directory, $recursive);
-    }
-
-    public function allFiles($directory = null): array
-    {
-        return $this->disk()->allFiles($directory);
-    }
-
-    public function directories($directory = null, $recursive = false): array
-    {
-        return $this->disk()->directories($directory, $recursive);
-    }
-
-    public function allDirectories($directory = null): array
-    {
-        return $this->disk()->allDirectories($directory);
-    }
-
-    public function makeDirectory($path): bool
-    {
-        return $this->disk()->makeDirectory($path);
-    }
-
-    public function deleteDirectory($directory): bool
-    {
-        return $this->disk()->deleteDirectory($directory);
     }
 
     private function diskName(mixed $name): string
@@ -193,16 +70,6 @@ final readonly class InstrumentedFilesystemManager implements Factory, Filesyste
             return $name->name;
         }
 
-        $default = config('filesystems.default');
-
-        return is_string($default) && $default !== '' ? $default : 'local';
-    }
-
-    /**
-     * @param  array<int, mixed>  $arguments
-     */
-    public function __call(string $method, array $arguments): mixed
-    {
-        return $this->manager->{$method}(...$arguments);
+        return $this->getDefaultDriver();
     }
 }

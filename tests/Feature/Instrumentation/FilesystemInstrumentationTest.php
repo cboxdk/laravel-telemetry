@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
+use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
@@ -84,6 +85,42 @@ it('creates no detail span outside a sampled trace, but keeps the tally', functi
     Telemetry::flush();
 
     expect(storageSpans($this->collector))->toBeEmpty();
+});
+
+it('stays a real FilesystemManager for afterResolving(FilesystemManager::class) consumers', function () {
+    // The exact shape of sentry-laravel's storage integration: a typed
+    // afterResolving callback on FilesystemManager::class (aliased to the
+    // 'filesystem' binding). Before the fix the instrumented manager was a
+    // standalone wrapper, not a FilesystemManager subclass, so this callback
+    // fired with the wrong type and crashed the app on boot with a TypeError.
+    $received = null;
+
+    $this->app->forgetInstance('filesystem');
+    Storage::clearResolvedInstances();
+
+    $this->app->afterResolving(
+        FilesystemManager::class,
+        function (FilesystemManager $manager) use (&$received): void {
+            $received = $manager;
+        }
+    );
+
+    // Resolving 'filesystem' now runs the extender, then fires the typed
+    // afterResolving callback — the boot sequence that used to TypeError.
+    Storage::fake('local');
+
+    // (a) no TypeError above, and (b) the binding is a real FilesystemManager.
+    expect($received)->toBeInstanceOf(FilesystemManager::class)
+        ->and($this->app->make('filesystem'))->toBeInstanceOf(FilesystemManager::class);
+
+    // (c) instrumentation still records once a disk operation runs.
+    Storage::disk('local')->put('after-resolving.txt', 'x');
+
+    $samples = collect(storageFamilies()['storage.operations']->samples)
+        ->keyBy(fn ($s) => $s->labels['operation']);
+
+    expect($samples['put']->value)->toBe(1.0)
+        ->and($samples['put']->labels['disk'])->toBe('local');
 });
 
 it('records an exception and rethrows on a failing operation', function () {

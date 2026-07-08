@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-08
+
+### Fixed
+
+- **Boot crash for apps that also use `sentry/sentry-laravel` (or anything
+  that type-hints `Illuminate\Filesystem\FilesystemManager`).** Filesystem
+  instrumentation replaced the `'filesystem'` binding with a standalone
+  decorator that was not a `FilesystemManager` subclass. Because Laravel
+  aliases `FilesystemManager::class` to `'filesystem'`, any typed
+  `afterResolving(FilesystemManager::class, …)` callback, constructor
+  injection, or `app(FilesystemManager::class)` received the wrapper and
+  threw a `TypeError` the moment the binding resolved — Sentry's storage
+  integration was simply the first to hit it. `InstrumentedFilesystemManager`
+  now `extends FilesystemManager`, so `instanceof FilesystemManager` holds
+  while `storage.operations{disk,operation}` counters and per-operation
+  detail spans continue to fire unchanged.
+
 ## [0.3.0] - 2026-07-07
 
 ### Added
@@ -871,7 +888,9 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.17...v0.2.0
 [0.1.0-alpha.17]: https://github.com/cboxdk/laravel-telemetry/compare/v0.1.0-alpha.16...v0.1.0-alpha.17
