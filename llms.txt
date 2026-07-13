@@ -13,7 +13,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 ## Getting started
 
 - [Installation](docs/getting-started/installation.md): composer require, store choice (redis/apcu/array), exporter setup, scheduler
-- [Quickstart](docs/getting-started/quickstart.md): counters, gauges, histograms, spans, events
+- [Quickstart](docs/quickstart.md): counters, gauges, histograms, spans, events
 - [API reference](docs/getting-started/api-reference.md): the whole facade on one page — read this first
 - [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions
 

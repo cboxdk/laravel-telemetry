@@ -32,7 +32,7 @@ self-contained task you can paste straight into your assistant:
 | Task | Where |
 |---|---|
 | Install & configure the package | [Installation](installation.md#agent-prompt) |
-| Instrument the app's key flows | [Quickstart](quickstart.md#agent-prompt) |
+| Instrument the app's key flows | [Quickstart](../quickstart.md#agent-prompt) |
 | Wire the log channel into the stack | [Logs](../core-concepts/logs.md#agent-prompt) |
 | Add telemetry to your own package | [Providers](../extension-points/providers.md#agent-prompt) |
 | Connect to the Grafana stack | [Grafana stack](../production/grafana-stack.md#agent-prompt) |

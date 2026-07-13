@@ -156,6 +156,6 @@ docker compose down -v         # wipe metrics/traces/logs/dashboards too
 
 - Production backends (self-hosted, Grafana Cloud, scrape vs push):
   [The Grafana stack](../production/grafana-stack.md).
-- Wire it into your own app with the [quickstart](../getting-started/quickstart.md),
+- Wire it into your own app with the [quickstart](../quickstart.md),
   then drive traffic through your routes, queues and commands to see every
   signal type land.

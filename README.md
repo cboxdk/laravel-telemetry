@@ -87,7 +87,7 @@ Schedule::command('telemetry:flush')->everyMinute()->onOneServer();
 Full documentation lives in [`docs/`](docs/index.md):
 
 - [Getting started](docs/getting-started/installation.md) —
-  [quickstart](docs/getting-started/quickstart.md),
+  [quickstart](docs/quickstart.md),
   [testing](docs/getting-started/testing.md),
   [API reference](docs/getting-started/api-reference.md),
   [AI assistants](docs/getting-started/ai-assistants.md)
