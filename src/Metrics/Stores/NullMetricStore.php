@@ -29,4 +29,6 @@ final class NullMetricStore implements MetricStore
     }
 
     public function wipe(): void {}
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void {}
 }

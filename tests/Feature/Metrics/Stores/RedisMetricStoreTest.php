@@ -31,8 +31,20 @@ beforeEach(function () {
 });
 
 afterEach(function () {
-    if (isset($this->store)) {
-        $this->store->wipe();
+    // wipe() deliberately preserves meta + indexes — tests must delete the
+    // whole prefix so no keys leak into the local Redis between runs.
+    if (isset($this->prefix)) {
+        $connection = app(Factory::class)->connection();
+
+        foreach (MetricType::cases() as $type) {
+            $index = "{$this->prefix}:index:{$type->value}";
+
+            foreach ($connection->smembers($index) ?: [] as $name) {
+                $connection->del("{$this->prefix}:{$type->value}:{$name}");
+            }
+
+            $connection->del($index);
+        }
     }
 });
 
@@ -125,6 +137,54 @@ it('wipes everything it wrote', function () {
     $this->store->wipe();
 
     expect($this->store->collect())->toBeEmpty();
+});
+
+it('forgets a single series without touching its siblings', function () {
+    $gauge = new MetricDefinition('worker.memory.php', MetricType::Gauge, unit: 'By');
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0]);
+
+    $this->store->setGauge($gauge, ['pid' => '1'], 100);
+    $this->store->setGauge($gauge, ['pid' => '2'], 200);
+    $this->store->recordHistogram($histogram, ['route' => '/a'], 5, new Exemplar('trace-1', 5.0, 1_000));
+    $this->store->recordHistogram($histogram, ['route' => '/b'], 7);
+
+    $this->store->forgetSeries($gauge, ['pid' => '1']);
+    $this->store->forgetSeries($histogram, ['route' => '/a']);
+
+    $families = collect($this->store->collect())->keyBy(fn ($f) => $f->name());
+
+    expect($families['worker.memory.php']->samples)->toHaveCount(1)
+        ->and($families['worker.memory.php']->samples[0]->labels['pid'])->toBe('2')
+        ->and($families['req.duration']->samples)->toHaveCount(1)
+        ->and($families['req.duration']->samples[0]->labels['route'])->toBe('/b');
+});
+
+it('keeps warm workers visible after a wipe from another process', function () {
+    $counter = new MetricDefinition('orders.created', MetricType::Counter, 'Orders created');
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0]);
+
+    // This instance plays the warm FPM worker: the first write sets its
+    // per-process initialize() memo.
+    $this->store->incrementCounter($counter, [], 1);
+    $this->store->recordHistogram($histogram, [], 5);
+
+    // Another process (telemetry:flush --wipe) resets the store.
+    (new RedisMetricStore(app(Factory::class), 'default', $this->prefix))->wipe();
+
+    expect($this->store->collect())->toBeEmpty();
+
+    // The warm worker writes again WITHOUT re-initializing — the metrics
+    // must still be collectable (meta + index membership survived).
+    $this->store->incrementCounter($counter, [], 5);
+    $this->store->recordHistogram($histogram, [], 7);
+
+    $families = collect($this->store->collect())->keyBy(fn ($f) => $f->name());
+
+    expect($families)->toHaveKeys(['orders.created', 'req.duration'])
+        ->and($families['orders.created']->samples[0]->value)->toBe(5.0)
+        ->and($families['orders.created']->definition->description)->toBe('Orders created')
+        ->and($families['req.duration']->samples[0]->count)->toBe(1)
+        ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([1, 0]);
 });
 
 it('aggregates correctly through the write buffer', function () {

@@ -185,6 +185,21 @@ final class BufferedMetricStore implements MetricStore
         $this->inner->wipe();
     }
 
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $series = Labels::encode($labels);
+
+        // Drop anything still buffered for the series so a later flush
+        // can't resurrect what the inner store just forgot.
+        unset(
+            $this->counters[$definition->name]['series'][$series],
+            $this->gauges[$definition->name]['series'][$series],
+            $this->histograms[$definition->name]['series'][$series],
+        );
+
+        $this->inner->forgetSeries($definition, $labels);
+    }
+
     public function inner(): MetricStore
     {
         return $this->inner;

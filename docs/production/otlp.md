@@ -43,7 +43,7 @@ series regardless of how many PHP processes contributed.
 
 At scale, two costs bite: per-request OTLP POSTs at terminate, and a
 one-minute metrics cadence that is too coarse. The spool solves both —
-the Nightwatch-agent model, with Redis instead of a local socket:
+an agent-plus-daemon model, with Redis standing in for a local socket:
 
 ```dotenv
 TELEMETRY_OTLP_SPOOL=true

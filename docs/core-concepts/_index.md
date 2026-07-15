@@ -1,7 +1,7 @@
 ---
 title: Core Concepts
 description: Core Concepts documentation.
-weight: 1
+weight: 2
 ---
 
 # Core Concepts

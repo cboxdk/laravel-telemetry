@@ -125,6 +125,12 @@ final class ArrayMetricStore implements MetricStore
                 $samples[] = new Sample(Labels::decode($encoded), $value);
             }
 
+            // A family can lose its last series to forgetSeries() —
+            // nothing to report until the next write.
+            if ($samples === []) {
+                continue;
+            }
+
             $families[] = new MetricFamily($entry['definition'], $samples, $this->since[$entry['definition']->name] ?? null);
         }
 
@@ -143,6 +149,10 @@ final class ArrayMetricStore implements MetricStore
                 );
             }
 
+            if ($samples === []) {
+                continue;
+            }
+
             $families[] = new MetricFamily($entry['definition'], $samples, $this->since[$entry['definition']->name] ?? null);
         }
 
@@ -155,6 +165,17 @@ final class ArrayMetricStore implements MetricStore
         $this->gauges = [];
         $this->histograms = [];
         $this->since = [];
+    }
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $key = Labels::encode($labels);
+
+        unset(
+            $this->counters[$definition->name]['series'][$key],
+            $this->gauges[$definition->name]['series'][$key],
+            $this->histograms[$definition->name]['series'][$key],
+        );
     }
 
     /**

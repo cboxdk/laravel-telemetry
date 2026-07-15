@@ -12,10 +12,12 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 
 ## Getting started
 
+- [Requirements](docs/requirements.md): PHP/Laravel versions, why no extra extensions or sidecars are needed
 - [Installation](docs/getting-started/installation.md): composer require, store choice (redis/apcu/array), exporter setup, scheduler
 - [Quickstart](docs/quickstart.md): counters, gauges, histograms, spans, events
 - [API reference](docs/getting-started/api-reference.md): the whole facade on one page — read this first
 - [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions
+- [AI assistants](docs/getting-started/ai-assistants.md): ship-ready guidance for Claude Code, Cursor, Copilot and Laravel Boost
 
 ## Core concepts
 
@@ -46,5 +48,5 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
 - [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget
 - [Grafana stack](docs/production/grafana-stack.md): recommended backend routing (Tempo/Mimir/Loki), correlation, query starters
-- [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (vs Nightwatch/Sentry-PHP)
+- [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (methodology + first-party numbers)
 - [Security](docs/production/security.md): endpoint protection, data leakage

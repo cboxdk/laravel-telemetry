@@ -70,7 +70,7 @@ Everything this package exports is built for Grafana's cross-linking:
 - **Metrics → traces**: dashboards share the `service.name` resource
   attribute across all three signals.
 
-## Bundled dashboards — the Nightwatch-style suite
+## Bundled dashboards — a full APM-grade suite
 
 Thirteen service-scoped dashboards mirroring an APM sidebar, linked as
 top-bar tabs with shared time range and filters: **Overview** (Activity /

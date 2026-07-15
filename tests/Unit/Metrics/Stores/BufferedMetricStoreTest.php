@@ -61,6 +61,11 @@ final class CountingStore implements MetricStore
     {
         $this->inner->wipe();
     }
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $this->inner->forgetSeries($definition, $labels);
+    }
 }
 
 function counterDefinition(): MetricDefinition

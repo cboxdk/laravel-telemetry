@@ -68,4 +68,16 @@ interface MetricStore
      * Remove all stored metric state.
      */
     public function wipe(): void;
+
+    /**
+     * Remove a single stored series (one labelset) from a family.
+     *
+     * Used to retire per-process series — e.g. the pid-labeled worker
+     * memory gauges — when the owning process exits, so dead series don't
+     * accumulate in the shared store forever. Only call this for series
+     * no other live process writes to.
+     *
+     * @param  array<string, string>  $labels
+     */
+    public function forgetSeries(MetricDefinition $definition, array $labels): void;
 }

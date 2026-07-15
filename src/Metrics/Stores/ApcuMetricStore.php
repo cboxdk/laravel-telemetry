@@ -156,6 +156,11 @@ final class ApcuMetricStore implements MetricStore
                     $samples[] = new Sample(Labels::decode($series), $this->toFloat($raw));
                 }
 
+                // Indexes survive a wipe; skip families with no data yet.
+                if ($samples === []) {
+                    continue;
+                }
+
                 $families[] = new MetricFamily($definition, $samples, $this->since($type, $name));
             }
         }
@@ -174,14 +179,22 @@ final class ApcuMetricStore implements MetricStore
             foreach ($this->seriesOf(MetricType::Histogram, $name) as $series) {
                 $base = $this->valueKey(MetricType::Histogram, $name, $series);
                 $bucketCounts = [];
+                $sawData = false;
 
                 for ($i = 0; $i < $bucketSlots; $i++) {
                     $count = apcu_fetch("{$base}:b{$i}");
+                    $sawData = $sawData || is_int($count);
                     $bucketCounts[] = is_int($count) ? $count : 0;
                 }
 
                 $sum = apcu_fetch("{$base}:sum");
                 $count = apcu_fetch("{$base}:count");
+
+                // Series indexes survive a wipe; a series with no keys at
+                // all has no data yet — nothing to report.
+                if (! $sawData && ! is_int($sum) && ! is_int($count)) {
+                    continue;
+                }
 
                 $samples[] = new HistogramSample(
                     labels: Labels::decode($series),
@@ -193,14 +206,28 @@ final class ApcuMetricStore implements MetricStore
                 );
             }
 
+            // Indexes survive a wipe; skip families with no data yet.
+            if ($samples === []) {
+                continue;
+            }
+
             $families[] = new MetricFamily($definition, $samples, $this->since(MetricType::Histogram, $name));
         }
 
         return $families;
     }
 
+    /**
+     * Reset every value while PRESERVING meta and the name/series indexes.
+     * Warm workers memoize index() per process and series — deleting the
+     * bookkeeping would leave their subsequent writes invisible until every
+     * process recycled. `since` is reset so cumulative start timestamps
+     * restart at the wipe.
+     */
     public function wipe(): void
     {
+        $now = (int) (microtime(true) * 1e9);
+
         foreach (MetricType::cases() as $type) {
             foreach ($this->names($type) as $name) {
                 // Delete a generous fixed range of bucket slots so bucket
@@ -213,21 +240,37 @@ final class ApcuMetricStore implements MetricStore
                     apcu_delete($base);
                     apcu_delete("{$base}:sum");
                     apcu_delete("{$base}:count");
+                    apcu_delete("{$base}:exemplar");
 
                     for ($i = 0; $i < $bucketSlots; $i++) {
                         apcu_delete("{$base}:b{$i}");
                     }
                 }
 
-                apcu_delete($this->seriesIndexKey($type, $name));
-                apcu_delete($this->metaKey($type, $name));
-                apcu_delete($this->sinceKey($type, $name));
+                apcu_store($this->sinceKey($type, $name), $now);
             }
+        }
+    }
 
-            apcu_delete($this->nameIndexKey($type));
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $type = $definition->type;
+        $series = Labels::encode($labels);
+        $base = $this->valueKey($type, $definition->name, $series);
+
+        apcu_delete($base);
+        apcu_delete("{$base}:sum");
+        apcu_delete("{$base}:count");
+        apcu_delete("{$base}:exemplar");
+
+        for ($i = 0, $slots = max(64, count($definition->buckets ?? []) + 1); $i < $slots; $i++) {
+            apcu_delete("{$base}:b{$i}");
         }
 
-        $this->indexed = [];
+        // Safe to drop from the series index: forgetSeries is only for
+        // series no other live process writes to (see the contract).
+        $this->removeUnique($this->seriesIndexKey($type, $definition->name), $series);
+        unset($this->indexed["{$type->value}:{$definition->name}:{$series}"]);
     }
 
     private function since(MetricType $type, string $name): ?int
@@ -287,6 +330,38 @@ final class ApcuMetricStore implements MetricStore
                 if (! in_array($value, $current, true)) {
                     $current[] = $value;
                     apcu_store($key, $current);
+                }
+
+                apcu_delete($lock);
+
+                return;
+            }
+
+            usleep(100);
+        }
+    }
+
+    /**
+     * Remove a value from a list key if present, guarded by the same
+     * spin lock as appendUnique.
+     */
+    private function removeUnique(string $key, string $value): void
+    {
+        $current = apcu_fetch($key);
+
+        if (! is_array($current) || ! in_array($value, $current, true)) {
+            return;
+        }
+
+        $lock = "{$key}:lock";
+
+        for ($attempt = 0; $attempt < 100; $attempt++) {
+            if (apcu_add($lock, 1, 1)) {
+                $current = apcu_fetch($key);
+
+                if (is_array($current)) {
+                    $filtered = array_values(array_filter($current, static fn ($entry): bool => $entry !== $value));
+                    apcu_store($key, $filtered);
                 }
 
                 apcu_delete($lock);

@@ -1,7 +1,7 @@
 ---
 title: Production
 description: Production documentation.
-weight: 1
+weight: 6
 ---
 
 # Production

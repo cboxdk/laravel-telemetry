@@ -14,7 +14,8 @@ beforeEach(function () {
         $this->markTestSkipped('APCu is not available (needs ext-apcu and apc.enable_cli=1).');
     }
 
-    $this->store = new ApcuMetricStore('telemetry_test_'.bin2hex(random_bytes(4)));
+    $this->prefix = 'telemetry_test_'.bin2hex(random_bytes(4));
+    $this->store = new ApcuMetricStore($this->prefix);
 });
 
 afterEach(function () {
@@ -66,8 +67,42 @@ it('keeps the latest exemplar for a histogram series', function () {
 
 it('wipes everything it wrote', function () {
     $this->store->incrementCounter(new MetricDefinition('a.b', MetricType::Counter), [], 1);
+    $this->store->recordHistogram(
+        new MetricDefinition('c.d', MetricType::Histogram, buckets: [1.0]),
+        [],
+        2,
+        new Exemplar('trace-1', 2.0, 1_000),
+    );
 
     $this->store->wipe();
 
     expect($this->store->collect())->toBeEmpty();
+});
+
+it('keeps warm workers visible after a wipe from another instance', function () {
+    $counter = new MetricDefinition('orders.created', MetricType::Counter, 'Orders created');
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0]);
+
+    // The first write sets this instance's per-process index() memo —
+    // it plays the warm FPM worker.
+    $this->store->incrementCounter($counter, [], 1);
+    $this->store->recordHistogram($histogram, [], 5, new Exemplar('trace-1', 5.0, 1_000));
+
+    // Another instance (telemetry:flush --wipe) resets the store.
+    (new ApcuMetricStore($this->prefix))->wipe();
+
+    expect($this->store->collect())->toBeEmpty();
+
+    // The warm worker writes again WITHOUT re-indexing — the metrics must
+    // still be collectable, and the wiped exemplar must not resurface.
+    $this->store->incrementCounter($counter, [], 5);
+    $this->store->recordHistogram($histogram, [], 7);
+
+    $families = collect($this->store->collect())->keyBy(fn ($f) => $f->name());
+
+    expect($families)->toHaveKeys(['orders.created', 'req.duration'])
+        ->and($families['orders.created']->samples[0]->value)->toBe(5.0)
+        ->and($families['req.duration']->samples[0]->count)->toBe(1)
+        ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([1, 0])
+        ->and($families['req.duration']->samples[0]->exemplar)->toBeNull();
 });

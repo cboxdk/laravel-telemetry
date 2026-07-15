@@ -40,8 +40,6 @@ jobs:
         exclude:
           - php: 8.5
             stability: prefer-lowest
-          - php: 8.3
-            laravel: 13.*
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
@@ -71,7 +69,7 @@ jobs:
         run: composer show -D
 
       - name: Execute tests
-        run: vendor/bin/pest --ci --exclude-group=redis
+        run: vendor/bin/pest --ci --exclude-group=redis --exclude-group=benchmark
 
   test-with-redis:
     runs-on: ubuntu-latest

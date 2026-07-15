@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
+### Fixed
+
+- **Disabling telemetry no longer breaks app code.** `Http::withTraceparent()`
+  and the `@telemetryTraceparent` Blade directive were only registered when
+  `telemetry.enabled` was true, so flipping `TELEMETRY_ENABLED=false` made
+  every call site throw a `BadMethodCallException` (and directives render as
+  literal text). Both are now always registered and behave as no-ops when
+  disabled.
+- **`@telemetryBrowser` was documented but never registered as a Blade
+  directive** — it rendered as literal text in any layout that used it. The
+  directive now exists and emits `BrowserSnippet::render()` (empty when the
+  span ingest or telemetry itself is disabled).
+- **`telemetry:flush --wipe` no longer makes warm workers' metrics invisible.**
+  Wipe used to delete metric meta and index entries while other FPM/Octane/queue
+  processes kept their per-process "already initialized" memo — everything they
+  wrote after the wipe was silently dropped until every process recycled. Wipe
+  now resets values but preserves meta and indexes (and resets the cumulative
+  start timestamp). APCu wipe also clears histogram exemplars, which previously
+  survived.
+- **A metric type conflict can no longer throw on every query.** The
+  `db.queries` counter registration inside the `QueryExecuted` listener ran
+  outside `FailSafe::guard`; an app registering the same name as another
+  instrument type would have turned every subsequent query into an exception.
+- **Custom exporters can no longer take down kernel terminate.** A throwing
+  `supports()`/`name()` on a custom exporter escaped `FailSafe::guard` during
+  `flush()`; the whole per-exporter interaction is now guarded, and one bad
+  exporter never blocks the others.
+- **Half-open instrumentation state is dropped between queue jobs.** In-flight
+  outgoing-HTTP spans (and mail/notification/transaction state) left behind by
+  a job that died mid-call leaked in long-running workers and could mis-attach
+  to a later job. Workers now flush that state before each job, mirroring the
+  Octane fresh-request reset.
+
+### Changed
+
+- **`worker.memory.php` / `worker.memory.rss` gauges no longer accumulate dead
+  pid series.** Workers retire their own pid-labeled series on
+  `WorkerStopping`, so restarts don't grow the store and dashboards don't show
+  stale memory lines for dead processes.
+- **BREAKING for custom `MetricStore` implementations:** the contract gained
+  `forgetSeries(MetricDefinition $definition, array $labels): void` (remove a
+  single labelset from a family). All bundled stores implement it.
+- Stores skip metric families with no samples at collect time (possible after
+  a wipe or `forgetSeries`) instead of emitting empty families.
+- Livewire instrumentation now allows Livewire 4 (`livewire/livewire`
+  `^3.0|^4.0`); the suite passes against v4.
+- CI: the PHP 8.3 × Laravel 13 matrix cell is no longer excluded, benchmarks
+  are excluded from the test matrix, `composer audit` runs in CI (plus weekly),
+  and the Pint workflow only checks style instead of auto-committing to main.
+- Supply chain: added `bin/check-licenses.php` (permissive-license gate),
+  `bin/generate-sbom.php` (deterministic CycloneDX 1.5 `sbom.json`, committed),
+  composer scripts `license-check`/`sbom`/`qa`, and a CI drift gate;
+  `composer.lock` is now committed.
+
+## [0.3.3] - 2026-07-14
+
+### Changed
+
+- Docs only: added `_index.md` section landings and the root
+  quickstart/requirements pages so the docs site grades the package
+  `complete`. No code changes.
+
 ## [0.3.2] - 2026-07-08
 
 ### Fixed

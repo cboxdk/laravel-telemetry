@@ -43,30 +43,27 @@ separate, already-bounded cost: OTLP posts run at terminate with a
 per-process circuit breaker after one failure so it costs one timeout
 per cooldown window, not per request (see below).
 
-### How this compares
+### The structural constraint (and both answers to it)
 
-Two comparison points, for context rather than a strict benchmark
-(different architectures, not run in the same harness):
+In-process telemetry in PHP has a constraint no SDK escapes: **PHP has
+no background threads**, so work that isn't handed off to a separate
+process happens inside the request — it cannot be silently deferred the
+way it can in Node or Python. The ecosystem has two standard answers:
 
-- **[Laravel Nightwatch](https://nightwatch.laravel.com/docs/guides/faqs)**
-  claims "typically less than 3ms per request", achieved by running its
-  agent as a **separate process** — the app fires-and-forgets a TCP
-  payload and the request path stays unblocked from the actual
-  telemetry work. This package's spool (`TELEMETRY_OTLP_SPOOL=true` +
-  `telemetry:flush --daemon`) is the closest equivalent: requests do one
-  `RPUSH` and return, and a separate daemon process ships the batches —
-  the same shape, Redis standing in for Nightwatch's socket.
-- **[Sentry's PHP SDK docs](https://docs.sentry.io/platforms/php/guides/laravel/performance/)**
-  note that its performance-monitoring feature does add response time,
-  and recommend a local Relay process to absorb it — [a maintainer
-  clarified](https://github.com/getsentry/sentry-docs/issues/11337) this
-  is specific to PHP: unlike Sentry's SDKs on other platforms, **PHP has
-  no background threads**, so in-process work cannot be silently
-  deferred inside the same request the way it can in Node or Python.
-  This package inherits the same constraint (see "Hot-path guarantees"
-  below) — direct OTLP export at terminate does real, synchronous work
-  in the request; the spool is this package's answer to the same
-  problem Sentry's Relay solves.
+- **The agent shape.** Agent-based APM SDKs keep the request path
+  unblocked by fire-and-forgetting the payload to a separate local
+  process (a socket write), which does the actual telemetry work. This
+  package's spool (`TELEMETRY_OTLP_SPOOL=true` + `telemetry:flush
+  --daemon`) is the same shape: requests do one `RPUSH` and return, and
+  a separate daemon process ships the batches — Redis standing in for
+  the local socket.
+- **The in-process shape.** External monitoring SDKs without an agent
+  do the export work in the request itself, and typically recommend a
+  local relay/collector process to absorb it at scale. This package's
+  direct OTLP export inherits the same constraint (see "Hot-path
+  guarantees" below) — real, synchronous work at terminate, bounded by
+  `timeout`/`connect_timeout` and the circuit breaker; the spool is
+  this package's answer when that cost matters.
 
 ## Per-operation cost
 

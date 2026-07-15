@@ -309,8 +309,9 @@ final class Tracer
 
     /**
      * Accumulate a per-trace tally (query count, query time, …). The
-     * totals land as attributes on the ROOT span when it ends — Nightwatch
-     * shows "4 queries / 24.5 ms" per request; so do we.
+     * totals land as attributes on the ROOT span when it ends, so every
+     * request shows its "4 queries / 24.5 ms" summary without needing
+     * the detail spans.
      */
     public function bumpStat(string $attribute, float $delta): void
     {

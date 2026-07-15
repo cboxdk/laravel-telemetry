@@ -328,8 +328,8 @@ final class TraceRequest
                 $labels['server.address'] = is_string($domainPattern) && $domainPattern !== '' ? $domainPattern : $request->getHost();
             }
 
-            // Peak memory and CPU delta for THIS request — Nightwatch-style
-            // resource attribution, per route and per custom dimension.
+            // Peak memory and CPU delta for THIS request — per-route,
+            // per-custom-dimension resource attribution.
             $usage = $request->attributes->get(self::USAGE_KEY);
             $measured = $usage instanceof ResourceUsage ? $usage->measure() : null;
 

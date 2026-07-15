@@ -240,6 +240,27 @@ can be analysed. Off by default; changes nothing when disabled. See
 Add `@telemetryBrowser` to your layout for turnkey RUM (or `@telemetryTraceparent` + your own script). See
 [Browser tracing](../production/browser-tracing.md).
 
+## Source map upload (optional)
+
+A `POST` endpoint the build pipeline uploads source maps to (via the
+`@cboxdk/telemetry-browser` uploader / Vite plugin), keyed by release, so
+minified browser stacks can be symbolicated back to original source.
+Uploads come from CI — which *can* hold a secret — so unlike the browser
+span ingest this endpoint is bearer-token gated: without a configured
+token every upload is rejected (`403`), so it is never accidentally open.
+Only valid v3 source maps within the size limit are stored. See
+[Browser tracing](../production/browser-tracing.md).
+
+| Key | Env | Default |
+|---|---|---|
+| `sourcemaps.enabled` | `TELEMETRY_SOURCEMAPS` | `false` |
+| `sourcemaps.token` | `TELEMETRY_SOURCEMAPS_TOKEN` | — required bearer token, checked with `hash_equals()`; uploads are rejected until one is set |
+| `sourcemaps.path` | `TELEMETRY_SOURCEMAPS_PATH` | `telemetry/sourcemaps` — the upload route |
+| `sourcemaps.disk` | `TELEMETRY_SOURCEMAPS_DISK` | `local` — the filesystem disk maps are stored on |
+| `sourcemaps.prefix` | — | `telemetry/sourcemaps` — storage path prefix; maps land at `{prefix}/{release}/{name}` |
+| `sourcemaps.middleware` | — | `[]` — extra route middleware for the upload endpoint |
+| `sourcemaps.max_bytes` | — | `20971520` (20 MB) — larger uploads are dropped |
+
 ## Automatic instrumentation
 
 | Key | Env | Default |
@@ -282,7 +303,7 @@ Add `@telemetryBrowser` to your layout for turnkey RUM (or `@telemetryTraceparen
 | `instrument.inertia` | `TELEMETRY_INSTRUMENT_INERTIA` | `true` — `inertia.request` span attribute from the `X-Inertia` header, plus `inertia.version_mismatches` counter + `inertia.version_mismatch` span attribute when the response carries `X-Inertia-Location` (Inertia forcing a full reload after an asset-version bump). Pure response inspection — no `inertiajs/inertia-laravel` dependency needed |
 | `instrument.rate_limiting` | `TELEMETRY_INSTRUMENT_RATE_LIMITING` | `true` — `rate_limit.exceeded{limiter}` counter from a 429 response, the driver-agnostic signal (Laravel's `RateLimiter` fires no event). Labeled by the `throttle:<name>` route middleware's limiter name when present, `default` for an inline `throttle:60,1` spec, `unknown` with no throttle middleware at all |
 | `instrument.baggage` | `TELEMETRY_INSTRUMENT_BAGGAGE` | `true` — inherit the caller's `Telemetry::context()` dimensions from an incoming W3C `baggage` header (traceparent's standard sibling). Gated on `traces.continue_incoming` too, since baggage is caller-supplied, unvalidated data. Outbound: `Http::withTraceparent()` attaches both headers |
-| `instrument.livewire` | `TELEMETRY_INSTRUMENT_LIVEWIRE` | `true` — Livewire component lifecycle via `livewire/livewire`'s own `ComponentHook` API, auto-activates when installed. `livewire.components.mounted`/`.hydrated` counters (mount/hydrate have no "after" phase in that API, so they're counted, not timed); `livewire.render`/`.update`/`.call` detail spans (these DO wrap the real work) carrying `livewire.component` + `livewire.property`/`.method` |
+| `instrument.livewire` | `TELEMETRY_INSTRUMENT_LIVEWIRE` | `true` — Livewire component lifecycle via `livewire/livewire`'s own `ComponentHook` API, auto-activates when installed. `livewire.components.mounted`/`.hydrated` counters (mount/hydrate have no "after" phase in that API, so they're counted, not timed); `livewire.render`/`.update`/`.call` detail spans (these DO wrap the real work) carrying `livewire.component` + `livewire.property`/`.method`. The request middleware also names Livewire update requests after their component — `livewire:{component}` (`livewire:batch` for multi-component batches) becomes the span name and `http.route` label, with the component list on the root span as `livewire.components` |
 | `instrument.broadcasting` | `TELEMETRY_INSTRUMENT_BROADCASTING` | `true` — `broadcast.count` root-span tally + a `broadcast {event}` detail span per `Broadcaster::broadcast()` call, driver-agnostic (Pusher, Ably, Reverb, Redis, Log, …) via a `Factory`/`Broadcaster` decorator. Carries `broadcasting.driver`, `broadcasting.event`, `broadcasting.channel.count` and a bounded `broadcasting.channels` shape (`public`/`private`/`presence`) — never raw channel names. Reverb's own richer connection/channel-occupancy metrics (`instrument.reverb`) are separate and unaffected |
 | `instrument.filesystem` | `TELEMETRY_INSTRUMENT_FILESYSTEM` | `true` — `storage.operations{disk,operation}` counter + a `storage {operation}` detail span per disk operation (put, get, delete, copy, move, …), driver-agnostic (local, S3, whatever Flysystem supports) via a `Factory`/`Filesystem` decorator. Instruments both `Storage::disk('x')->put(...)` and the `Storage::put(...)` default-disk shorthand. Paths are safe on spans (per-occurrence) but never metric labels — same rule as query text |
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |

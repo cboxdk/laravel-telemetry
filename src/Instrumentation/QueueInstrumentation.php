@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Metrics\MetricDefinition;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
@@ -24,6 +26,7 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\QueueBusy;
+use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\QueueManager;
 
 /**
@@ -49,6 +52,9 @@ final class QueueInstrumentation implements ManagesRequestState
 
     /** @var array<int, CpuProfiler> keyed by span object id */
     private array $jobProfiles = [];
+
+    /** @var array<string, array<string, string>> worker gauge labelsets written by THIS process, keyed by encoded labels */
+    private array $workerGaugeLabels = [];
 
     public function __construct(private readonly Container $container) {}
 
@@ -151,6 +157,13 @@ final class QueueInstrumentation implements ManagesRequestState
                         ->inc(1, ['job.name' => $event->job->resolveName(), 'queue' => $event->job->getQueue() ?? 'default']));
                 });
             }
+
+            // The pid label is unique to this process — retire its series
+            // when the worker stops, or every restart leaves a dead
+            // worker.memory.* series in the shared store forever.
+            $events->listen(WorkerStopping::class, function () {
+                FailSafe::guard(fn () => $this->forgetWorkerGauges());
+            });
 
             // `artisan queue:monitor` fires this above its size threshold.
             $events->listen(QueueBusy::class, function ($event) {
@@ -355,6 +368,7 @@ final class QueueInstrumentation implements ManagesRequestState
             // no daemon required, the worker measures itself.
             FailSafe::guard(function () use ($queue) {
                 $labels = ['queue' => $queue ?? 'default', 'pid' => (string) getmypid()];
+                $this->workerGaugeLabels[implode('|', $labels)] = $labels;
 
                 $this->telemetry()
                     ->gauge('worker.memory.php', description: 'Worker PHP allocator usage after each job', unit: 'By')
@@ -377,6 +391,27 @@ final class QueueInstrumentation implements ManagesRequestState
     private function currentJobSpan(): ?Span
     {
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
+    }
+
+    /**
+     * Retire every pid-labeled worker gauge series this process wrote.
+     * The pid is unique to this process, so no other live worker can be
+     * writing the same labelsets.
+     */
+    private function forgetWorkerGauges(): void
+    {
+        if ($this->workerGaugeLabels === []) {
+            return;
+        }
+
+        $store = $this->telemetry()->registry()->store();
+
+        foreach ($this->workerGaugeLabels as $labels) {
+            $store->forgetSeries(new MetricDefinition('worker.memory.php', MetricType::Gauge, unit: 'By'), $labels);
+            $store->forgetSeries(new MetricDefinition('worker.memory.rss', MetricType::Gauge, unit: 'By'), $labels);
+        }
+
+        $this->workerGaugeLabels = [];
     }
 
     private function reportProfile(CpuProfiler $profile, float $durationMs, string $job, string $queue): void

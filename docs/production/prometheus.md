@@ -102,7 +102,10 @@ process). Wipe deliberately if you need a reset:
 php artisan telemetry:flush --wipe
 ```
 
-`rate()`/`increase()` in PromQL handle occasional resets gracefully.
+Wipe resets every value but preserves metric definitions and indexes, so
+warm FPM/Octane/queue workers keep reporting seamlessly after the reset —
+no process recycle needed. `rate()`/`increase()` in PromQL handle
+occasional resets gracefully.
 
 ## Cardinality budget
 

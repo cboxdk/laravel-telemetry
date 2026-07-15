@@ -81,6 +81,7 @@ use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Http\Client\Events\RequestSending;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
@@ -226,6 +227,12 @@ class TelemetryServiceProvider extends ServiceProvider
                 DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
         }
 
+        // The macro and Blade directives are part of the app's code surface —
+        // they must exist (as no-ops) even when telemetry is disabled, or
+        // flipping TELEMETRY_ENABLED=false would break every call site.
+        $this->registerBladeDirectives();
+        $this->registerHttpClientMacro();
+
         if (! $this->app->make('config')->get('telemetry.enabled')) {
             return;
         }
@@ -233,7 +240,6 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerPrometheusRoutes();
         $this->registerSpanIngestRoute();
         $this->registerSourcemapRoute();
-        $this->registerBladeDirectives();
         $this->registerRequestInstrumentation();
         $this->registerQueueInstrumentation();
         $this->registerQueryInstrumentation();
@@ -243,7 +249,6 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerSystemMetricsProvider();
         $this->registerSelfMetrics();
         $this->registerOctaneReset();
-        $this->registerHttpClientMacro();
         $this->registerAboutCommand();
     }
 
@@ -486,11 +491,6 @@ class TelemetryServiceProvider extends ServiceProvider
     }
 
     /**
-     * The optional browser/RUM span ingest route. Off by default; when on,
-     * the frontend POSTs its spans here and they join the same trace as
-     * the backend. Protected by throttling + payload bounding, not a token.
-     */
-    /**
      * The source map upload endpoint (bearer-token gated). Off by default.
      */
     private function registerSourcemapRoute(): void
@@ -513,6 +513,9 @@ class TelemetryServiceProvider extends ServiceProvider
      * @telemetryTraceparent — renders a <meta name="traceparent"> so the
      * browser can parent its RUM spans to the current server trace. A no-op
      * when no trace is active.
+     *
+     * @telemetryBrowser — the traceparent meta plus the RUM <script> tag;
+     * empty when the span ingest (or telemetry itself) is disabled.
      */
     private function registerBladeDirectives(): void
     {
@@ -521,8 +524,14 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         Blade::directive('telemetryTraceparent', static fn (): string => "<?php \$__tp = app('telemetry')->traceparent(); if (\$__tp !== null) { echo '<meta name=\"traceparent\" content=\"'.htmlspecialchars(\$__tp, ENT_QUOTES).'\">'; } ?>");
+        Blade::directive('telemetryBrowser', static fn (): string => '<?php echo \Cbox\Telemetry\Http\BrowserSnippet::render(); ?>');
     }
 
+    /**
+     * The optional browser/RUM span ingest route. Off by default; when on,
+     * the frontend POSTs its spans here and they join the same trace as
+     * the backend. Protected by throttling + payload bounding, not a token.
+     */
     private function registerSpanIngestRoute(): void
     {
         $config = Cast::stringKeyedArray($this->app->make('config')->get('telemetry.ingest.spans', []));
@@ -624,6 +633,42 @@ class TelemetryServiceProvider extends ServiceProvider
                 $propagate,
                 $instrument,
             );
+        });
+
+        if (! $instrument) {
+            return;
+        }
+
+        // Long-running workers: before each job, drop half-open state a
+        // prior job left behind (died mid-HTTP-call, mid-transaction) —
+        // the queue-worker twin of the Octane fresh-request reset. Sync
+        // jobs run inside the dispatcher's request, whose in-flight state
+        // must survive, so they never reset. Context reset is
+        // QueueInstrumentation's own job — only instrumentation state
+        // is flushed here.
+        $this->app->make(Dispatcher::class)->listen(JobProcessing::class, function (JobProcessing $event): void {
+            if ($event->connectionName === 'sync') {
+                return;
+            }
+
+            FailSafe::guard(function () {
+                foreach ($this->statefulInstrumentations() as $abstract) {
+                    // The worker's own `artisan queue:work` span lives on
+                    // this stack for the daemon's whole life — it must
+                    // survive job boundaries.
+                    if ($abstract === CommandInstrumentation::class) {
+                        continue;
+                    }
+
+                    if ($this->app->resolved($abstract)) {
+                        $instance = $this->app->make($abstract);
+
+                        if ($instance instanceof ManagesRequestState) {
+                            $instance->flushRequestState();
+                        }
+                    }
+                }
+            });
         });
     }
 

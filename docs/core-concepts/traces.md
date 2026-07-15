@@ -57,6 +57,15 @@ logical route), and add attributes at terminate with
 `enrichRequestsUsing()`; see [Runtime hooks](../extension-points/hooks.md).
 An explicit `updateName()` during the request always survives terminate.
 
+Livewire's update endpoint gets logical naming built in: `POST
+/livewire/update` identifies nothing, so the root span is named after the
+component(s) the request actually touched — `POST livewire:{component}`
+for a single-component update, `POST livewire:batch` when one request
+updates several. The same value replaces the `http.route` label (the
+literal template is preserved as `http.route.template`), and the root
+span carries the full component list as a `livewire.components`
+attribute. An app-level `resolveRouteUsing()` override still wins.
+
 Query spans are only recorded inside an active trace — no orphan roots
 from tinker sessions. The ROOT span additionally carries per-request
 tallies — `db.query.count` and `db.query.time_ms` ("12 queries / 48 ms"
@@ -117,7 +126,7 @@ when they're recorded).
 
 ## Custom dimensions (context)
 
-Nightwatch-style facets — set once, applied everywhere:
+Faceted trace search — set the dimensions once, applied everywhere:
 
 ```php
 // e.g. in middleware, after tenant/team resolution:

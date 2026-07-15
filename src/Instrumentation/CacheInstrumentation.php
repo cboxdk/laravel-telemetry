@@ -34,8 +34,8 @@ use Illuminate\Contracts\Events\Dispatcher;
  *   cache operation — cache.hit / cache.miss / cache.write /
  *   cache.forget — WITH the key, store and real duration (measured
  *   between Laravel's before/after cache events). Keys are safe on
- *   spans: they are per-occurrence, not aggregated. This is the
- *   Nightwatch-style timeline with hundreds of cache events per request.
+ *   spans: they are per-occurrence, not aggregated. This is the full
+ *   trace-waterfall timeline with hundreds of cache events per request.
  *
  * Spans are only recorded inside a sampled active trace; the tracer's
  * buffer cap bounds pathological requests.

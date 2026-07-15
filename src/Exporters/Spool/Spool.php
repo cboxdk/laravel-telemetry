@@ -7,8 +7,8 @@ namespace Cbox\Telemetry\Exporters\Spool;
 /**
  * A local buffer between the app and the OTLP endpoint. Requests push
  * serialized payloads in microseconds; the `telemetry:flush --daemon`
- * ships them in large batches on size/age thresholds — the
- * Nightwatch-agent model, with Redis instead of a local socket.
+ * ships them in large batches on size/age thresholds — an
+ * agent-plus-daemon model, with Redis standing in for a local socket.
  */
 interface Spool
 {

@@ -186,17 +186,57 @@ final class RedisMetricStore implements MetricStore
         return $families;
     }
 
+    /**
+     * Reset every value while PRESERVING `__meta` and the index sets.
+     * Warm workers memoize initialize() per process — deleting the
+     * bookkeeping would leave their subsequent writes invisible (no meta,
+     * no index membership) until every process recycled. `__since` is
+     * reset so cumulative start timestamps restart at the wipe.
+     */
     public function wipe(): void
     {
         $connection = $this->connection();
+        $now = (string) ((int) (microtime(true) * 1e9));
 
         foreach (MetricType::cases() as $type) {
             foreach ($this->names($type) as $name) {
-                $connection->del($this->familyKey($type, $name));
+                $key = $this->familyKey($type, $name);
+
+                /** @var list<string> $fields */
+                $fields = $connection->hkeys($key) ?: [];
+                $values = array_values(array_filter(
+                    $fields,
+                    static fn (string $field): bool => $field !== '__meta',
+                ));
+
+                if ($values !== []) {
+                    $connection->hdel($key, ...$values);
+                }
+
+                $connection->hset($key, '__since', $now);
+            }
+        }
+    }
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $key = $this->familyKey($definition->type, $definition->name);
+        $connection = $this->connection();
+
+        if ($definition->type === MetricType::Histogram) {
+            $series = base64_encode(Labels::encode($labels));
+            $fields = ["{$series}:sum", "{$series}:count", "{$series}:exemplar"];
+
+            for ($i = 0, $slots = count($definition->buckets ?? []) + 1; $i < $slots; $i++) {
+                $fields[] = "{$series}:b{$i}";
             }
 
-            $connection->del($this->indexKey($type));
+            $connection->hdel($key, ...$fields);
+
+            return;
         }
+
+        $connection->hdel($key, Labels::encode($labels));
     }
 
     /**
@@ -231,6 +271,12 @@ final class RedisMetricStore implements MetricStore
             }
 
             $samples[] = new Sample(Labels::decode($field), (float) $value);
+        }
+
+        // A family can be all bookkeeping right after a wipe — nothing to
+        // render until the next write.
+        if ($samples === []) {
+            return null;
         }
 
         return new MetricFamily($definition, $samples, $this->since($fields));
@@ -300,6 +346,12 @@ final class RedisMetricStore implements MetricStore
                 count: $data['count'],
                 exemplar: $data['exemplar'],
             );
+        }
+
+        // A family can be all bookkeeping right after a wipe — nothing to
+        // render until the next write.
+        if ($samples === []) {
+            return null;
         }
 
         return new MetricFamily($definition, $samples, $this->since($fields));

@@ -116,7 +116,9 @@ $fake->recordedEvents();
 
 ```bash
 php artisan telemetry:doctor                   # verify store, exporters, config
-php artisan telemetry:flush [--wipe]           # push metrics to exporters
+php artisan telemetry:flush [--wipe]           # export metrics and drain the OTLP spool
+php artisan telemetry:monitor [--once]         # sample host + process metrics (node_exporter analog)
+php artisan telemetry:deploy [--id=] [--notes=] # emit a deployment marker event (dashboard annotations)
 php artisan telemetry:dashboards [--export=]   # install the Grafana dashboards
 php artisan about                              # shows the Telemetry section
 ```

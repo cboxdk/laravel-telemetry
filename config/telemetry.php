@@ -283,9 +283,32 @@ return [
     'redaction' => [
         'enabled' => env('TELEMETRY_REDACTION', true),
 
-        // 'keys' => [...Redactor::defaultKeys(), 'cpr'],
-        // 'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
-        // 'safe_keys' => [...Redactor::defaultSafeKeys(), 'my.known_safe.token_bucket'],
+        // The lists below mirror the built-in defaults exactly
+        // (Redactor::defaultKeys() / defaultPatterns() / defaultSafeKeys())
+        // — append your own entries, or remove the whole key to keep
+        // tracking the package's built-ins across upgrades.
+
+        // Attribute-key segments whose whole value is replaced.
+        'keys' => [
+            'password', 'passwd', 'secret', 'token', 'api_key', 'apikey',
+            'auth', 'authorization', 'signature', 'credential', 'credentials',
+            'private_key', 'credit_card', 'card_number', 'cvv', 'ssn', 'session',
+        ],
+
+        // Regexes scrubbing secrets embedded in any string value
+        // (regex => replacement).
+        'patterns' => [
+            // JWTs — three base64url segments.
+            '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
+            // HTTP credential schemes embedded in messages.
+            '/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{16,}/i' => '$1 [REDACTED]',
+            // Userinfo in URLs: scheme://user:pass@host.
+            '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
+        ],
+
+        // Exact keys exempt from KEY-based redaction — known-safe by
+        // construction. Patterns and the redactUsing() hook still apply.
+        'safe_keys' => ['session.driver', 'session.hash', 'session.id'],
 
         'replacement' => '[REDACTED]',
     ],
@@ -496,7 +519,7 @@ return [
         // forget). Off by default — hot caches are chatty.
         'cache' => env('TELEMETRY_INSTRUMENT_CACHE', false),
 
-        // Nightwatch-style timeline spans per cache operation — key,
+        // Trace-timeline spans per cache operation — key,
         // store and duration on every hit/miss/write/forget in the
         // trace waterfall. Keys are safe on spans (per-occurrence, not
         // aggregated). Off by default; the span buffer cap bounds

@@ -1,7 +1,7 @@
 ---
 title: Cookbook
 description: Cookbook documentation.
-weight: 1
+weight: 3
 ---
 
 # Cookbook

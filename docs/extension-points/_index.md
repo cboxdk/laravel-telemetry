@@ -1,7 +1,7 @@
 ---
 title: Extension Points
 description: Extension Points documentation.
-weight: 1
+weight: 5
 ---
 
 # Extension Points

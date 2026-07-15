@@ -53,23 +53,28 @@ final class QueryInstrumentation
             return;
         }
 
-        // Tallies are cheap and land on the root span ("12 queries /
-        // 48 ms"), regardless of span-level noise floors.
-        $telemetry->tracer()->bumpStat('db.query.count', 1);
-        $telemetry->tracer()->bumpStat('db.query.time_ms', (float) $event->time);
+        // Guarded as a whole: this listener fires for EVERY query, and even
+        // instrument registration (a type conflict on `db.queries`) must
+        // never surface as a per-query exception in the app.
+        FailSafe::guard(function () use ($event, $telemetry) {
+            // Tallies are cheap and land on the root span ("12 queries /
+            // 48 ms"), regardless of span-level noise floors.
+            $telemetry->tracer()->bumpStat('db.query.count', 1);
+            $telemetry->tracer()->bumpStat('db.query.time_ms', (float) $event->time);
 
-        // Fleet-level counter — the database twin of redis.commands, so a
-        // dashboard can show DB activity per host without depending on
-        // tail-sampled traces. Bounded labels (configured connections × a
-        // handful of drivers); query text never becomes a label.
-        $telemetry->counter('db.queries', 'Database queries executed')->inc(1, [
-            'connection' => $event->connectionName,
-            'driver' => $event->connection->getDriverName(),
-        ]);
+            // Fleet-level counter — the database twin of redis.commands, so a
+            // dashboard can show DB activity per host without depending on
+            // tail-sampled traces. Bounded labels (configured connections × a
+            // handful of drivers); query text never becomes a label.
+            $telemetry->counter('db.queries', 'Database queries executed')->inc(1, [
+                'connection' => $event->connectionName,
+                'driver' => $event->connection->getDriverName(),
+            ]);
 
-        if ($this->detectDuplicates) {
-            $this->detectDuplicate($telemetry, $event);
-        }
+            if ($this->detectDuplicates) {
+                $this->detectDuplicate($telemetry, $event);
+            }
+        });
 
         // Only record spans inside a *sampled* trace — unsampled traces
         // must not pay per-query span cost on N+1-heavy requests.

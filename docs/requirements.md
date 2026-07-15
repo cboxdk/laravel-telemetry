@@ -16,8 +16,11 @@ so this page only explains them.
 | PHP | `^8.3 \|\| ^8.4 \|\| ^8.5` | Uses modern PHP language features throughout. |
 
 No non-default PHP extensions are required. Metric aggregation uses a shared
-store (Redis by default, APCu supported); OTLP export posts over HTTP via
-Laravel's HTTP client. Neither needs a C extension, an OTel SDK, or a sidecar.
+store (Redis by default, APCu supported); OTLP export posts over HTTP using
+PHP's `curl` extension directly — no HTTP-client library dependency.
+`ext-curl` is only needed when OTLP export is enabled, and it is
+default-enabled in virtually all PHP builds. Neither path needs an OTel SDK,
+a protobuf extension, or a sidecar.
 
 ## Framework
 

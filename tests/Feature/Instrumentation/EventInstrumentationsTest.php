@@ -104,7 +104,7 @@ it('records the bootstrap phase when LARAVEL_START is defined', function () {
     expect($spans->firstWhere('name', 'laravel.bootstrap'))->not->toBeNull();
 });
 
-it('records nightwatch-style cache spans with key, store and duration', function () {
+it('records detailed cache spans with key, store and duration', function () {
     config()->set('telemetry.instrument.cache_spans', true);
 
     (new CacheInstrumentation(app()))->register(app('events'), counters: false, spans: true);

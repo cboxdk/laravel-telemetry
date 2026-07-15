@@ -74,7 +74,7 @@ docker compose logs -f lgtm      # wait for "up and running"
 
 ## Load the bundled dashboards
 
-The package ships the full Nightwatch-style dashboard suite. Push it into
+The package ships a full APM-grade dashboard suite. Push it into
 your local Grafana with one command:
 
 ```bash

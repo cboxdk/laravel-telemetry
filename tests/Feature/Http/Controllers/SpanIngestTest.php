@@ -13,6 +13,7 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Blade;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
@@ -149,6 +150,14 @@ it('renders nothing when ingest is disabled', function () {
     config()->set('telemetry.ingest.spans.enabled', false);
 
     expect(BrowserSnippet::render())->toBe('');
+});
+
+it('exposes the snippet through the @telemetryBrowser Blade directive', function () {
+    config()->set('telemetry.ingest.spans.enabled', true);
+
+    expect(Blade::render('@telemetryBrowser'))
+        ->toContain('<script')
+        ->toContain('browser.js');
 });
 
 it('omits data-session when analytics is off', function () {

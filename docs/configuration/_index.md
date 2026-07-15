@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Configuration documentation.
-weight: 1
+weight: 4
 ---
 
 # Configuration

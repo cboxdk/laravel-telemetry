@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Http\Middleware\Sample;
+use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Cbox\Telemetry\Tracing\Tracer;
@@ -55,6 +56,49 @@ it('lets routes opt out of sampling with Sample::never', function () {
 
     expect($names)->toContain('GET /normal')
         ->not->toContain('GET /health-check');
+});
+
+it('lets routes opt back in with Sample::always when the global rate is zero', function () {
+    config()->set('telemetry.traces.sample_rate', 0.0);
+    app()->forgetInstance(Tracer::class);
+    app()->forgetInstance(TelemetryManager::class);
+
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    Route::get('/checkout', fn () => 'ok')->middleware(Sample::always());
+    Route::get('/normal', fn () => 'ok');
+
+    $this->get('/checkout')->assertOk();
+    $this->get('/normal')->assertOk();
+
+    Telemetry::flush();
+
+    $names = collect($collector->batches())->flatMap(fn ($batch) => $batch->spans)->pluck('name');
+
+    expect($names)->toContain('GET /checkout')
+        ->not->toContain('GET /normal');
+});
+
+it('parses the Sample::rate() route parameter into a float rate', function () {
+    config()->set('telemetry.traces.sample_rate', 0.0);
+    app()->forgetInstance(Tracer::class);
+    app()->forgetInstance(TelemetryManager::class);
+
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    // rate(1.0) must deterministically sample; the interesting part is the
+    // string round-trip through the route-middleware parameter syntax.
+    Route::get('/feed', fn () => 'ok')->middleware(Sample::rate(1.0));
+
+    $this->get('/feed')->assertOk();
+
+    Telemetry::flush();
+
+    $names = collect($collector->batches())->flatMap(fn ($batch) => $batch->spans)->pluck('name');
+
+    expect($names)->toContain('GET /feed');
 });
 
 it('re-decides sampling for the whole active trace including the open root', function () {

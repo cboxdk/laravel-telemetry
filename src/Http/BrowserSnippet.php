@@ -16,6 +16,10 @@ final class BrowserSnippet
 {
     public static function render(): string
     {
+        if (! config('telemetry.enabled')) {
+            return '';
+        }
+
         /** @var array<string, mixed> $config */
         $config = (array) config('telemetry.ingest.spans', []);
 

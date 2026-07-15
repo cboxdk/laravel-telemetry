@@ -6,8 +6,12 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\InteractsWithQueue;
 
 class TelemetryTestJob implements ShouldQueue
@@ -58,4 +62,31 @@ it('counts processed jobs', function () {
 
     expect($families)->toHaveKey('queue.jobs.processed')
         ->and($families['queue.jobs.processed']->samples[0]->value)->toBe(1.0);
+});
+
+it('retires pid-labeled worker gauges when the worker stops', function () {
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    $events = app('events');
+    $events->dispatch(new JobProcessing('redis', $job));
+    $events->dispatch(new JobProcessed('redis', $job));
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->toHaveKey('worker.memory.php')
+        ->and($families['worker.memory.php']->samples[0]->labels['pid'])->toBe((string) getmypid());
+
+    // The worker recycles — its pid series must not outlive the process.
+    $events->dispatch(new WorkerStopping);
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->not->toHaveKey('worker.memory.php')
+        ->and($families)->not->toHaveKey('worker.memory.rss');
 });

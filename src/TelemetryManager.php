@@ -210,7 +210,7 @@ class TelemetryManager
      * Login event fires on the login POST itself, before the request
      * span's user attribution runs, and Logout empties the guard before
      * terminate. Without this, exactly those two request types would be
-     * anonymous. (A Nightwatch-agent lesson.)
+     * anonymous.
      *
      * @param  array{id: string, type: string, guard: string|null}  $identity
      */
@@ -910,28 +910,34 @@ class TelemetryManager
     private function export(TelemetryBatch $batch, Signal ...$signals): void
     {
         foreach ($this->exporters as $exporter) {
-            $supports = $exporter->supports();
+            // The whole per-exporter interaction is guarded — a custom
+            // exporter throwing from supports()/name() must not take the
+            // flush (and with it kernel terminate) down. One bad exporter
+            // never blocks the others.
+            FailSafe::guard(function () use ($exporter, $batch, $signals) {
+                $supports = $exporter->supports();
 
-            $relevant = false;
+                $relevant = false;
 
-            foreach ($signals as $signal) {
-                if ($supports->contains($signal)) {
-                    $relevant = true;
-                    break;
+                foreach ($signals as $signal) {
+                    if ($supports->contains($signal)) {
+                        $relevant = true;
+                        break;
+                    }
                 }
-            }
 
-            if (! $relevant) {
-                continue;
-            }
+                if (! $relevant) {
+                    return;
+                }
 
-            $narrowed = $batch->only($supports);
+                $narrowed = $batch->only($supports);
 
-            if (! $narrowed->isEmpty()) {
-                $startedAt = microtime(true);
-                $result = FailSafe::guard(fn () => $exporter->export($narrowed));
-                $this->recordExportMetrics($exporter->name(), $signals, $startedAt, $result);
-            }
+                if (! $narrowed->isEmpty()) {
+                    $startedAt = microtime(true);
+                    $result = FailSafe::guard(fn () => $exporter->export($narrowed));
+                    $this->recordExportMetrics($exporter->name(), $signals, $startedAt, $result);
+                }
+            });
         }
     }
 
