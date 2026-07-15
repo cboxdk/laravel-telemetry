@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Redis instrumentation no longer tries to open the `client`/`options`/`cluster`
+  config keys as connections.** When `instrument.redis` is on, retro-fitting
+  already-resolved connections enumerated every key under `database.redis` and
+  skipped only `options`, so a `client` key (the phpredis/predis selector, present
+  in every default Laravel config) threw "Redis connection [client] not configured"
+  on every request. It was FailSafe-guarded, so no request broke, but it flooded
+  the log. All reserved keys (`client`, `options`, `cluster`) are now skipped.
+
 ## [0.4.0] - 2026-07-15
 
 ### Fixed

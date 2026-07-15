@@ -22,6 +22,16 @@ use Illuminate\Redis\Events\CommandExecuted;
  */
 final class RedisInstrumentation
 {
+    /**
+     * Reserved keys under `database.redis` that configure the client rather
+     * than naming a connection. Opening any of them as a connection throws
+     * ("Redis connection [client] not configured"), so they are always
+     * skipped when retro-fitting already-resolved connections.
+     *
+     * @var list<string>
+     */
+    private const RESERVED_KEYS = ['client', 'options', 'cluster'];
+
     /** @var list<string> */
     private array $ignoreConnections = [];
 
@@ -49,7 +59,8 @@ final class RedisInstrumentation
             $dispatcher = $this->container->make('events');
 
             foreach (array_keys($connections) as $name) {
-                if ($name === 'options' || in_array((string) $name, $this->ignoreConnections, true)) {
+                if (in_array((string) $name, self::RESERVED_KEYS, true)
+                    || in_array((string) $name, $this->ignoreConnections, true)) {
                     continue;
                 }
 
