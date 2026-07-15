@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-07-15
+## [1.0.0] - 2026-07-15
+
+First stable release. The public surface — the span & metric emitters, the
+`Contracts\*` interfaces, config keys, and the FailSafe guarantees — is now
+covered by Semantic Versioning, and the 1.x line commits to backward
+compatibility. Functionally this promotes the 0.4.x line to stable; there are no
+behavioural changes beyond the fix below, which was staged as 0.4.1 but never
+tagged and is rolled up here.
 
 ### Fixed
 
@@ -17,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skipped only `options`, so a `client` key (the phpredis/predis selector, present
   in every default Laravel config) threw "Redis connection [client] not configured"
   on every request. It was FailSafe-guarded, so no request broke, but it flooded
-  the log. All reserved keys (`client`, `options`, `cluster`) are now skipped.
+  the log. All reserved keys (`client`, `options`, `cluster`) are now skipped. (#4)
 
 ## [0.4.0] - 2026-07-15
 
