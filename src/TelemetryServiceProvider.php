@@ -40,7 +40,7 @@ use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
-use Cbox\Telemetry\Instrumentation\NativePhp\NativeScreenInstrumentation;
+use Cbox\Telemetry\Instrumentation\NativeScreenInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\PennantInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;

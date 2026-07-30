@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `sqlite` spool driver (`TELEMETRY_OTLP_SPOOL_DRIVER=sqlite`) so a device
     that spent the afternoon offline still has its telemetry when it
     reconnects — the Redis spool dies with the process.
-  - `Instrumentation\NativePhp\NativeScreenInstrumentation` — opt-in screen and
+  - `Instrumentation\NativeScreenInstrumentation` — opt-in screen and
     interaction spans for mobile v4. A native screen holds one request open for
     its whole lifetime, so `Kernel::terminate()` never fires and the
     per-request flush never happens; this puts the flush on the interaction

@@ -65,7 +65,7 @@ has to hand us the moments itself. One shared base class does it for every
 screen:
 
 ```php
-use Cbox\Telemetry\Instrumentation\NativePhp\NativeScreenInstrumentation;
+use Cbox\Telemetry\Instrumentation\NativeScreenInstrumentation;
 use Native\Mobile\Edge\NativeComponent;
 
 abstract class Screen extends NativeComponent
@@ -78,14 +78,14 @@ abstract class Screen extends NativeComponent
     protected function dispatch(array $event): void
     {
         $this->telemetry()->aroundInteraction(
-            static::class, 'screen.interaction', $event, fn () => parent::dispatch($event),
+            static::class, 'interaction', $event, fn () => parent::dispatch($event),
         );
     }
 
     protected function dispatchNativeEvent(array $event): void
     {
         $this->telemetry()->aroundInteraction(
-            static::class, 'screen.native_event', $event, fn () => parent::dispatchNativeEvent($event),
+            static::class, 'native_event', $event, fn () => parent::dispatchNativeEvent($event),
         );
     }
 
@@ -106,6 +106,12 @@ Point your screens at `Screen` instead of `NativeComponent` and you get:
 | `screen.interactions.failed` | Interactions that threw |
 | `screen.view` event + `screen.views` | Navigation, screen by screen |
 | `screen.view.duration` | Time spent per screen |
+
+Spans carry `screen.name` and `screen.event.type`; the duration histograms
+are labelled `{screen}` and `{screen,type}`. The whole integration sits
+behind `instrument.native_screens` — turn it off and those forwards pass
+straight through, which is how a consent prompt answered mid-session takes
+effect without a restart.
 
 Each interaction is its own trace root, flushed on the spot. It is
 deliberately not a child of a screen-wide span: that span would stay open

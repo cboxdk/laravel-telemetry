@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Cbox\Telemetry\Instrumentation\NativePhp;
+namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
@@ -78,13 +78,17 @@ final class NativeScreenInstrumentation
      */
     public function aroundScreen(string $screen, Closure $work): mixed
     {
+        if (! $this->instrumenting()) {
+            return $work();
+        }
+
         $name = $this->screenName($screen);
         $startedAt = microtime(true);
 
         FailSafe::guard(function () use ($name): void {
             $telemetry = $this->telemetry();
 
-            $telemetry->event('screen.view', ['app.screen.name' => $name]);
+            $telemetry->event('screen.view', ['screen.name' => $name]);
             $telemetry->counter('screen.views', 'Native screen views')->inc(1, ['screen' => $name]);
         });
 
@@ -114,19 +118,26 @@ final class NativeScreenInstrumentation
      *
      * @template T
      *
+     * @param  string  $type  "interaction" (a tap, a keystroke) or
+     *                        "native_event" (a bridge callback). Becomes
+     *                        the span name `screen.{type}`.
      * @param  array<array-key, mixed>  $event
      * @param  Closure(): T  $work
      * @return T
      */
-    public function aroundInteraction(string $screen, string $kind, array $event, Closure $work): mixed
+    public function aroundInteraction(string $screen, string $type, array $event, Closure $work): mixed
     {
+        if (! $this->instrumenting()) {
+            return $work();
+        }
+
         $name = $this->screenName($screen);
 
         $span = FailSafe::guard(fn (): Span => $this->telemetry()->span(
-            $kind,
+            'screen.'.$type,
             attributes: [
-                'app.screen.name' => $name,
-                'app.interaction.type' => $this->eventType($event),
+                'screen.name' => $name,
+                'screen.event.type' => $this->eventType($event),
             ],
             kind: SpanKind::Internal,
         ));
@@ -145,13 +156,13 @@ final class NativeScreenInstrumentation
 
             throw $e;
         } finally {
-            FailSafe::guard(function () use ($span, $name, $kind, $failed): void {
+            FailSafe::guard(function () use ($span, $name, $type, $failed): void {
                 if ($span !== null) {
                     $span->end();
 
                     $this->telemetry()
                         ->histogram('screen.interaction.duration', description: 'Native screen interaction duration', unit: 'ms')
-                        ->record($span->durationMs(), ['screen' => $name, 'kind' => $kind]);
+                        ->record($span->durationMs(), ['screen' => $name, 'type' => $type]);
                 }
 
                 if ($failed) {
@@ -187,6 +198,21 @@ final class NativeScreenInstrumentation
         $type = $event['type'] ?? null;
 
         return is_scalar($type) ? (string) $type : 'unknown';
+    }
+
+    /**
+     * `instrument.native_screens` is read per call, not memoized: a
+     * screen already on the stack must honour a toggle flipped underneath
+     * it (a consent prompt answered mid-session is exactly that).
+     */
+    private function instrumenting(): bool
+    {
+        return FailSafe::guard(function (): bool {
+            $config = $this->container->make('config');
+
+            return (bool) $config->get('telemetry.enabled')
+                && (bool) $config->get('telemetry.instrument.native_screens', true);
+        }) ?? false;
     }
 
     /**
