@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:2d3f9b85-7a4a-da90-4c1d-0174cbc39ac3",
+    "serialNumber": "urn:uuid:cdc7afb6-c4fa-6d00-e13e-5e09a203be29",
     "version": 1,
     "metadata": {
         "component": {
@@ -156,10 +156,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/guzzlehttp/guzzle@7.14.2",
+            "bom-ref": "pkg:composer/guzzlehttp/guzzle@7.15.2",
             "name": "guzzlehttp/guzzle",
-            "version": "7.14.2",
-            "purl": "pkg:composer/guzzlehttp/guzzle@7.14.2",
+            "version": "7.15.2",
+            "purl": "pkg:composer/guzzlehttp/guzzle@7.15.2",
             "licenses": [
                 {
                     "license": {
@@ -186,10 +186,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/guzzlehttp/psr7@2.12.5",
+            "bom-ref": "pkg:composer/guzzlehttp/psr7@2.13.0",
             "name": "guzzlehttp/psr7",
-            "version": "2.12.5",
-            "purl": "pkg:composer/guzzlehttp/psr7@2.12.5",
+            "version": "2.13.0",
+            "purl": "pkg:composer/guzzlehttp/psr7@2.13.0",
             "licenses": [
                 {
                     "license": {
