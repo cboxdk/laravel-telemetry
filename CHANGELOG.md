@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-05
+
+Fixes a `TypeError` that made `instrument.filesystem` unusable alongside any
+package that type-hints Laravel's concrete `FilesystemAdapter` — Statamic's
+imaging being the reported case. Minor rather than patch only because it ships
+a new config key alongside the fix.
+
 ### Fixed
 
 - **An instrumented disk is now a real `Illuminate\Filesystem\FilesystemAdapter`.**
@@ -1019,7 +1026,11 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.4.0...v1.0.0
+[0.4.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.2.1...v0.3.0
