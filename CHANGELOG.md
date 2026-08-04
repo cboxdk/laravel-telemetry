@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An instrumented disk is now a real `Illuminate\Filesystem\FilesystemAdapter`.**
+  `InstrumentedFilesystem` implemented only the `Filesystem` contract, so any
+  consumer that type-hints Laravel's concrete adapter got a `TypeError` the
+  moment it touched an instrumented disk. Statamic hits this saving an asset —
+  `Imaging\Attributes::from()` takes a `FilesystemAdapter` — so
+  `AssetContainer::find(…)->makeAsset(…)->save()` died with *"Argument #1
+  ($source) must be of type FilesystemAdapter,
+  Cbox\Telemetry\Instrumentation\InstrumentedFilesystem given"*. Because
+  `instrument.filesystem` is all-or-nothing, the only workaround was disabling
+  disk instrumentation entirely.
+
+  Disks that resolve to a concrete adapter — every driver Laravel ships — are
+  now wrapped in `InstrumentedFilesystemAdapter`, a genuine subclass. Same fix
+  the manager got in 0.3.1, one level further down. Custom `Storage::extend()`
+  drivers returning their own `Filesystem` keep the original decorator; there
+  is no concrete type to preserve there. `instanceof Filesystem` holds either
+  way, adapter extras (`url()`, `temporaryUrl()`) and macros keep working, and
+  nothing instrumented before stopped being.
+
+  Behaviour is delegated to the wrapped disk rather than inherited, because
+  `AwsS3V3Adapter` and `LocalFilesystemAdapter` override `url()` and
+  `temporaryUrl()` — running the parent's generic versions would have silently
+  handed back wrong URLs, a worse failure than the TypeError being fixed.
+
+### Added
+
+- **`instrument.filesystem_ignore_disks`** — disks left entirely
+  uninstrumented, by name. PHP cannot choose a parent class at runtime, so an
+  instrumented disk satisfies `instanceof FilesystemAdapter` but can never
+  satisfy `instanceof AwsS3V3Adapter`. This is the escape hatch for a disk
+  whose consumers need the exact subclass. It is also why this release is a
+  **minor** rather than a patch — the fix on its own would have been `1.0.1`.
+
 ## [1.0.0] - 2026-07-15
 
 First stable release. The public surface — the span & metric emitters, the

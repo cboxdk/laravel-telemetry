@@ -37,6 +37,11 @@ arch('final by default')
         'Cbox\Telemetry\Exporters\Otlp\OtlpTransport',
         // Deliberately open so Storage::shouldReceive()/partialMock() work.
         'Cbox\Telemetry\Instrumentation\InstrumentedFilesystemManager',
+        // Stands in for Laravel's FilesystemAdapter, which is itself
+        // non-final — a resolved disk is a plausible partial-mock target
+        // in an app's test suite, and Mockery cannot subclass a final
+        // class. Same reasoning as the manager above.
+        'Cbox\Telemetry\Instrumentation\InstrumentedFilesystemAdapter',
         // Abstract base — subclassed by every package exception.
         'Cbox\Telemetry\Exceptions\TelemetryException',
     ]);
