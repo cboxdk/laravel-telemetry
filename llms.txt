@@ -35,7 +35,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Queue monitoring](docs/cookbook/queue-monitoring.md): depth, in-flight, oldest-job age, alerts
 - [External services](docs/cookbook/external-services.md): outbound API instrumentation, distributed traces
 - [Deploy annotations](docs/cookbook/deploy-annotations.md): telemetry:deploy wired into Forge/Envoyer/GitHub Actions, id/notes filled from the deploy script's own git access
-- [NativePHP](docs/cookbook/nativephp.md): mobile v4 (SuperNative) and desktop v2 — sqlite store + sqlite spool, push-only export, NativeScreenInstrumentation for screen/interaction spans because a native screen holds one request open and never terminates
+- [NativePHP](docs/cookbook/nativephp.md): mobile v4 (SuperNative) and desktop v2 — sqlite store + sqlite spool, push-only export; screen views automatic off the upstream Screen lifecycle events, interaction spans opt-in via a NativeComponent base class because a native screen holds one request open and never terminates
 
 ## Decisions
 

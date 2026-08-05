@@ -57,12 +57,34 @@ fires while someone is using your app, and the per-request flush the rest
 of this package relies on never happens. Left alone, a native screen
 records telemetry that is never shipped.
 
-`NativeScreenInstrumentation` puts the flush back on the only boundary
-that exists: the interaction. NativePHP v4 dispatches no events for the
-screen lifecycle and constructs both the router and the component with
-`new`, so there is nothing to listen to and nothing to decorate — the app
-has to hand us the moments itself. One shared base class does it for every
-screen:
+Screen instrumentation comes in two halves, and only one of them is
+automatic.
+
+### Screen views — automatic
+
+Wherever `nativephp/mobile` dispatches the screen lifecycle events
+(`Native\Mobile\Events\Screen\*`, added upstream in
+[mobile-air#248](https://github.com/NativePHP/mobile-air/pull/248)), the
+package listens for them behind a `class_exists` guard, exactly like the
+Horizon and Pennant integrations. Nothing to wire:
+
+| Signal | What it tells you |
+| --- | --- |
+| `screen.view` event | Navigation — carries `screen.name`, `screen.uri`, and whether it was a fresh push or a resume |
+| `screen.views` counter | Views per screen |
+| `screen.view.duration` | Time spent per screen, measured mount → unmount |
+
+At the time of writing this is **not in a released version**: `4.0.1` was
+tagged before the events merged. On an older NativePHP the guard simply
+never arms and none of the above appears — nothing breaks.
+
+### Interactions — still yours to wire
+
+Those events cover `mount()` / `onResume()` / `unmount()` only. A tap goes
+through `NativeComponent::dispatch()`, which upstream does not announce —
+and that is exactly where the flush has to happen, because the runloop
+holds its request open across every interaction on the screen. So
+interaction spans need two forwards from one shared base class:
 
 ```php
 use Cbox\Telemetry\Instrumentation\NativeScreenInstrumentation;
@@ -70,11 +92,6 @@ use Native\Mobile\Edge\NativeComponent;
 
 abstract class Screen extends NativeComponent
 {
-    public function runLoop(): void
-    {
-        $this->telemetry()->aroundScreen(static::class, fn () => parent::runLoop());
-    }
-
     protected function dispatch(array $event): void
     {
         $this->telemetry()->aroundInteraction(
@@ -104,8 +121,6 @@ Point your screens at `Screen` instead of `NativeComponent` and you get:
 | `screen.native_event` span | The same for bridge callbacks — a photo returning, a scan resolving |
 | `screen.interaction.duration` | Interaction latency by screen |
 | `screen.interactions.failed` | Interactions that threw |
-| `screen.view` event + `screen.views` | Navigation, screen by screen |
-| `screen.view.duration` | Time spent per screen |
 
 Spans carry `screen.name` and `screen.event.type`; the duration histograms
 are labelled `{screen}` and `{screen,type}`. The whole integration sits
@@ -119,14 +134,19 @@ for minutes and never reach an exporter.
 
 ### What is deliberately not instrumented
 
-`mount()`, `onResume()` and `unmount()` are yours to override, and a
-screen that defines its own `mount()` would silently replace an
-instrumented base-class one. Instrumentation that quietly stops working on
-some screens is worse than instrumentation that was never there, so these
-are left alone. The render frame is out of reach for a related reason:
-`NativeComponent::renderToElement()` is private.
+Do not forward `mount()`, `onResume()` or `unmount()` from your base
+class, even though it would work. A screen that defines its own `mount()`
+silently replaces the base class's, and instrumentation that quietly stops
+working on exactly the screens with the most logic in them is worse than
+instrumentation that was never there. That is the gap the upstream events
+close, and why the automatic half above exists.
 
-Both gaps need upstream lifecycle events to close properly.
+If you already forward `runLoop()` from an older setup, leave it — once
+the events are available `aroundScreen()` steps aside on its own rather
+than counting every view twice.
+
+The render frame stays out of reach: `NativeComponent::renderToElement()`
+is private, so there is nothing to wrap.
 
 ### The persistent runtime
 

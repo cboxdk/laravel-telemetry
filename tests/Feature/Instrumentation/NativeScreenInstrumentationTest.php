@@ -9,11 +9,76 @@ use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Native\Mobile\Events\Screen\ScreenMounted;
+use Native\Mobile\Events\Screen\ScreenResumed;
+use Native\Mobile\Events\Screen\ScreenUnmounted;
 
 beforeEach(function () {
     Telemetry::fake();
 
     $this->instrumentation = new NativeScreenInstrumentation(app());
+});
+
+/*
+ * The upstream event classes are declared in
+ * tests/fixtures/nativephp-screen-events.php — nativephp/mobile itself
+ * cannot be a dev dependency (PHP ^8.4 floor vs this package's 8.3), and
+ * a class_alias would not work because the dispatcher resolves listeners
+ * by get_class(), which returns the original name.
+ */
+
+it('records a screen view automatically from the upstream mount event', function () {
+    $this->instrumentation->register(app('events'));
+
+    event(new ScreenMounted('App\NativeComponents\IkeaCart', '/cart'));
+
+    Telemetry::assertEventEmitted('screen.view', fn ($e) => ($e->attributes['screen.name'] ?? null) === 'IkeaCart'
+        && ($e->attributes['screen.uri'] ?? null) === '/cart'
+        && ($e->attributes['screen.resumed'] ?? null) === 'false');
+
+    Telemetry::assertCounterIncremented('screen.views', ['screen' => 'IkeaCart']);
+});
+
+it('marks a resumed screen as such on the event but not the counter', function () {
+    $this->instrumentation->register(app('events'));
+
+    event(new ScreenResumed('App\NativeComponents\IkeaCart', '/cart'));
+
+    Telemetry::assertEventEmitted('screen.view', fn ($e) => ($e->attributes['screen.resumed'] ?? null) === 'true');
+
+    // One metric name must not carry two different label sets.
+    Telemetry::assertCounterIncremented('screen.views', ['screen' => 'IkeaCart']);
+});
+
+it('measures the visit when the screen leaves the stack', function () {
+    $this->instrumentation->register(app('events'));
+
+    event(new ScreenMounted('App\NativeComponents\IkeaCart', '/cart'));
+    event(new ScreenUnmounted('App\NativeComponents\IkeaCart', '/cart'));
+
+    Telemetry::assertHistogramRecorded('screen.view.duration', ['screen' => 'IkeaCart']);
+});
+
+it('does not measure an unmount it never saw mounted', function () {
+    $this->instrumentation->register(app('events'));
+
+    // A screen already on the stack when instrumentation booted: no start
+    // time, so a fabricated duration would be worse than none.
+    event(new ScreenUnmounted('App\NativeComponents\Orphan', '/orphan'));
+
+    expect(Telemetry::histogramCount('screen.view.duration', ['screen' => 'Orphan']))->toBe(0);
+});
+
+it('stops double-counting views once the evented path is armed', function () {
+    $this->instrumentation->register(app('events'));
+
+    // A base class written before the upstream events still forwards
+    // runLoop(). The work must still run, but the view is the listener's
+    // to record now.
+    expect($this->instrumentation->aroundScreen('Screens\Counter', fn () => 'ran'))->toBe('ran');
+
+    Telemetry::assertEventNotEmitted('screen.view');
+    Telemetry::assertCounterNotIncremented('screen.views');
 });
 
 it('emits a view event and a counter when a screen opens', function () {

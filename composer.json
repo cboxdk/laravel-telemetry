@@ -66,7 +66,10 @@
     "autoload-dev": {
         "psr-4": {
             "Cbox\\Telemetry\\Tests\\": "tests/"
-        }
+        },
+        "files": [
+            "tests/fixtures/nativephp-screen-events.php"
+        ]
     },
     "extra": {
         "branch-alias": {

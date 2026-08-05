@@ -667,14 +667,16 @@ return [
         // tallied shape as view rendering.
         'livewire' => env('TELEMETRY_INSTRUMENT_LIVEWIRE', true),
 
-        // NativePHP for Mobile screens: screen.interaction/native_event
-        // spans + screen.views/.view.duration/.interaction.duration.
-        // Unlike every other toggle here this one arms nothing by itself —
-        // v4 dispatches no lifecycle events, so the app opts in by
-        // forwarding from a NativeComponent base class (see
-        // docs/cookbook/nativephp.md). Turning this off makes those
-        // forwards pass straight through, which is how a consent prompt
-        // answered mid-session takes effect without a restart.
+        // NativePHP for Mobile screens. Two halves: screen.views +
+        // .view.duration come free from the upstream Screen lifecycle
+        // events (guarded by class_exists, so an older NativePHP never
+        // arms them), while screen.interaction/native_event spans need the
+        // app to forward dispatch()/dispatchNativeEvent() from a
+        // NativeComponent base class — upstream announces no interaction,
+        // and that is where the flush must happen. See
+        // docs/cookbook/nativephp.md. Turning this off silences both and
+        // makes the forwards pass straight through, which is how a consent
+        // prompt answered mid-session takes effect without a restart.
         'native_screens' => env('TELEMETRY_INSTRUMENT_NATIVE_SCREENS', true),
 
         // broadcast.count root-span tally + a "broadcast {event}" detail

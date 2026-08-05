@@ -18,11 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `sqlite` spool driver (`TELEMETRY_OTLP_SPOOL_DRIVER=sqlite`) so a device
     that spent the afternoon offline still has its telemetry when it
     reconnects — the Redis spool dies with the process.
-  - `Instrumentation\NativeScreenInstrumentation` — opt-in screen and
-    interaction spans for mobile v4. A native screen holds one request open for
-    its whole lifetime, so `Kernel::terminate()` never fires and the
-    per-request flush never happens; this puts the flush on the interaction
-    instead.
+  - `Instrumentation\NativeScreenInstrumentation` — screen and interaction
+    telemetry for mobile v4, in two halves. Screen views (`screen.views`,
+    `screen.view.duration`, `screen.view` events) come free from the upstream
+    `Native\Mobile\Events\Screen\*` lifecycle events, behind a `class_exists`
+    guard so an older NativePHP never arms them. Interaction spans stay opt-in:
+    a native screen holds one request open for its whole lifetime, so
+    `Kernel::terminate()` never fires and the per-request flush never happens —
+    and upstream announces no interaction, so the app forwards
+    `dispatch()`/`dispatchNativeEvent()` from one shared base class.
   - Automatic state reset on `Native\Mobile\Runtime::onReset()`, the persistent
     runtime's equivalent of the existing Octane reset.
 - Architecture decision records under `docs/decisions/`. The first restates

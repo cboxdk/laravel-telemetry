@@ -139,9 +139,10 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->singleton(MetricStore::class, fn (Application $app) => $this->buildStore($app));
 
-        // Opt-in: nothing resolves this until a NativePHP screen base class
-        // asks for it (see docs/cookbook/nativephp.md). Stateless, so one
-        // instance serves every screen.
+        // Resolved on boot only when NativePHP dispatches the screen
+        // lifecycle events; otherwise nothing touches it until an app's own
+        // screen base class asks (see docs/cookbook/nativephp.md). It holds
+        // the open-screen timers, so one instance has to serve every screen.
         $this->app->singleton(
             NativeScreenInstrumentation::class,
             fn (Application $app) => new NativeScreenInstrumentation($app),
@@ -880,6 +881,14 @@ class TelemetryServiceProvider extends ServiceProvider
 
         if ($config->get('telemetry.instrument.livewire', true) && class_exists(Livewire::class)) {
             Livewire::componentHook(LivewireInstrumentation::class);
+        }
+
+        // Screen views on NativePHP mobile, once upstream dispatches the
+        // lifecycle events. The guard lives inside register(); interaction
+        // spans stay opt-in either way (see the class docblock).
+        if ($config->get('telemetry.instrument.native_screens', true)
+            && class_exists(NativeScreenInstrumentation::MOUNTED)) {
+            $this->app->make(NativeScreenInstrumentation::class)->register($events);
         }
 
         if ($config->get('telemetry.instrument.broadcasting', true)) {

@@ -11,6 +11,7 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Closure;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
 use Throwable;
 
 /**
@@ -24,28 +25,32 @@ use Throwable;
  * never fires between interactions and the per-request flush the rest of
  * this package depends on never happens. Something has to take its place.
  *
- * NativePHP v4 has no events and no container hook for the screen
- * lifecycle: `NativeRouter::createComponent()` does `new $class`, and both
- * the router and the component are constructed directly. So there is
- * nothing to listen to, and nothing to decorate. Until upstream gains
- * lifecycle events, the app has to hand us the two moments itself — from
- * one shared base class, which is about ten lines:
+ * ## Two halves, only one of them automatic
+ *
+ * **Screen views are automatic** wherever `nativephp/mobile` dispatches
+ * the screen lifecycle events (`Native\Mobile\Events\Screen\*`, added
+ * upstream in NativePHP/mobile-air#248). {@see register()} listens for
+ * them behind a `class_exists` guard, exactly like the Horizon and
+ * Pennant integrations, so an older NativePHP simply never arms it.
+ *
+ * **Interactions are not, and cannot be.** Those events cover
+ * `mount()` / `onResume()` / `unmount()` only. A tap goes through
+ * `NativeComponent::dispatch()`, which upstream does not announce — and
+ * that is precisely where the flush has to happen, because the runloop
+ * holds its request open across every interaction on the screen. So an
+ * app that wants interaction spans still forwards two methods from one
+ * shared base class:
  *
  *     abstract class Screen extends NativeComponent
  *     {
- *         public function runLoop(): void
- *         {
- *             $this->telemetry()->aroundScreen(static::class, fn () => parent::runLoop());
- *         }
- *
  *         protected function dispatch(array $event): void
  *         {
- *             $this->telemetry()->aroundInteraction(static::class, 'screen.interaction', $event, fn () => parent::dispatch($event));
+ *             $this->telemetry()->aroundInteraction(static::class, 'interaction', $event, fn () => parent::dispatch($event));
  *         }
  *
  *         protected function dispatchNativeEvent(array $event): void
  *         {
- *             $this->telemetry()->aroundInteraction(static::class, 'screen.native_event', $event, fn () => parent::dispatchNativeEvent($event));
+ *             $this->telemetry()->aroundInteraction(static::class, 'native_event', $event, fn () => parent::dispatchNativeEvent($event));
  *         }
  *
  *         private function telemetry(): NativeScreenInstrumentation
@@ -54,17 +59,126 @@ use Throwable;
  *         }
  *     }
  *
- * `runLoop()`, `dispatch()` and `dispatchNativeEvent()` are NativePHP's
- * own internals, never anything an app defines, so overriding them in a
- * base class collides with nothing. `mount()` and `unmount()` are left
- * alone on purpose: a screen that defines its own `mount()` would
- * override the base class's, and instrumentation that silently stops
- * working on some screens is worse than instrumentation that was never
- * there.
+ * `dispatch()` and `dispatchNativeEvent()` are NativePHP's own internals,
+ * never anything an app defines, so overriding them in a base class
+ * collides with nothing. `mount()` and `unmount()` are deliberately NOT
+ * forwarded this way even though it would work: a screen that defines its
+ * own `mount()` would override the base class's, and instrumentation that
+ * silently stops working on some screens is worse than instrumentation
+ * that was never there. That is the gap the upstream events close.
+ *
+ * {@see aroundScreen()} remains for apps on a NativePHP without the
+ * events; it steps aside on its own once `register()` has armed the
+ * evented path, so a base class that still forwards `runLoop()` does not
+ * double-count.
  */
 final class NativeScreenInstrumentation
 {
+    /**
+     * Upstream event names — referenced as strings; NativePHP is not a
+     * dependency here. MOUNTED doubles as the "does this NativePHP have
+     * the events" probe, so the provider can skip resolving this class
+     * entirely on an install that has no use for it.
+     */
+    public const MOUNTED = 'Native\Mobile\Events\Screen\ScreenMounted';
+
+    private const RESUMED = 'Native\Mobile\Events\Screen\ScreenResumed';
+
+    private const UNMOUNTED = 'Native\Mobile\Events\Screen\ScreenUnmounted';
+
+    private bool $lifecycleEvented = false;
+
+    /** @var array<string, float> screen name => microtime of the visit that opened it */
+    private array $openedAt = [];
+
     public function __construct(private readonly Container $container) {}
+
+    /**
+     * Arm the automatic half. No-op on a NativePHP without the lifecycle
+     * events, which is every release up to and including 4.0.1.
+     */
+    public function register(Dispatcher $events): void
+    {
+        if (! class_exists(self::MOUNTED)) {
+            return;
+        }
+
+        $this->lifecycleEvented = true;
+
+        $events->listen(self::MOUNTED, fn (object $event) => $this->screenOpened($event, resumed: false));
+        $events->listen(self::RESUMED, fn (object $event) => $this->screenOpened($event, resumed: true));
+        $events->listen(self::UNMOUNTED, fn (object $event) => $this->screenClosed($event));
+    }
+
+    /**
+     * A screen was pushed, or returned to. Both are a view.
+     */
+    private function screenOpened(object $event, bool $resumed): void
+    {
+        if (! $this->instrumenting()) {
+            return;
+        }
+
+        FailSafe::guard(function () use ($event, $resumed): void {
+            $screen = $this->screenName($this->attribute($event, 'component'));
+
+            $this->openedAt[$screen] = microtime(true);
+
+            $this->telemetry()->event('screen.view', array_filter([
+                'screen.name' => $screen,
+                'screen.uri' => $this->attribute($event, 'uri'),
+                'screen.resumed' => $resumed ? 'true' : 'false',
+            ], fn (?string $value): bool => $value !== null));
+
+            // No `resumed` label: aroundScreen() cannot tell a push from a
+            // resume, and one metric name carrying two different label sets
+            // depending on which path recorded it is how dashboards break.
+            // The distinction lives on the event, where detail belongs.
+            $this->telemetry()->counter('screen.views', 'Native screen views')->inc(1, ['screen' => $screen]);
+        });
+    }
+
+    /**
+     * A screen left the stack. The last chance to ship anything it
+     * recorded — the component is about to be dropped.
+     */
+    private function screenClosed(object $event): void
+    {
+        if (! $this->instrumenting()) {
+            return;
+        }
+
+        FailSafe::guard(function () use ($event): void {
+            $screen = $this->screenName($this->attribute($event, 'component'));
+            $openedAt = $this->openedAt[$screen] ?? null;
+
+            unset($this->openedAt[$screen]);
+
+            if ($openedAt !== null) {
+                $this->telemetry()
+                    ->histogram('screen.view.duration', description: 'Time spent on a native screen', unit: 'ms')
+                    ->record((microtime(true) - $openedAt) * 1000, ['screen' => $screen]);
+            }
+
+            $this->telemetry()->flush();
+        });
+    }
+
+    /**
+     * The events carry public string properties, but NativePHP is not a
+     * dependency here — read them defensively rather than type-hinting a
+     * class this package cannot see.
+     */
+    private function attribute(object $event, string $property): ?string
+    {
+        if (! property_exists($event, $property)) {
+            return null;
+        }
+
+        $value = $event->{$property};
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
 
     /**
      * One screen visit. The flush on the way out is the last chance to
@@ -78,7 +192,10 @@ final class NativeScreenInstrumentation
      */
     public function aroundScreen(string $screen, Closure $work): mixed
     {
-        if (! $this->instrumenting()) {
+        // Once the upstream events are arming this, a base class that still
+        // forwards runLoop() would count every view twice. Step aside — but
+        // keep running the work, which is the caller's actual screen.
+        if ($this->lifecycleEvented || ! $this->instrumenting()) {
             return $work();
         }
 
@@ -183,8 +300,12 @@ final class NativeScreenInstrumentation
      * The screen's short class name — stable, low cardinality, and it
      * reads the way the route registration does.
      */
-    private function screenName(string $screen): string
+    private function screenName(?string $screen): string
     {
+        if ($screen === null || $screen === '') {
+            return 'unknown';
+        }
+
         $position = strrpos($screen, '\\');
 
         return $position === false ? $screen : substr($screen, $position + 1);
