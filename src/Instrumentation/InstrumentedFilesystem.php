@@ -4,37 +4,38 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
-use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
-use Cbox\Telemetry\Tracing\Span;
-use Closure;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\File;
 use Illuminate\Http\UploadedFile;
-use Throwable;
 
 /**
- * Wraps a single disk: every operation inside a detail span, always run
- * — telemetry never blocks or suppresses the actual file operation.
- * Driver-agnostic (local, s3, ftp, …), since `Filesystem` is Flysystem's
- * own abstraction over all of them.
+ * Wraps a disk that is NOT a concrete {@see FilesystemAdapter}
+ * — a custom driver registered through `Storage::extend()` that returns
+ * its own `Filesystem` implementation. Laravel's own drivers all resolve
+ * to a `FilesystemAdapter` and get {@see InstrumentedFilesystemAdapter}
+ * instead, which preserves that concrete type for consumers that
+ * type-hint it.
  *
  * Implements the interface explicitly (so `instanceof Filesystem` still
- * holds) but forwards anything NOT on it — adapter-specific extras like
- * `url()`/`temporaryUrl()` — via __call, straight to the real disk. The
- * real disk object keeps working exactly as before either way.
+ * holds) but forwards anything NOT on it via __call, straight to the real
+ * disk. The real disk object keeps working exactly as before either way.
  *
- * Paths are safe on spans (per-occurrence, never aggregated) but never
- * become metric labels — same rule as query text and cache keys
- * elsewhere in this package.
+ * Measurement lives in {@see DiskOperations}, shared with the adapter
+ * decorator so both record identically.
  */
 final class InstrumentedFilesystem implements Filesystem
 {
+    private readonly DiskOperations $operations;
+
     public function __construct(
         private readonly Filesystem $disk,
-        private readonly TelemetryManager $telemetry,
-        private readonly string $diskName,
-    ) {}
+        TelemetryManager $telemetry,
+        string $diskName,
+    ) {
+        $this->operations = new DiskOperations($telemetry, $diskName);
+    }
 
     public function path($path): string
     {
@@ -43,22 +44,22 @@ final class InstrumentedFilesystem implements Filesystem
 
     public function exists($path): bool
     {
-        return $this->operation('exists', $path, fn () => $this->disk->exists($path));
+        return $this->operations->record('exists', $path, fn () => $this->disk->exists($path));
     }
 
     public function get($path): ?string
     {
-        return $this->operation('get', $path, fn () => $this->disk->get($path));
+        return $this->operations->record('get', $path, fn () => $this->disk->get($path));
     }
 
     public function readStream($path)
     {
-        return $this->operation('readStream', $path, fn () => $this->disk->readStream($path));
+        return $this->operations->record('readStream', $path, fn () => $this->disk->readStream($path));
     }
 
     public function put($path, $contents, $options = []): bool
     {
-        return $this->operation('put', $path, fn () => $this->disk->put($path, $contents, $options));
+        return $this->operations->record('put', $path, fn () => $this->disk->put($path, $contents, $options));
     }
 
     /**
@@ -67,7 +68,7 @@ final class InstrumentedFilesystem implements Filesystem
      */
     public function putFile($path, $file = null, $options = [])
     {
-        return $this->operation('putFile', $this->pathLabel($path), fn () => $this->disk->putFile($path, $file, $options));
+        return $this->operations->record('putFile', $this->operations->pathLabel($path), fn () => $this->disk->putFile($path, $file, $options));
     }
 
     /**
@@ -77,7 +78,7 @@ final class InstrumentedFilesystem implements Filesystem
      */
     public function putFileAs($path, $file, $name = null, $options = [])
     {
-        return $this->operation('putFileAs', $this->pathLabel($path), fn () => $this->disk->putFileAs($path, $file, $name, $options));
+        return $this->operations->record('putFileAs', $this->operations->pathLabel($path), fn () => $this->disk->putFileAs($path, $file, $name, $options));
     }
 
     /**
@@ -85,27 +86,27 @@ final class InstrumentedFilesystem implements Filesystem
      */
     public function writeStream($path, $resource, array $options = []): bool
     {
-        return $this->operation('writeStream', $path, fn () => $this->disk->writeStream($path, $resource, $options));
+        return $this->operations->record('writeStream', $path, fn () => $this->disk->writeStream($path, $resource, $options));
     }
 
     public function getVisibility($path): string
     {
-        return $this->operation('getVisibility', $path, fn () => $this->disk->getVisibility($path));
+        return $this->operations->record('getVisibility', $path, fn () => $this->disk->getVisibility($path));
     }
 
     public function setVisibility($path, $visibility): bool
     {
-        return $this->operation('setVisibility', $path, fn () => $this->disk->setVisibility($path, $visibility));
+        return $this->operations->record('setVisibility', $path, fn () => $this->disk->setVisibility($path, $visibility));
     }
 
     public function prepend($path, $data): bool
     {
-        return $this->operation('prepend', $path, fn () => $this->disk->prepend($path, $data));
+        return $this->operations->record('prepend', $path, fn () => $this->disk->prepend($path, $data));
     }
 
     public function append($path, $data): bool
     {
-        return $this->operation('append', $path, fn () => $this->disk->append($path, $data));
+        return $this->operations->record('append', $path, fn () => $this->disk->append($path, $data));
     }
 
     /**
@@ -115,27 +116,27 @@ final class InstrumentedFilesystem implements Filesystem
     {
         $path = is_array($paths) ? implode(',', $paths) : $paths;
 
-        return $this->operation('delete', $path, fn () => $this->disk->delete($paths));
+        return $this->operations->record('delete', $path, fn () => $this->disk->delete($paths));
     }
 
     public function copy($from, $to): bool
     {
-        return $this->operation('copy', "{$from} -> {$to}", fn () => $this->disk->copy($from, $to));
+        return $this->operations->record('copy', "{$from} -> {$to}", fn () => $this->disk->copy($from, $to));
     }
 
     public function move($from, $to): bool
     {
-        return $this->operation('move', "{$from} -> {$to}", fn () => $this->disk->move($from, $to));
+        return $this->operations->record('move', "{$from} -> {$to}", fn () => $this->disk->move($from, $to));
     }
 
     public function size($path): int
     {
-        return $this->operation('size', $path, fn () => $this->disk->size($path));
+        return $this->operations->record('size', $path, fn () => $this->disk->size($path));
     }
 
     public function lastModified($path): int
     {
-        return $this->operation('lastModified', $path, fn () => $this->disk->lastModified($path));
+        return $this->operations->record('lastModified', $path, fn () => $this->disk->lastModified($path));
     }
 
     public function files($directory = null, $recursive = false): array
@@ -160,12 +161,12 @@ final class InstrumentedFilesystem implements Filesystem
 
     public function makeDirectory($path): bool
     {
-        return $this->operation('makeDirectory', $path, fn () => $this->disk->makeDirectory($path));
+        return $this->operations->record('makeDirectory', $path, fn () => $this->disk->makeDirectory($path));
     }
 
     public function deleteDirectory($directory): bool
     {
-        return $this->operation('deleteDirectory', $directory, fn () => $this->disk->deleteDirectory($directory));
+        return $this->operations->record('deleteDirectory', $directory, fn () => $this->disk->deleteDirectory($directory));
     }
 
     /**
@@ -174,52 +175,5 @@ final class InstrumentedFilesystem implements Filesystem
     public function __call(string $method, array $arguments): mixed
     {
         return $this->disk->{$method}(...$arguments);
-    }
-
-    /**
-     * putFile()/putFileAs() accept a File/UploadedFile in $path itself
-     * (the single-arg form) — a readable label either way.
-     */
-    private function pathLabel(mixed $path): string
-    {
-        return is_string($path) ? $path : get_debug_type($path);
-    }
-
-    /**
-     * @template T
-     *
-     * @param  Closure(): T  $work
-     * @return T
-     */
-    private function operation(string $name, string $path, Closure $work): mixed
-    {
-        $span = FailSafe::guard(function () use ($name, $path): ?Span {
-            $labels = ['disk' => $this->diskName, 'operation' => $name];
-
-            $this->telemetry->tracer()->bumpStat('storage.operation.count', 1);
-            $this->telemetry->counter('storage.operations', 'Filesystem/disk operations')->inc(1, $labels);
-
-            if ($this->telemetry->currentSpan()?->sampled !== true) {
-                return null;
-            }
-
-            return $this->telemetry->tracer()->startSpan("storage {$name}", attributes: [
-                'storage.disk' => $this->diskName,
-                'storage.operation' => $name,
-                'storage.path' => $path,
-            ])->markDetail();
-        });
-
-        try {
-            return $work();
-        } catch (Throwable $e) {
-            FailSafe::guard(function () use ($span, $e): void {
-                $span?->recordException($e);
-            });
-
-            throw $e;
-        } finally {
-            FailSafe::guard(fn () => $span?->end());
-        }
     }
 }

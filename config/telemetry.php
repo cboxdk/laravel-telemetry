@@ -690,6 +690,14 @@ return [
         // Flysystem supports). Paths are safe on spans (per-occurrence)
         // but never metric labels — same rule as query text.
         'filesystem' => env('TELEMETRY_INSTRUMENT_FILESYSTEM', true),
+
+        // Disks left entirely uninstrumented, by name. An instrumented
+        // disk is a FilesystemAdapter, so it satisfies everything that
+        // type-hints Laravel's concrete adapter — but PHP cannot pick a
+        // parent class at runtime, so it can never BE an adapter
+        // subclass (AwsS3V3Adapter, or a package's own). List a disk here
+        // if something type-hints the exact subclass and breaks.
+        'filesystem_ignore_disks' => [],
     ],
 
     /*

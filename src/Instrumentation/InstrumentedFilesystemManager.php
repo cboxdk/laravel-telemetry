@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Filesystem\FilesystemManager;
 
 /**
@@ -25,9 +27,13 @@ use Illuminate\Filesystem\FilesystemManager;
  * All real manager behaviour (driver creation, the disk cache, custom
  * creators, `set()`/`Storage::fake()`, `forgetDisk()`, `purge()`, …) is
  * inherited untouched. The only override is `disk()`: whatever the parent
- * resolves is wrapped in {@see InstrumentedFilesystem} so every operation
- * feeds the `storage.operations{disk,operation}` counter and a detail
- * span. Wrapping at `disk()` (rather than the protected `resolve()`) is
+ * resolves is wrapped — in {@see InstrumentedFilesystemAdapter} when it is
+ * a concrete `FilesystemAdapter` (every Laravel driver), otherwise in
+ * {@see InstrumentedFilesystem} — so every operation feeds the
+ * `storage.operations{disk,operation}` counter and a detail span. The
+ * split exists because the decorator has to keep passing the type checks
+ * the real disk would; see the adapter class for the full reasoning.
+ * Wrapping at `disk()` (rather than the protected `resolve()`) is
  * deliberate — `Storage::fake()` injects its disk straight into the cache
  * and bypasses `resolve()`, so faked disks are instrumented too. The
  * default-disk shorthand (`Storage::put(...)`) routes through the parent's
@@ -50,6 +56,9 @@ class InstrumentedFilesystemManager extends FilesystemManager
         parent::__construct($app);
     }
 
+    /** @var list<string>|null memoized — disk() runs on every Storage call */
+    private ?array $ignoredDisks = null;
+
     /**
      * @param  \UnitEnum|string|null  $name
      */
@@ -57,11 +66,38 @@ class InstrumentedFilesystemManager extends FilesystemManager
     {
         $disk = parent::disk($name);
 
-        if ($disk instanceof InstrumentedFilesystem) {
+        if ($disk instanceof InstrumentedFilesystem || $disk instanceof InstrumentedFilesystemAdapter) {
             return $disk;
         }
 
-        return new InstrumentedFilesystem($disk, $this->telemetry, $this->diskName($name));
+        $diskName = $this->diskName($name);
+
+        if (in_array($diskName, $this->ignoredDisks(), true)) {
+            return $disk;
+        }
+
+        // A concrete adapter must stay a concrete adapter: consumers type-hint
+        // Laravel's FilesystemAdapter, not just the contract. Anything else is
+        // a custom Storage::extend() driver, where the contract is all there
+        // is to preserve.
+        return $disk instanceof FilesystemAdapter
+            ? new InstrumentedFilesystemAdapter($disk, $this->telemetry, $diskName)
+            : new InstrumentedFilesystem($disk, $this->telemetry, $diskName);
+    }
+
+    /**
+     * Disks left alone entirely — the escape hatch for a consumer that
+     * needs the exact adapter subclass back, which no decorator can be.
+     *
+     * @return list<string>
+     */
+    private function ignoredDisks(): array
+    {
+        return $this->ignoredDisks ??= FailSafe::guard(function (): array {
+            $configured = $this->app->make('config')->get('telemetry.instrument.filesystem_ignore_disks', []);
+
+            return is_array($configured) ? array_values(array_filter($configured, 'is_string')) : [];
+        }) ?? [];
     }
 
     private function diskName(mixed $name): string
