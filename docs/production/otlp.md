@@ -39,6 +39,46 @@ so one flusher is enough (and avoids duplicate datapoints).
 Metrics are exported with cumulative temporality — backends see monotonic
 series regardless of how many PHP processes contributed.
 
+## When the backend rejects a batch
+
+`telemetry:flush` answers for delivery, not just for collection. A batch
+the endpoint refused is printed with the exporter, the HTTP status and
+the backend's own error body, written to the log at `error` level (under
+cron nobody reads stdout), and the command **exits non-zero**:
+
+```
+$ php artisan telemetry:flush
+   ERROR  Flushed 57 metric families: 0 of 1 exporter accepted the batch.
+
+  otlp ...... rejected: HTTP 400: {"code":3,"message":"unknown metric type"}
+
+$ echo $?
+1
+```
+
+Partial delivery is reported as partial — `2 of 3 exporters accepted the
+batch` — and a backend that took the batch but refused some data points
+(OTLP partial success) is reported too. One exporter failing never stops
+the others from being tried.
+
+Because the exit code is real, the scheduled flush can be monitored like
+any other cron job:
+
+```php
+Schedule::command('telemetry:flush')
+    ->everyMinute()
+    ->onOneServer()
+    ->emailOutputOnFailure('ops@example.com');
+```
+
+Spool mode counts entries held back for the next tick as a failure of
+*this* run: nothing is lost — they stay queued — but the endpoint is not
+taking data and the exit code says so.
+
+The request path is unchanged: a rejection at terminate is counted in the
+`telemetry.export.count{outcome=...}` self-metric and never surfaced to
+the user's request.
+
 ## High traffic: the spool + flush daemon
 
 At scale, two costs bite: per-request OTLP POSTs at terminate, and a

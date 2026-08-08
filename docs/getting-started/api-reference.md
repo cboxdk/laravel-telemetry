@@ -85,10 +85,30 @@ Telemetry::addExporter(new ClickhouseExporter(...));    // runtime exporter
 
 ```php
 Telemetry::collect();       // list<MetricFamily> — what a scrape sees
-Telemetry::flush();         // export buffered spans + events now
-Telemetry::flushMetrics();  // push metrics to exporters now
+Telemetry::flush();         // export buffered spans + events now → ExportReport
+Telemetry::flushMetrics();  // push metrics to exporters now → ExportReport
 Telemetry::enabled();       // bool
 Telemetry::handleExceptionsUsing(fn (Throwable $e) => ...);
+```
+
+Both flushes return an `ExportReport` saying what each exporter did with
+the batch — they still never throw, but the outcome is no longer thrown
+away either:
+
+```php
+$report = Telemetry::flushMetrics();
+
+$report->items;         // metric families offered
+$report->attempted();   // exporters the batch was sent to
+$report->accepted();    // exporters that took it
+$report->successful();  // nothing failed and nothing was rejected
+$report->summary();     // "2 of 3 exporters accepted the batch"
+
+foreach ($report->problems() as $problem) {
+    $problem->exporter;         // "otlp"
+    $problem->status;           // ExportStatus::Failed
+    $problem->describe();       // 'rejected: HTTP 400: {"message":"…"}'
+}
 ```
 
 ## Testing
@@ -115,8 +135,8 @@ $fake->recordedEvents();
 ## Artisan
 
 ```bash
-php artisan telemetry:doctor                   # verify store, exporters, config
-php artisan telemetry:flush [--wipe]           # export metrics and drain the OTLP spool
+php artisan telemetry:doctor                   # verify store, exporters, config (exits 1 on a failed check)
+php artisan telemetry:flush [--wipe]           # export metrics and drain the OTLP spool (exits 1 on a rejected batch)
 php artisan telemetry:monitor [--once]         # sample host + process metrics (node_exporter analog)
 php artisan telemetry:deploy [--id=] [--notes=] # emit a deployment marker event (dashboard annotations)
 php artisan telemetry:dashboards [--export=]   # install the Grafana dashboards

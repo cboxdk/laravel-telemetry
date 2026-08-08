@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Marks a deployment — run it from your deploy pipeline (Forge/Envoyer
@@ -43,8 +44,25 @@ final class DeployCommand extends Command
         ]));
 
         $telemetry->counter('deployments', 'Deploy markers')->inc();
-        $telemetry->flush();
-        $telemetry->flushMetrics();
+
+        // The marker is only worth anything if it lands. A pipeline that
+        // sees a green telemetry:deploy has been told the annotation is
+        // in the backend — so a rejected batch fails the step.
+        $report = $telemetry->flush()->merge($telemetry->flushMetrics());
+
+        if (! $report->successful()) {
+            $this->components->error("Deployment marker was rejected: {$report->summary()}.");
+
+            foreach ($report->problems() as $problem) {
+                $this->components->twoColumnDetail($problem->exporter, '<fg=red>'.$problem->describe().'</>');
+            }
+
+            Log::error("telemetry:deploy — deployment marker was rejected: {$report->summary()}", [
+                'deployment.id' => $id,
+            ]);
+
+            return self::FAILURE;
+        }
 
         $this->components->info("Deployment marker emitted (deployment.id: {$id}).");
 

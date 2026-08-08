@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Exporters\Spool;
 
+use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportResult;
 use Closure;
 
@@ -39,14 +40,14 @@ final class SpoolShipper
         private readonly Closure $post,
     ) {}
 
-    /**
-     * @return array{shipped: int, requeued: int, dropped: int}
-     */
-    public function ship(int $maxBatch = 200): array
+    public function ship(int $maxBatch = 200): ShipResult
     {
         $shipped = 0;
         $requeued = 0;
         $dropped = 0;
+
+        /** @var list<ExportOutcome> $failures */
+        $failures = [];
 
         while (($entries = $this->spool->pop($maxBatch)) !== []) {
             $stop = false;
@@ -59,6 +60,11 @@ final class SpoolShipper
 
                     continue;
                 }
+
+                // Why it failed travels with the counts. A drained spool
+                // that dropped everything used to look like a drained
+                // spool that delivered everything.
+                $failures[] = ExportOutcome::of("otlp {$signal}", $result);
 
                 if ($result->retryable) {
                     // Collector down — only THIS signal's entries go back,
@@ -80,7 +86,7 @@ final class SpoolShipper
             }
         }
 
-        return ['shipped' => $shipped, 'requeued' => $requeued, 'dropped' => $dropped];
+        return new ShipResult($shipped, $requeued, $dropped, $failures);
     }
 
     /**

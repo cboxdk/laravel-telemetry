@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`telemetry:flush` no longer reports success for a batch the backend
+  rejected.** Against an endpoint answering `HTTP 400` to every request the
+  command printed *"Flushed 57 metric families to 1 exporter(s)"* and exited
+  `0`. Nothing was stored, `telemetry:doctor` was green, and the only way to
+  find out was a packet capture.
+
+  The transport classified the failure correctly all along —
+  `OtlpTransport::post()` returned `ExportResult::failed("HTTP 400: …")` — and
+  `OtlpExporter` passed it up faithfully. It was dropped one level higher:
+  `TelemetryManager::export()` fed the result to the self-metrics counter and
+  then discarded it, returning `void`, and `flushMetrics()` returned the number
+  of families *collected* — a count of what was offered, reported as a count of
+  what landed.
+
+  Flushes now return an `ExportReport` (`Support\ExportReport`,
+  `ExportOutcome`, `ExportStatus`) naming what each exporter did with the
+  batch, and the command turns it into output, a log line and an exit code:
+
+  - A rejected batch prints the exporter, the HTTP status and the backend's
+    response body (collapsed to one line, truncated at 500 characters), and
+    **exits non-zero** — cron is the only thing watching, and a silent success
+    there is the original bug one level down.
+  - Failures are logged at `error` as well as printed, since nobody reads
+    cron's stdout.
+  - Partial delivery is reported as partial: *"2 of 3 exporters accepted the
+    batch"*, rather than a flat "flushed" or a flat failure. OTLP partial
+    success (the backend took the batch but refused some data points) counts
+    as a problem too.
+  - A failing exporter still does not throw, and never stops the remaining
+    exporters from being tried.
+  - In `--daemon` mode a persistent failure is reported once, not once per
+    tick, and recovery is reported when exports start landing again.
+
+  The same silence was in the other two paths and is fixed with it:
+  `SpoolShipper::ship()` counted permanently-rejected entries as `dropped`
+  without recording *why* (that data is discarded, so the reason was the only
+  evidence it ever existed), and `telemetry:deploy` reported a deployment
+  marker as emitted whether or not the backend took it. A spool drain that
+  requeues or drops now fails the flush command's exit code as well.
+
+- **`telemetry:doctor` probes OTLP with a payload the exporter would really
+  send.** It posted an empty batch — 24 bytes, under the transport's 1 KB gzip
+  threshold — so it tested a path the exporter never takes and passed against a
+  backend (or proxy) that rejects every compressed request. It now posts one
+  real, gzipped span named `telemetry.doctor`, serialized by the real
+  serializer, and says so in its output.
+
+### Added
+
+- **`Testing\RejectingExporter`** — a fake exporter that refuses batches, so an
+  application can test the unhappy path. `CollectingExporter` (behind
+  `Telemetry::fake()`) always answers `ok()`, which is exactly why a suite
+  could be green while the flush command lied. Takes any `ExportResult`, so a
+  503 or an OTLP partial success can be modelled too. See
+  `docs/getting-started/testing.md`.
+
+### Changed
+
+- **`TelemetryManager::flush()`, `flushMetrics()`, `ingestSpans()` and
+  `ingestEvents()` return `Support\ExportReport`** instead of `void`/`int`.
+  `flushMetrics()` previously returned the number of metric families
+  collected; that count is now `$report->items`, with delivery reported
+  separately — conflating the two is what made the failure invisible. The
+  facade advertised all four as `void`, so the returned int was never part of
+  the documented surface.
+- **`SpoolShipper::ship()` returns `Exporters\Spool\ShipResult`** instead of an
+  `array{shipped, requeued, dropped}` shape, carrying the failures with the
+  counts.
+
 ### Added
 
 - **NativePHP support — mobile v4 (SuperNative) and desktop v2.** See

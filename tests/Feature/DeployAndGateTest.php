@@ -3,8 +3,11 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Testing\CollectingExporter;
+use Cbox\Telemetry\Testing\RejectingExporter;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Gate;
 
 beforeEach(function () {
@@ -25,6 +28,23 @@ it('emits a deployment marker event and counter', function () {
 
     expect(collect(Telemetry::collect())->keyBy(fn ($family) => $family->name()))
         ->toHaveKey('deployments');
+});
+
+it('fails the deploy step when the marker was rejected', function () {
+    // A deploy pipeline that sees a green telemetry:deploy has been told
+    // the annotation is in the backend.
+    Telemetry::addExporter(new RejectingExporter(
+        ExportResult::failed('HTTP 400: {"message":"unknown deployment attribute"}'),
+        name: 'otlp',
+    ));
+
+    Artisan::call('telemetry:deploy', ['--id' => 'v1.2.3']);
+
+    expect(Artisan::output())
+        ->toContain('Deployment marker was rejected')
+        ->toContain('HTTP 400');
+
+    expect(Artisan::call('telemetry:deploy', ['--id' => 'v1.2.3']))->toBe(1);
 });
 
 it('counts gate checks by ability and outcome with root-span tallies', function () {
