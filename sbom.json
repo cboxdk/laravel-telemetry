@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:cdc7afb6-c4fa-6d00-e13e-5e09a203be29",
+    "serialNumber": "urn:uuid:ed322968-4dc4-9f08-68b9-fa441561b3b6",
     "version": 1,
     "metadata": {
         "component": {
@@ -261,10 +261,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/commonmark@2.8.3",
+            "bom-ref": "pkg:composer/league/commonmark@2.9.0",
             "name": "league/commonmark",
-            "version": "2.8.3",
-            "purl": "pkg:composer/league/commonmark@2.8.3",
+            "version": "2.9.0",
+            "purl": "pkg:composer/league/commonmark@2.9.0",
             "licenses": [
                 {
                     "license": {
@@ -421,10 +421,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/nette/utils@v4.1.4",
+            "bom-ref": "pkg:composer/nette/utils@v4.1.5",
             "name": "nette/utils",
-            "version": "v4.1.4",
-            "purl": "pkg:composer/nette/utils@v4.1.4",
+            "version": "v4.1.5",
+            "purl": "pkg:composer/nette/utils@v4.1.5",
             "licenses": [
                 {
                     "license": {
