@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-08
+
+Two things. Telemetry now runs on a device — NativePHP for Mobile v4
+(SuperNative) and Desktop v2, which break the two assumptions this package
+was built on: there is no Redis or APCu, and nothing can scrape a Prometheus
+endpoint on someone's phone. And `telemetry:flush` stopped lying about
+batches the backend rejected.
+
+**Upgrade note.** Four `TelemetryManager` methods now return
+`Support\ExportReport` where they returned `void`, and `flushMetrics()`
+returned an undocumented `int`. The facade advertised all four as `void`, so
+the documented surface is unchanged and callers are unaffected — but code
+that used `flushMetrics()`'s int, code that consumed `SpoolShipper::ship()`'s
+array shape, or a subclass of `TelemetryManager` overriding any of the four
+will need the new signatures. None of those are in the surface the 1.0.0
+release put under SemVer, which is why this is a minor.
+
 ### Fixed
 
 - **`telemetry:flush` no longer reports success for a batch the backend
@@ -1123,7 +1140,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/cboxdk/laravel-telemetry/compare/v0.3.3...v0.4.0
