@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Instrumentation\NativeScreenInstrumentation` — screen and interaction
     telemetry for mobile v4, in two halves. Screen views (`screen.views`,
     `screen.view.duration`, `screen.view` events) come free from the upstream
-    `Native\Mobile\Events\Screen\*` lifecycle events, behind a `class_exists`
-    guard so an older NativePHP never arms them. Interaction spans stay opt-in:
+    `Native\Mobile\Events\Screen\*` lifecycle events on `nativephp/mobile`
+    ^4.1, behind a `class_exists` guard so 4.0.x never arms them. Interaction spans stay opt-in:
     a native screen holds one request open for its whole lifetime, so
     `Kernel::terminate()` never fires and the per-request flush never happens —
     and upstream announces no interaction, so the app forwards

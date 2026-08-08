@@ -669,8 +669,9 @@ return [
 
         // NativePHP for Mobile screens. Two halves: screen.views +
         // .view.duration come free from the upstream Screen lifecycle
-        // events (guarded by class_exists, so an older NativePHP never
-        // arms them), while screen.interaction/native_event spans need the
+        // events on nativephp/mobile ^4.1 (guarded by class_exists, so
+        // 4.0.x never arms them), while screen.interaction/native_event
+        // spans need the
         // app to forward dispatch()/dispatchNativeEvent() from a
         // NativeComponent base class — upstream announces no interaction,
         // and that is where the flush must happen. See

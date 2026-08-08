@@ -62,8 +62,8 @@ automatic.
 
 ### Screen views — automatic
 
-Wherever `nativephp/mobile` dispatches the screen lifecycle events
-(`Native\Mobile\Events\Screen\*`, added upstream in
+On **`nativephp/mobile` ^4.1**, which dispatches the screen lifecycle
+events (`Native\Mobile\Events\Screen\*`, added in
 [mobile-air#248](https://github.com/NativePHP/mobile-air/pull/248)), the
 package listens for them behind a `class_exists` guard, exactly like the
 Horizon and Pennant integrations. Nothing to wire:
@@ -74,9 +74,9 @@ Horizon and Pennant integrations. Nothing to wire:
 | `screen.views` counter | Views per screen |
 | `screen.view.duration` | Time spent per screen, measured mount → unmount |
 
-At the time of writing this is **not in a released version**: `4.0.1` was
-tagged before the events merged. On an older NativePHP the guard simply
-never arms and none of the above appears — nothing breaks.
+On `4.0.x` the guard simply never arms and none of the above appears —
+nothing breaks, and the opt-in half below still works. `4.1.0` is the
+first release carrying the events.
 
 ### Interactions — still yours to wire
 
