@@ -55,6 +55,10 @@ Register it by class name in config — it resolves through the container:
   - `retryable($reason, $retryAfterSeconds)` — transient (429/503,
     timeouts). The pipeline/scheduler decides on retries.
   - `failed($reason)` — permanent; retrying won't help.
+- **The reason is read by humans.** `telemetry:flush` prints it, logs it
+  and exits non-zero on it, so include the status code and whatever the
+  backend said — a bare "export failed" costs an operator a packet
+  capture.
 - Exports run at terminate (after the response) — but they still block the
   worker. Keep timeouts tight.
 - `$batch->resource` carries the service attributes; include them in your

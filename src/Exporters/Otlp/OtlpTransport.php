@@ -17,7 +17,16 @@ use Cbox\Telemetry\Support\ExportResult;
  */
 class OtlpTransport
 {
-    private const COMPRESSION_THRESHOLD = 1024;
+    /**
+     * Bodies above this many bytes are gzipped. Public because
+     * `telemetry:doctor` probes with a payload big enough to cross it —
+     * a diagnostic that only ever sends uncompressed bodies does not
+     * test the path the exporter actually takes.
+     */
+    public const COMPRESSION_THRESHOLD = 1024;
+
+    /** Characters of the backend's error body carried into the failure reason. */
+    private const MAX_REPORTED_BODY = 500;
 
     /**
      * @param  array<string, string>  $headers
@@ -99,12 +108,36 @@ class OtlpTransport
 
         if (in_array($status, [429, 502, 503, 504], true)) {
             return ExportResult::retryable(
-                "HTTP {$status}",
+                $this->describe($status, $responseBody),
                 $this->retryAfter($rawHeaders),
             );
         }
 
-        return ExportResult::failed("HTTP {$status}: ".substr($responseBody, 0, 500));
+        return ExportResult::failed($this->describe($status, $responseBody));
+    }
+
+    /**
+     * The status plus whatever the backend said about it — the operator
+     * reads this in `telemetry:flush` output, and a real collector's JSON
+     * error body is usually the whole diagnosis.
+     *
+     * Collapsed to one line (an HTML error page from a proxy in front of
+     * the collector would otherwise spray the console) and cut on a
+     * character boundary, not a byte one.
+     */
+    private function describe(int $status, string $body): string
+    {
+        $body = trim((string) preg_replace('/\s+/', ' ', $body));
+
+        if ($body === '') {
+            return "HTTP {$status}";
+        }
+
+        if (mb_strlen($body) > self::MAX_REPORTED_BODY) {
+            $body = mb_substr($body, 0, self::MAX_REPORTED_BODY).'… (truncated)';
+        }
+
+        return "HTTP {$status}: {$body}";
     }
 
     private function classifySuccess(string $body): ExportResult

@@ -50,9 +50,11 @@ it('drains the spool from the flush command', function () {
 
     expect($spool->size())->toBe(1);
 
+    // Held back, not delivered — and the command says so and exits
+    // non-zero, because cron is the only thing watching.
     $this->artisan('telemetry:flush')
         ->expectsOutputToContain('requeued')
-        ->assertSuccessful();
+        ->assertFailed();
 
     expect($spool->size())->toBe(1);
 });

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\TelemetryManager;
+use Cbox\Telemetry\Tests\Support\StubOtlpServer;
 use Illuminate\Support\Facades\Artisan;
 
 final class FakeDoctorSpool implements Spool
@@ -152,6 +153,44 @@ it('fails the check when the spool is near capacity — dropping entries', funct
     $this->artisan('telemetry:doctor')
         ->expectsOutputToContain('near capacity')
         ->assertFailed();
+});
+
+it('probes OTLP with a gzipped batch — the path the exporter really takes', function () {
+    $server = StubOtlpServer::start(200, '{}');
+
+    config()->set('telemetry.exporters', ['otlp']);
+    config()->set('telemetry.otlp.endpoint', $server->url());
+
+    Artisan::call('telemetry:doctor');
+    $output = Artisan::output();
+
+    $request = $server->requests()[0];
+    $server->stop();
+
+    // An empty batch stayed under the compression threshold, so the
+    // doctor passed against a server that rejects everything the real
+    // exporter sends. The probe now crosses it.
+    expect($request['encoding'])->toBe('gzip')
+        ->and($request['path'])->toBe('/v1/traces')
+        ->and($request['body'])->toContain('telemetry.doctor')
+        ->and(strlen($request['body']))->toBeGreaterThan(1024)
+        ->and($output)->toContain('OK — accepted a gzipped probe span');
+});
+
+it('fails when the OTLP endpoint rejects the probe', function () {
+    $server = StubOtlpServer::start(400, '{"message":"compressed payloads are not supported"}');
+
+    config()->set('telemetry.exporters', ['otlp']);
+    config()->set('telemetry.otlp.endpoint', $server->url());
+
+    $status = Artisan::call('telemetry:doctor');
+    $output = Artisan::output();
+
+    $server->stop();
+
+    expect($status)->toBe(1)
+        ->and($output)->toContain('FAILED — HTTP 400')
+        ->and($output)->toContain('compressed payloads are not supported');
 });
 
 it('reports when telemetry is disabled', function () {

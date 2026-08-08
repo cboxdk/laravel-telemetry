@@ -14,6 +14,8 @@ use Cbox\Telemetry\Metrics\Instruments\ObservableGauge;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
+use Cbox\Telemetry\Support\ExportOutcome;
+use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Redactor;
@@ -86,7 +88,9 @@ class TelemetryManager
     ) {
         // A buffer-cap flush means the trace is pathological — keep every
         // detail for it.
-        $this->tracer->onBufferFull(fn () => $this->flush(forceDetails: true));
+        $this->tracer->onBufferFull(function (): void {
+            $this->flush(forceDetails: true);
+        });
     }
 
     public function enabled(): bool
@@ -681,8 +685,13 @@ class TelemetryManager
     /**
      * Flush buffered spans and events to every exporter that supports them.
      * Called from terminable middleware and after each queue job.
+     *
+     * Returns what each exporter did with the batch. Request-path callers
+     * ignore it — a rejection there is counted in the export self-metrics,
+     * never surfaced to the user's request — but `telemetry:flush` reports
+     * and exits on it.
      */
-    public function flush(bool $forceDetails = false): void
+    public function flush(bool $forceDetails = false): ExportReport
     {
         // Buffered stores push their aggregated metric writes at the same
         // points spans flush — request terminate, after each queue job —
@@ -710,13 +719,13 @@ class TelemetryManager
         }
 
         if ($spans === [] && $events === []) {
-            return;
+            return new ExportReport;
         }
 
         $this->flushing = true;
 
         try {
-            $this->export(new TelemetryBatch(
+            return $this->export(new TelemetryBatch(
                 resource: $this->resource,
                 spans: $spans,
                 events: $events,
@@ -733,10 +742,10 @@ class TelemetryManager
      *
      * @param  list<Span>  $spans
      */
-    public function ingestSpans(array $spans): void
+    public function ingestSpans(array $spans): ExportReport
     {
         if (! $this->enabled || $spans === []) {
-            return;
+            return new ExportReport;
         }
 
         if ($this->redactor !== null) {
@@ -746,7 +755,7 @@ class TelemetryManager
         $this->flushing = true;
 
         try {
-            $this->export(new TelemetryBatch(resource: $this->resource, spans: $spans), Signal::Traces);
+            return $this->export(new TelemetryBatch(resource: $this->resource, spans: $spans), Signal::Traces);
         } finally {
             $this->flushing = false;
         }
@@ -760,10 +769,10 @@ class TelemetryManager
      *
      * @param  list<TelemetryEvent>  $events
      */
-    public function ingestEvents(array $events): void
+    public function ingestEvents(array $events): ExportReport
     {
         if (! $this->enabled || $events === []) {
-            return;
+            return new ExportReport;
         }
 
         if ($this->redactor !== null) {
@@ -773,7 +782,7 @@ class TelemetryManager
         $this->flushing = true;
 
         try {
-            $this->export(new TelemetryBatch(resource: $this->resource, events: $events), Signal::Events);
+            return $this->export(new TelemetryBatch(resource: $this->resource, events: $events), Signal::Events);
         } finally {
             $this->flushing = false;
         }
@@ -782,21 +791,23 @@ class TelemetryManager
     /**
      * Push metrics from the shared store (plus observable gauges) to every
      * exporter that supports metrics. Run by the `telemetry:flush` command.
+     *
+     * The report's `items` is the number of metric families collected —
+     * how many were *offered*. Whether a backend took them is the
+     * outcomes' business, and the two are no longer conflated.
      */
-    public function flushMetrics(): int
+    public function flushMetrics(): ExportReport
     {
         $metrics = $this->collect();
 
         if ($metrics === []) {
-            return 0;
+            return new ExportReport;
         }
 
-        $this->export(new TelemetryBatch(
+        return $this->export(new TelemetryBatch(
             resource: $this->resource,
             metrics: $metrics,
         ), Signal::Metrics);
-
-        return count($metrics);
     }
 
     /**
@@ -907,38 +918,72 @@ class TelemetryManager
         }
     }
 
-    private function export(TelemetryBatch $batch, Signal ...$signals): void
+    /**
+     * Offer a batch to every exporter and report what each one did with
+     * it. Nothing throws out of here — a failure is a value, not an
+     * exception — but it is no longer silently dropped either: callers
+     * that can act on a rejection (the flush command) get told.
+     */
+    private function export(TelemetryBatch $batch, Signal ...$signals): ExportReport
     {
+        $report = new ExportReport(items: $batch->count());
+
         foreach ($this->exporters as $exporter) {
             // The whole per-exporter interaction is guarded — a custom
             // exporter throwing from supports()/name() must not take the
             // flush (and with it kernel terminate) down. One bad exporter
             // never blocks the others.
-            FailSafe::guard(function () use ($exporter, $batch, $signals) {
-                $supports = $exporter->supports();
+            $outcome = FailSafe::guard(fn (): ExportOutcome => $this->exportTo($exporter, $batch, $signals))
+                ?? ExportOutcome::threw($this->nameOf($exporter));
 
-                $relevant = false;
-
-                foreach ($signals as $signal) {
-                    if ($supports->contains($signal)) {
-                        $relevant = true;
-                        break;
-                    }
-                }
-
-                if (! $relevant) {
-                    return;
-                }
-
-                $narrowed = $batch->only($supports);
-
-                if (! $narrowed->isEmpty()) {
-                    $startedAt = microtime(true);
-                    $result = FailSafe::guard(fn () => $exporter->export($narrowed));
-                    $this->recordExportMetrics($exporter->name(), $signals, $startedAt, $result);
-                }
-            });
+            $report = $report->with($outcome);
         }
+
+        return $report;
+    }
+
+    /**
+     * @param  array<Signal>  $signals
+     */
+    private function exportTo(Exporter $exporter, TelemetryBatch $batch, array $signals): ExportOutcome
+    {
+        $supports = $exporter->supports();
+
+        $relevant = false;
+
+        foreach ($signals as $signal) {
+            if ($supports->contains($signal)) {
+                $relevant = true;
+                break;
+            }
+        }
+
+        if (! $relevant) {
+            return ExportOutcome::skipped($exporter->name());
+        }
+
+        $narrowed = $batch->only($supports);
+
+        if ($narrowed->isEmpty()) {
+            return ExportOutcome::skipped($exporter->name());
+        }
+
+        $startedAt = microtime(true);
+        $result = FailSafe::guard(fn () => $exporter->export($narrowed));
+        $this->recordExportMetrics($exporter->name(), $signals, $startedAt, $result);
+
+        return $result === null
+            ? ExportOutcome::threw($exporter->name())
+            : ExportOutcome::of($exporter->name(), $result);
+    }
+
+    /**
+     * name() is the exporter's own code and may throw like anything else;
+     * an unnameable exporter still has to appear in the report.
+     */
+    private function nameOf(Exporter $exporter): string
+    {
+        return FailSafe::guard(fn (): string => $exporter->name()) ?? $exporter::class;
     }
 
     /**

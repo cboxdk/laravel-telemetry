@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\TelemetryManager;
+use Cbox\Telemetry\Tracing\Span;
+use Cbox\Telemetry\Tracing\SpanKind;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -39,7 +42,7 @@ final class DoctorCommand extends Command
         $this->checkCacheCollision();
         $this->checkProfiling();
         $healthy = $this->checkPrometheus() && $healthy;
-        $healthy = $this->checkOtlp() && $healthy;
+        $healthy = $this->checkOtlp($telemetry) && $healthy;
         $healthy = $this->checkSpool($spool) && $healthy;
 
         if ($healthy) {
@@ -163,7 +166,7 @@ final class DoctorCommand extends Command
         $this->components->twoColumnDetail('CPU profiling', 'off — ext-excimer not installed (optional)');
     }
 
-    private function checkOtlp(): bool
+    private function checkOtlp(TelemetryManager $telemetry): bool
     {
         /** @var list<string> $exporters */
         $exporters = config('telemetry.exporters', []);
@@ -175,20 +178,31 @@ final class DoctorCommand extends Command
         }
 
         $endpoint = Cast::string(config('telemetry.otlp.endpoint'));
+        $compressed = Cast::bool(config('telemetry.otlp.compression'), true);
 
         $transport = new OtlpTransport(
             endpoint: $endpoint,
             headers: Cast::stringMap(config('telemetry.otlp.headers', [])),
             timeout: Cast::float(config('telemetry.otlp.timeout'), 3.0),
             connectTimeout: Cast::float(config('telemetry.otlp.connect_timeout'), 1.0),
+            compress: $compressed,
         );
 
+        $payload = $this->probeBatch($telemetry->resource());
+
         $start = microtime(true);
-        $result = $transport->post('/v1/traces', ['resourceSpans' => []]);
+        $result = $transport->post('/v1/traces', $payload);
         $ms = (int) ((microtime(true) - $start) * 1000);
 
         if ($result->success) {
-            $this->components->twoColumnDetail("OTLP [{$endpoint}]", "<fg=green>OK — accepted an empty batch in {$ms}ms</>");
+            $this->components->twoColumnDetail(
+                "OTLP [{$endpoint}]",
+                sprintf(
+                    '<fg=green>OK — accepted a %sprobe span in %dms</>',
+                    $compressed ? 'gzipped ' : '',
+                    $ms,
+                ),
+            );
 
             return true;
         }
@@ -196,6 +210,42 @@ final class DoctorCommand extends Command
         $this->components->twoColumnDetail("OTLP [{$endpoint}]", '<fg=red>FAILED — '.($result->reason ?? 'unknown').'</>');
 
         return false;
+    }
+
+    /**
+     * One real span, serialized by the real serializer, deliberately over
+     * the transport's gzip threshold.
+     *
+     * The old empty batch tested a path the exporter never takes: at 24
+     * bytes it stayed under COMPRESSION_THRESHOLD, so it went out
+     * uncompressed and a backend (or a proxy in front of it) that chokes
+     * on `Content-Encoding: gzip` — or on an actual span — still passed
+     * the doctor. The padding attribute is the cheapest way over the
+     * threshold; the cost is one obviously-named probe span in the
+     * backend per run, the same trade the metric-store heartbeat makes.
+     *
+     * @param  array<string, scalar>  $resource
+     * @return array<string, mixed>
+     */
+    private function probeBatch(array $resource): array
+    {
+        $span = new Span(
+            traceId: bin2hex(random_bytes(16)),
+            spanId: bin2hex(random_bytes(8)),
+            parentSpanId: null,
+            name: 'telemetry.doctor',
+            kind: SpanKind::Internal,
+            sampled: true,
+            attributes: [
+                'telemetry.doctor' => true,
+                'telemetry.doctor.padding' => str_repeat('.', OtlpTransport::COMPRESSION_THRESHOLD),
+            ],
+            onEnd: static fn (Span $span) => null,
+        );
+
+        $span->end();
+
+        return (new OtlpSerializer($resource))->traces([$span]);
     }
 
     /**

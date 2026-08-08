@@ -33,6 +33,15 @@ final readonly class TelemetryBatch
     }
 
     /**
+     * Top-level items in the batch — spans, metric families and events.
+     * What an operator means by "57 metric families".
+     */
+    public function count(): int
+    {
+        return count($this->spans) + count($this->metrics) + count($this->events);
+    }
+
+    /**
      * Narrow the batch to the signals an exporter supports.
      */
     public function only(SignalSet $signals): self
