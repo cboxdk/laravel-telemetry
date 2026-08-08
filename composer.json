@@ -48,15 +48,17 @@
         "phpstan/phpstan-phpunit": "^2.0"
     },
     "suggest": {
-        "ext-apcu": "Required when using the apcu metric store.",
-        "ext-redis": "Recommended when using the redis metric store (phpredis).",
-        "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export.",
         "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans.",
+        "ext-apcu": "Required when using the apcu metric store.",
+        "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export.",
+        "ext-pdo_sqlite": "Required when using the sqlite metric store or spool (NativePHP mobile/desktop).",
+        "ext-redis": "Recommended when using the redis metric store (phpredis).",
         "geoip2/geoip2": "Resolve client.geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",
         "laravel/horizon": "Supervisor/master state, long-wait detection, process restarts and OOM metrics when Horizon runs your queues.",
-        "laravel/reverb": "WebSocket message/channel/connection metrics when Reverb is your broadcasting server.",
         "laravel/pennant": "Feature flag check counters (feature.checks, feature.unknown).",
-        "livewire/livewire": "Component lifecycle: mount/hydrate counters + render/update/call detail spans."
+        "laravel/reverb": "WebSocket message/channel/connection metrics when Reverb is your broadcasting server.",
+        "livewire/livewire": "Component lifecycle: mount/hydrate counters + render/update/call detail spans.",
+        "nativephp/mobile": "Screen views, time-on-screen and interaction spans for a NativePHP mobile app (^4.1 for the automatic half — earlier versions dispatch no screen lifecycle events)."
     },
     "autoload": {
         "psr-4": {
@@ -66,7 +68,10 @@
     "autoload-dev": {
         "psr-4": {
             "Cbox\\Telemetry\\Tests\\": "tests/"
-        }
+        },
+        "files": [
+            "tests/fixtures/nativephp-screen-events.php"
+        ]
     },
     "extra": {
         "branch-alias": {

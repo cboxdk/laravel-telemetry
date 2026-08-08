@@ -22,6 +22,7 @@ use Cbox\Telemetry\Exporters\Prometheus\PrometheusRenderer;
 use Cbox\Telemetry\Exporters\Spool\RedisSpool;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
+use Cbox\Telemetry\Exporters\Spool\SqliteSpool;
 use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Controllers\SourcemapController;
@@ -39,6 +40,7 @@ use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
+use Cbox\Telemetry\Instrumentation\NativeScreenInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\PennantInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
@@ -55,6 +57,7 @@ use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
+use Cbox\Telemetry\Metrics\Stores\SqliteMetricStore;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\Cast;
@@ -66,6 +69,7 @@ use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\Support\Symbolicator;
 use Cbox\Telemetry\Tracing\Tracer;
+use Closure;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
@@ -114,17 +118,35 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->singleton(Spool::class, function (Application $app) {
             $config = $app->make('config');
 
+            $maxItems = Cast::int($config->get('telemetry.otlp.spool.max_items'), 20000);
+
+            if (Cast::string($config->get('telemetry.otlp.spool.driver'), 'redis') === 'sqlite') {
+                return new SqliteSpool(
+                    path: Cast::string($config->get('telemetry.otlp.spool.path'), storage_path('framework/telemetry-spool.sqlite')),
+                    maxItems: $maxItems,
+                );
+            }
+
             return new RedisSpool(
                 redis: $app->make('redis'),
                 connection: Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
                 key: Cast::string($config->get('telemetry.otlp.spool.key'), 'telemetry:spool'),
-                maxItems: Cast::int($config->get('telemetry.otlp.spool.max_items'), 20000),
+                maxItems: $maxItems,
             );
         });
 
         $this->mergeConfigFrom(__DIR__.'/../config/telemetry.php', 'telemetry');
 
         $this->app->singleton(MetricStore::class, fn (Application $app) => $this->buildStore($app));
+
+        // Resolved on boot only when NativePHP dispatches the screen
+        // lifecycle events; otherwise nothing touches it until an app's own
+        // screen base class asks (see docs/cookbook/nativephp.md). It holds
+        // the open-screen timers, so one instance has to serve every screen.
+        $this->app->singleton(
+            NativeScreenInstrumentation::class,
+            fn (Application $app) => new NativeScreenInstrumentation($app),
+        );
 
         $this->app->singleton(Registry::class, function (Application $app) {
             /** @var list<float> $buckets */
@@ -249,6 +271,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerSystemMetricsProvider();
         $this->registerSelfMetrics();
         $this->registerOctaneReset();
+        $this->registerNativePhpReset();
         $this->registerAboutCommand();
     }
 
@@ -387,13 +410,19 @@ class TelemetryServiceProvider extends ServiceProvider
             'apcu' => new ApcuMetricStore(
                 prefix: Cast::string($config->get('telemetry.stores.apcu.prefix'), 'telemetry'),
             ),
+            'sqlite' => new SqliteMetricStore(
+                path: Cast::string($config->get('telemetry.stores.sqlite.path'), storage_path('framework/telemetry-metrics.sqlite')),
+                busyTimeoutMs: Cast::int($config->get('telemetry.stores.sqlite.busy_timeout'), 5000),
+            ),
             'array' => new ArrayMetricStore,
             default => new NullMetricStore,
         };
 
         // Wrap networked/shared stores in the write buffer; the array and
         // null stores are in-process already and gain nothing from it.
-        if (in_array($driver, ['redis', 'apcu'], true) && $config->get('telemetry.buffer_writes', true)) {
+        // sqlite is included because a disk write per observation is the
+        // one thing that would make this store too slow on a phone.
+        if (in_array($driver, ['redis', 'apcu', 'sqlite'], true) && $config->get('telemetry.buffer_writes', true)) {
             return new BufferedMetricStore($store);
         }
 
@@ -854,6 +883,14 @@ class TelemetryServiceProvider extends ServiceProvider
             Livewire::componentHook(LivewireInstrumentation::class);
         }
 
+        // Screen views on NativePHP mobile, once upstream dispatches the
+        // lifecycle events. The guard lives inside register(); interaction
+        // spans stay opt-in either way (see the class docblock).
+        if ($config->get('telemetry.instrument.native_screens', true)
+            && class_exists(NativeScreenInstrumentation::MOUNTED)) {
+            $this->app->make(NativeScreenInstrumentation::class)->register($events);
+        }
+
         if ($config->get('telemetry.instrument.broadcasting', true)) {
             (new BroadcastingInstrumentation)->register($this->app);
         }
@@ -959,7 +996,49 @@ class TelemetryServiceProvider extends ServiceProvider
         // (a request that died mid-HTTP-call or mid-transaction). Without
         // this the singleton instrumentations leak worker memory and can
         // mis-parent the next request's spans.
-        $reset = function (): void {
+        $reset = $this->freshRequestReset();
+
+        $dispatcher = $this->app->make(Dispatcher::class);
+        $dispatcher->listen(RequestReceived::class, $reset);
+
+        // RoadRunner/FrankenPHP/Swoole all surface as Octane; the tick
+        // worker (queue-less scheduling) resets on the same signal.
+        if (class_exists(TickReceived::class)) {
+            $dispatcher->listen(TickReceived::class, $reset);
+        }
+    }
+
+    /**
+     * NativePHP for Mobile boots the app once and dispatches every request
+     * through the same container — Octane's problem in a smaller box, with
+     * its own hook rather than Laravel events.
+     *
+     * This covers the web/Livewire path only. SuperNative screens never
+     * reach Runtime::dispatch(): NativeRouter holds a single request open
+     * for the lifetime of a screen, so state there is reset per
+     * interaction by InstrumentsNativeScreen instead.
+     */
+    private function registerNativePhpReset(): void
+    {
+        /** @var class-string|string $runtime */
+        $runtime = 'Native\Mobile\Runtime';
+
+        if (! class_exists($runtime) || ! method_exists($runtime, 'onReset')) {
+            return;
+        }
+
+        $runtime::onReset($this->freshRequestReset());
+    }
+
+    /**
+     * Drop any trace context AND any half-open instrumentation state a
+     * prior request left behind (one that died mid-HTTP-call or
+     * mid-transaction). Without this the singleton instrumentations leak
+     * worker memory and can mis-parent the next request's spans.
+     */
+    private function freshRequestReset(): Closure
+    {
+        return function (): void {
             FailSafe::guard(function () {
                 $this->app->make(TelemetryManager::class)->resetContext();
 
@@ -974,15 +1053,6 @@ class TelemetryServiceProvider extends ServiceProvider
                 }
             });
         };
-
-        $dispatcher = $this->app->make(Dispatcher::class);
-        $dispatcher->listen(RequestReceived::class, $reset);
-
-        // RoadRunner/FrankenPHP/Swoole all surface as Octane; the tick
-        // worker (queue-less scheduling) resets on the same signal.
-        if (class_exists(TickReceived::class)) {
-            $dispatcher->listen(TickReceived::class, $reset);
-        }
     }
 
     /**

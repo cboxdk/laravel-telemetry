@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **NativePHP support — mobile v4 (SuperNative) and desktop v2.** See
+  `docs/cookbook/nativephp.md`.
+  - `sqlite` metric store driver (`TELEMETRY_STORE=sqlite`) for runtimes with
+    neither Redis nor APCu. Durable across app restarts, and safe for the
+    several PHP processes a desktop app runs. Sits behind `BufferedMetricStore`
+    like the other shared stores.
+  - `sqlite` spool driver (`TELEMETRY_OTLP_SPOOL_DRIVER=sqlite`) so a device
+    that spent the afternoon offline still has its telemetry when it
+    reconnects — the Redis spool dies with the process.
+  - `Instrumentation\NativeScreenInstrumentation` — screen and interaction
+    telemetry for mobile v4, in two halves. Screen views (`screen.views`,
+    `screen.view.duration`, `screen.view` events) come free from the upstream
+    `Native\Mobile\Events\Screen\*` lifecycle events on `nativephp/mobile`
+    ^4.1, behind a `class_exists` guard so 4.0.x never arms them. Interaction spans stay opt-in:
+    a native screen holds one request open for its whole lifetime, so
+    `Kernel::terminate()` never fires and the per-request flush never happens —
+    and upstream announces no interaction, so the app forwards
+    `dispatch()`/`dispatchNativeEvent()` from one shared base class.
+  - Automatic state reset on `Native\Mobile\Runtime::onReset()`, the persistent
+    runtime's equivalent of the existing Octane reset.
+- Architecture decision records under `docs/decisions/`. The first restates
+  invariant #3 in terms of shared *writers*, which is what makes a
+  process-local store correct on a single-writer runtime.
+
 ## [1.1.0] - 2026-08-05
 
 Fixes a `TypeError` that made `instrument.filesystem` unusable alongside any

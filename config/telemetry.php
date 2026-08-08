@@ -74,9 +74,14 @@ return [
     | so values survive PHP's shared-nothing lifecycle and aggregate across
     | web workers, queue workers and nodes.
     |
-    | Supported drivers: "redis", "apcu", "array".
+    | Supported drivers: "redis", "apcu", "sqlite", "array".
     |
     | We recommend a Redis connection separate from your queue connection.
+    |
+    | "sqlite" is for runtimes with neither Redis nor APCu — NativePHP
+    | mobile and desktop. It is durable across restarts and safe for
+    | several processes writing the same series. See
+    | docs/decisions/0001-metric-state-on-single-process-runtimes.md.
     |
     */
 
@@ -102,6 +107,18 @@ return [
 
         'apcu' => [
             'prefix' => env('TELEMETRY_APCU_PREFIX', 'telemetry'),
+        ],
+
+        'sqlite' => [
+            // Its own file, opened on a raw PDO handle — never one of the
+            // app's database connections, or QueryInstrumentation would
+            // measure telemetry's own writes.
+            'path' => env('TELEMETRY_SQLITE_PATH', storage_path('framework/telemetry-metrics.sqlite')),
+
+            // How long a write waits for a competing writer before giving
+            // up. Only matters when more than one process writes — a
+            // desktop app's queue worker alongside its server.
+            'busy_timeout' => env('TELEMETRY_SQLITE_BUSY_TIMEOUT', 5000),
         ],
     ],
 
@@ -140,9 +157,20 @@ return [
         // batches every --interval seconds. Drop-oldest above max_items.
         'spool' => [
             'enabled' => env('TELEMETRY_OTLP_SPOOL', false),
+
+            // "redis" (a capped list) or "sqlite" (a file). Use sqlite
+            // where there is no Redis and the network comes and goes —
+            // NativePHP mobile and desktop — because it is the one that
+            // survives the app being killed with a full queue.
+            'driver' => env('TELEMETRY_OTLP_SPOOL_DRIVER', 'redis'),
+
             'connection' => env('TELEMETRY_OTLP_SPOOL_CONNECTION', 'default'),
             'key' => env('TELEMETRY_OTLP_SPOOL_KEY', 'telemetry:spool'),
             'max_items' => env('TELEMETRY_OTLP_SPOOL_MAX_ITEMS', 20000),
+
+            // sqlite driver only. Its own file — sharing the metric store's
+            // would make a spool drain contend with every metric write.
+            'path' => env('TELEMETRY_OTLP_SPOOL_PATH', storage_path('framework/telemetry-spool.sqlite')),
         ],
     ],
 
@@ -638,6 +666,19 @@ return [
         // (livewire.render/update/call) — same tail-sampled, root-span-
         // tallied shape as view rendering.
         'livewire' => env('TELEMETRY_INSTRUMENT_LIVEWIRE', true),
+
+        // NativePHP for Mobile screens. Two halves: screen.views +
+        // .view.duration come free from the upstream Screen lifecycle
+        // events on nativephp/mobile ^4.1 (guarded by class_exists, so
+        // 4.0.x never arms them), while screen.interaction/native_event
+        // spans need the
+        // app to forward dispatch()/dispatchNativeEvent() from a
+        // NativeComponent base class — upstream announces no interaction,
+        // and that is where the flush must happen. See
+        // docs/cookbook/nativephp.md. Turning this off silences both and
+        // makes the forwards pass straight through, which is how a consent
+        // prompt answered mid-session takes effect without a restart.
+        'native_screens' => env('TELEMETRY_INSTRUMENT_NATIVE_SCREENS', true),
 
         // broadcast.count root-span tally + a "broadcast {event}" detail
         // span per Broadcaster::broadcast() call — driver-agnostic

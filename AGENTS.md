@@ -30,8 +30,11 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
    type conflict) may throw.
 2. **No `KEYS`/`SCAN`** on any Redis path; no full-keyspace `APCuIterator`
    scans. Stores maintain explicit indexes.
-3. **Metric state lives in the shared store**, never in the PHP process —
-   that is the package's reason to exist (shared-nothing FPM).
+3. **Metric state lives in a store shared by every process that writes the
+   series**, never only in one request's memory — that is the package's
+   reason to exist (shared-nothing FPM). On a single-writer runtime a
+   process-local store satisfies this; see
+   `docs/decisions/0001-metric-state-on-single-process-runtimes.md`.
 4. **Push and pull instruments stay distinct API shapes.** Don't blur
    `gauge('x')->set()` and `gauge('x', fn () => ...)`.
 5. **Full W3C traceparent propagation** (trace id AND parent span id) —
