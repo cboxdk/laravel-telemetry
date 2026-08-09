@@ -7,9 +7,11 @@ namespace Cbox\Telemetry\Console;
 use Cbox\SystemMetrics\DTO\Metrics\Cpu\CpuSnapshot;
 use Cbox\SystemMetrics\ProcessMetrics;
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The optional node_exporter analog: samples host metrics (CPU via a
@@ -37,6 +39,9 @@ final class MonitorCommand extends Command
     /** @var CpuSnapshot|null */
     private ?object $previousCpu = null;
 
+    /** The last failure reported in daemon mode; '' means healthy. */
+    private ?string $lastReported = null;
+
     public function handle(TelemetryManager $telemetry): int
     {
         if (! $telemetry->enabled()) {
@@ -61,14 +66,85 @@ final class MonitorCommand extends Command
             FailSafe::guard(fn () => $this->sampleHost($telemetry));
             FailSafe::guard(fn () => $this->sampleProcesses($telemetry));
 
-            $telemetry->flush();
+            $report = FailSafe::guard(fn (): ExportReport => $telemetry->flush());
 
             if ($this->option('once')) {
-                return self::SUCCESS;
+                // Read from cron, where the exit code is the whole report.
+                // Sampling a host and then failing to ship it is a failure,
+                // and this returned SUCCESS for one until now.
+                return $this->reportOneShot($report);
             }
+
+            $this->watch($report);
 
             sleep($interval);
         } while (true);
+    }
+
+    /**
+     * A single run answers with its exit code.
+     */
+    private function reportOneShot(?ExportReport $report): int
+    {
+        if ($report === null) {
+            $this->components->error('Failed to flush the sampled metrics.');
+
+            return self::FAILURE;
+        }
+
+        if ($report->successful()) {
+            return self::SUCCESS;
+        }
+
+        $this->components->error('The sampled metrics were not accepted: '.$report->summary());
+
+        foreach ($report->problems() as $problem) {
+            $this->components->twoColumnDetail($problem->exporter, '<fg=red>'.$problem->describe().'</>');
+        }
+
+        Log::error('telemetry:monitor — the sampled metrics were not accepted', [
+            'summary' => $report->summary(),
+        ]);
+
+        return self::FAILURE;
+    }
+
+    /**
+     * The daemon answers to a log, and only when something changed.
+     *
+     * A collector that is down for an hour must not write 3,600 identical
+     * lines. FlushCommand solves the same problem the same way; the two are
+     * not shared yet because its copy is interleaved with spool-specific
+     * reporting, and untangling a command released hours ago is a worse
+     * trade than these few lines.
+     */
+    private function watch(?ExportReport $report): void
+    {
+        $signature = match (true) {
+            $report === null => 'threw',
+            $report->successful() => '',
+            default => $report->summary(),
+        };
+
+        if ($signature === $this->lastReported) {
+            return;
+        }
+
+        $this->lastReported = $signature;
+
+        if ($signature === '') {
+            $this->components->info('Metrics are being accepted again.');
+            Log::info('telemetry:monitor — metrics are being accepted again');
+
+            return;
+        }
+
+        $headline = $report === null
+            ? 'Failed to flush the sampled metrics.'
+            : 'The sampled metrics were not accepted: '.$report->summary();
+
+        $this->components->error($headline);
+        Log::error("telemetry:monitor — {$headline}");
     }
 
     private function sampleHost(TelemetryManager $telemetry): void
