@@ -87,9 +87,9 @@ final class SqliteSpool implements Spool
                 }
 
                 $seqs[] = (int) $row['seq'];
-                $entry = json_decode($row['entry'], true);
+                $entry = SpoolEntry::decode($row['entry']);
 
-                if (is_array($entry) && is_string($entry['signal'] ?? null) && is_array($entry['payload'] ?? null)) {
+                if ($entry !== null) {
                     $entries[] = $entry;
                 }
             }

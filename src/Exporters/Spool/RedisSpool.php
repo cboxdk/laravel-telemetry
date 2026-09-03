@@ -49,9 +49,9 @@ final class RedisSpool implements Spool
                 break;
             }
 
-            $entry = json_decode($raw, true);
+            $entry = SpoolEntry::decode($raw);
 
-            if (is_array($entry) && is_string($entry['signal'] ?? null) && is_array($entry['payload'] ?? null)) {
+            if ($entry !== null) {
                 $entries[] = $entry;
             }
         }
