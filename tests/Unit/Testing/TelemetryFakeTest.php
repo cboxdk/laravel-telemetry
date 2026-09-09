@@ -56,6 +56,30 @@ it('asserts recorded spans with a matcher', function () {
     expect($fake->recordedSpans('import.customers'))->toHaveCount(1);
 });
 
+it('measures span resources, like the real tracer does', function () {
+    $fake = new TelemetryFake;
+
+    $fake->span('import.customers', fn () => null);
+
+    $attributes = $fake->recordedSpans('import.customers')[0]->attributes();
+
+    expect($attributes)->toHaveKeys(['php.cpu.time_ms', 'php.memory.delta_bytes'])
+        ->and($attributes['php.cpu.time_ms'])->toBeFloat()
+        ->and($attributes['php.memory.delta_bytes'])->toBeInt();
+});
+
+it('can model instrument.resources => false', function () {
+    $fake = new TelemetryFake;
+    $fake->tracer()->measureSpanResources(false);
+
+    $fake->span('import.customers', fn () => null);
+
+    expect($fake->recordedSpans('import.customers')[0]->attributes())
+        ->not->toHaveKey('php.cpu.time_ms')
+        ->and($fake->recordedSpans('import.customers')[0]->attributes())
+        ->not->toHaveKey('php.memory.delta_bytes');
+});
+
 it('asserts emitted events', function () {
     $fake = new TelemetryFake;
 

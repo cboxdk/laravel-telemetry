@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Telemetry::fake()` now measures span resources, like the real tracer.**
+  `TelemetryFake` built its tracer as `new Tracer(sampleRate: 1.0)` and never
+  called `measureSpanResources()`, which the service provider does apply to
+  the real tracer whenever `instrument.resources` is on — the default. So
+  every span recorded through the fake was missing `php.cpu.time_ms` and
+  `php.memory.delta_bytes`, and a test asserting on either failed against a
+  double that was quietly less capable than production. The divergence was
+  invisible from the other direction too: root spans still carried the
+  request middleware's own `php.memory.peak_bytes` and
+  `process.memory.rss_peak_bytes`, because those are set explicitly rather
+  than by the tracer, so only child spans came back bare.
+
+  To model an app with `instrument.resources => false`, turn it off on the
+  fake's tracer: `$fake->tracer()->measureSpanResources(false)`.
+
+
 ## [1.2.0] - 2026-08-08
 
 Two things. Telemetry now runs on a device — NativePHP for Mobile v4

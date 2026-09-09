@@ -47,6 +47,32 @@ $fake->recordedSpans('import.customers');                    // list<Span>
 $fake->recordedEvents();                                     // list<TelemetryEvent>
 ```
 
+## Span resource attributes
+
+The fake measures span resources, exactly as the service provider does for
+the real tracer when `instrument.resources` is on (the default), so every
+recorded span carries `php.cpu.time_ms` and `php.memory.delta_bytes`:
+
+```php
+$fake->span('import.customers', fn () => $importer->run());
+
+$span = $fake->recordedSpans('import.customers')[0];
+$span->attributes()['php.cpu.time_ms'];       // float
+$span->attributes()['php.memory.delta_bytes']; // int, may be negative
+```
+
+To model an app that turned the measurement off, turn it off on the fake's
+tracer too:
+
+```php
+$fake->tracer()->measureSpanResources(false);
+```
+
+Peak-memory and OS-level numbers (`php.memory.peak_bytes`,
+`process.memory.rss_peak_bytes`, `process.cpu.utilization`) are per unit of
+work, not per span — the request middleware and the queue instrumentation
+put them on the root span. See [Traces](../core-concepts/traces.md).
+
 ## Testing a telemetry provider
 
 Package authors can test their provider without booting Laravel:
