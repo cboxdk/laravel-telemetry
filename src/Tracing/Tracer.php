@@ -33,7 +33,7 @@ final class Tracer
 
     private ?Closure $onBufferFull = null;
 
-    /** @var array<string, scalar|null> ambient dimensions merged into every finished span */
+    /** @var array<string, scalar> ambient dimensions merged into every finished span; a null passed to addContext() removes the key rather than storing one */
     private array $contextAttributes = [];
 
     private bool $measureSpanResources = false;
@@ -92,15 +92,33 @@ final class Tracer
      * into every span that finishes from now on — span-specific
      * attributes win on conflict.
      *
+     * A null value REMOVES the dimension rather than recording an empty one:
+     * spans take context through mergeMissingAttributes(), whose ??= creates
+     * the key even for a null, and the OTLP serializer has no null — it ships
+     * an empty string. So a caller mirroring "the current tenant, or none"
+     * would otherwise stamp an empty attribute on every span outside a tenant,
+     * and had to filter nulls itself to avoid it. Null meaning "not set" also
+     * gives callers the only way to clear a dimension mid-unit-of-work; before
+     * this, resetContext() — which drops the trace continuation with it — was
+     * the only lever.
+     *
      * @param  array<string, scalar|null>  $attributes
      */
     public function addContext(array $attributes): void
     {
-        $this->contextAttributes = [...$this->contextAttributes, ...$attributes];
+        foreach ($attributes as $key => $value) {
+            if ($value === null) {
+                unset($this->contextAttributes[$key]);
+
+                continue;
+            }
+
+            $this->contextAttributes[$key] = $value;
+        }
     }
 
     /**
-     * @return array<string, scalar|null>
+     * @return array<string, scalar>
      */
     public function contextAttributes(): array
     {

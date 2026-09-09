@@ -137,6 +137,16 @@ Telemetry::context([
 ]);
 ```
 
+A `null` value means **not set**: it removes the dimension rather than
+recording an empty one, so an optional value needs no filtering at the call
+site, and a dimension can be cleared without `resetContext()` (which would
+drop the trace continuation with it).
+
+```php
+Telemetry::context(['tenant.id' => $tenant?->id]); // absent when null
+Telemetry::context(['tenant.id' => null]);         // removes it again
+```
+
 From that point every span, event and telemetry-channel log record in the
 request carries the dimensions (span-specific attributes win on
 conflict) — and **dispatched jobs inherit them**, together with

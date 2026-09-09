@@ -48,6 +48,38 @@ it('merges context dimensions into every span, with span-specific winning', func
         ->and($inner->attributes()['plan'])->toBe('overridden');
 });
 
+it('treats a null dimension as not set rather than recording an empty one', function () {
+    // Spans take context through mergeMissingAttributes(), whose ??= creates
+    // the key even for a null, and OTLP has no null — it ships an empty string.
+    // An app mirroring "the current tenant, or none" would otherwise stamp an
+    // empty attribute on every span outside a tenant.
+    Telemetry::context(['tenant.id' => null, 'plan' => 'pro']);
+
+    Telemetry::span('work', fn () => null);
+
+    [$spans] = collected($this->collector);
+
+    $attributes = collect($spans)->firstWhere('name', 'work')->attributes();
+
+    expect($attributes)->not->toHaveKey('tenant.id')
+        ->and($attributes['plan'])->toBe('pro');
+});
+
+it('removes a dimension when it is set to null later', function () {
+    // The only lever before this was resetContext(), which drops the trace
+    // continuation along with it.
+    Telemetry::context(['tenant.id' => 42]);
+    Telemetry::span('before', fn () => null);
+
+    Telemetry::context(['tenant.id' => null]);
+    Telemetry::span('after', fn () => null);
+
+    [$spans] = collected($this->collector);
+
+    expect(collect($spans)->firstWhere('name', 'before')->attributes()['tenant.id'])->toBe(42)
+        ->and(collect($spans)->firstWhere('name', 'after')->attributes())->not->toHaveKey('tenant.id');
+});
+
 it('applies context to events and telemetry-channel logs', function () {
     config()->set('logging.channels.telemetry', ['driver' => 'telemetry', 'level' => 'debug']);
 
