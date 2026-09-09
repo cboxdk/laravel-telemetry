@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Console;
 use Cbox\SystemMetrics\DTO\Metrics\Cpu\CpuSnapshot;
 use Cbox\SystemMetrics\ProcessMetrics;
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
@@ -151,19 +152,9 @@ final class MonitorCommand extends Command
     {
         $metrics = SystemMetrics::class;
 
-        // CPU: a real delta between ticks — no blocking sleep needed
-        // after the first sample.
-        $cpu = $metrics::cpu()->getValueOr(null);
-
-        if ($cpu !== null) {
-            if ($this->previousCpu !== null) {
-                $delta = $cpu::calculateDelta($this->previousCpu, $cpu);
-
-                $telemetry->gauge('system.cpu.utilization', description: 'CPU busy fraction (0-1)', unit: '1')
-                    ->set($delta->usagePercentage() / 100);
-            }
-
-            $this->previousCpu = $cpu;
+        if (($cpuPercentage = $this->sampleCpuPercentage()) !== null) {
+            $telemetry->gauge('system.cpu.utilization', description: 'CPU busy fraction (0-1)', unit: '1')
+                ->set($cpuPercentage / 100);
         }
 
         if (($memory = $metrics::memory()->getValueOr(null)) !== null) {
@@ -194,6 +185,42 @@ final class MonitorCommand extends Command
             $gauge->set((float) $network->totalBytesReceived(), ['direction' => 'receive']);
             $gauge->set((float) $network->totalBytesSent(), ['direction' => 'transmit']);
         }
+    }
+
+    /**
+     * CPU busy percentage, by whichever method the mode allows.
+     *
+     * The daemon deltas between its own ticks — the honest measure, and no
+     * blocking sleep. Cron mode has no next tick to delta against: the process
+     * exits, `$previousCpu` dies with it, and every `--once` run is therefore
+     * a first sample. It reported no CPU at all, silently, in the mode the
+     * README recommends for hosts without a supervisor. So it pays for one
+     * short blocking sample instead — the same one the scrape-time provider
+     * takes, sized by the same config key.
+     */
+    private function sampleCpuPercentage(): ?float
+    {
+        if (! $this->option('once')) {
+            $cpu = SystemMetrics::cpu()->getValueOr(null);
+
+            if (! $cpu instanceof CpuSnapshot) {
+                return null;
+            }
+
+            $previous = $this->previousCpu;
+            $this->previousCpu = $cpu;
+
+            return $previous === null
+                ? null
+                : $cpu::calculateDelta($previous, $cpu)->usagePercentage();
+        }
+
+        $interval = Cast::float(
+            $this->laravel->make('config')->get('telemetry.providers.system.cpu_interval'),
+            0.1,
+        );
+
+        return SystemMetrics::cpuUsage($interval)->getValueOr(null)?->usagePercentage();
     }
 
     /**

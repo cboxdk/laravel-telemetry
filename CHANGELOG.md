@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`telemetry:monitor --once` reports CPU utilization.** It never had. The
+  command deltas CPU between its own ticks, holding the previous snapshot in an
+  instance property — but a single run is always a *first* sample: the process
+  exits and the property dies with it, so the delta branch was unreachable and
+  `system.cpu.utilization` was silently absent from every cron-mode sample.
+  `--once` is the mode the docs recommend for hosts without a supervisor, and
+  the failure looked like nothing at all: memory, load, disk and network all
+  landed, so the metric appeared to be missing from the dashboard rather than
+  from the host.
+
+  Cron mode now pays for one short blocking sample instead — the same
+  `SystemMetrics::cpuUsage()` the scrape-time provider takes, sized by the same
+  `providers.system.cpu_interval` key. Daemon mode is unchanged and still
+  deltas between ticks with no sleep.
+
+
 ## [1.4.0] - 2026-09-09
 
 ### Changed
