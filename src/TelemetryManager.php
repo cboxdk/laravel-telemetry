@@ -279,6 +279,12 @@ class TelemetryManager
      * Traces/events/logs only — never metric labels (cardinality safety);
      * use labelRequestsUsing() for bounded metric dimensions.
      *
+     * A null value REMOVES the dimension, so mirroring an optional value needs
+     * no filtering at the call site and a dimension can be cleared without
+     * resetContext():
+     *
+     *     Telemetry::context(['tenant.id' => $tenant?->id]);
+     *
      * @param  array<string, scalar|null>  $attributes
      */
     public function context(array $attributes): void
@@ -291,7 +297,7 @@ class TelemetryManager
     }
 
     /**
-     * @return array<string, scalar|null>
+     * @return array<string, scalar>
      */
     public function contextAttributes(): array
     {

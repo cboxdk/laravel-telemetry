@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A `null` in `Telemetry::context()` now means "not set" — it removes the
+  dimension instead of recording an empty one.** Spans take context through
+  `mergeMissingAttributes()`, whose `??=` creates the key even for a null, and
+  the OTLP serializer has no null — it ships an empty string. So an app
+  mirroring an optional dimension (`['tenant.id' => $tenant?->id]`, the shape
+  every multi-tenant integration reaches for) stamped an empty attribute on
+  every span raised outside a tenant: every console command, every
+  unauthenticated request. The only way to avoid it was to filter nulls at each
+  call site, which is a workaround the package was silently requiring.
+
+  Null also gives callers a way to clear one dimension mid-unit-of-work.
+  Previously the only lever was `resetContext()`, which drops the trace
+  continuation along with it — so code that wanted to stop attributing spans to
+  a tenant had to choose between a stale value and a broken trace.
+
+  Passing null was previously the only way to get an empty-string attribute
+  from context, which nothing would do deliberately, so this is a fix in
+  practice. It is filed as Changed because `contextAttributes()` now returns
+  `array<string, scalar>` rather than `array<string, scalar|null>`.
+
+
 ## [1.3.1] - 2026-09-09
 
 ### Fixed
