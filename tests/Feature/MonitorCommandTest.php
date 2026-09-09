@@ -41,3 +41,31 @@ it('still exits zero when the batch lands', function (): void {
 
     $this->artisan('telemetry:monitor --once')->assertExitCode(0);
 });
+
+/**
+ * A single run is always a FIRST sample: the process exits and $previousCpu
+ * dies with it. Deltaing against a previous tick therefore never produced a
+ * CPU number in cron mode — the mode the docs recommend for hosts without a
+ * supervisor — and did so silently.
+ */
+it('reports cpu utilization from a single run', function (): void {
+    $gauges = [];
+
+    $telemetry = Mockery::mock(TelemetryManager::class);
+    $telemetry->shouldReceive('enabled')->andReturn(true);
+    $telemetry->shouldReceive('counter')->andReturnSelf();
+    $telemetry->shouldReceive('flush')->andReturn(new ExportReport);
+    $telemetry->shouldReceive('gauge')
+        ->andReturnUsing(function (string $name) use (&$gauges, $telemetry) {
+            $gauges[] = $name;
+
+            return $telemetry;
+        });
+    $telemetry->shouldReceive('set')->andReturnSelf();
+
+    app()->instance(TelemetryManager::class, $telemetry);
+
+    $this->artisan('telemetry:monitor --once')->assertExitCode(0);
+
+    expect($gauges)->toContain('system.cpu.utilization');
+})->skipOnWindows();
