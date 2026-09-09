@@ -22,6 +22,13 @@ use PHPUnit\Framework\Assert;
  * Metrics land in an in-memory store, every trace is sampled, and flushed
  * spans/events are collected instead of exported — with assertions to
  * match, so packages can test their providers without infrastructure.
+ *
+ * Span resource measurement is ON, matching the `instrument.resources`
+ * default the service provider applies to the real tracer: a fake whose
+ * spans lack `php.cpu.time_ms`/`php.memory.delta_bytes` would fail tests
+ * for attributes production really does emit. Turn it off — to model
+ * `instrument.resources => false` — with
+ * `$fake->tracer()->measureSpanResources(false)`.
  */
 final class TelemetryFake extends TelemetryManager
 {
@@ -35,11 +42,13 @@ final class TelemetryFake extends TelemetryManager
     public function __construct(array $defaultBuckets = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000])
     {
         $store = new ArrayMetricStore;
+        $tracer = new Tracer(sampleRate: 1.0);
+        $tracer->measureSpanResources();
 
         parent::__construct(
             enabled: true,
             registry: new Registry($store, $defaultBuckets),
-            tracer: new Tracer(sampleRate: 1.0),
+            tracer: $tracer,
             resource: ['service.name' => 'testing'],
         );
 
