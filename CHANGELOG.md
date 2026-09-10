@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`telemetry:monitor` scopes its gauges to the host that measured them.** Every
+  gauge the command writes describes ONE machine, but they were written with only
+  `state`/`period`/`direction` labels into a store shared by the whole fleet —
+  which is the package's reason to exist. `system.memory.usage{state="used"}` was
+  therefore a single series that every host overwrote in turn, and the elected
+  `telemetry:flush` exported the survivor stamped with its OWN `host.name`
+  resource. One host's memory silently read as another's and the rest of the
+  fleet was simply absent, which is the opposite of what a node_exporter analog
+  is for. `process.count` and `process.memory.rss` had it too, so a per-host
+  queue-worker count was really "whichever host wrote last".
+
+  All of them now carry a `host` label. Cardinality is the size of the fleet.
+  This is the one place host identity belongs on the metric rather than the
+  resource: the resource is attached by whoever *exports*, which under
+  `onOneServer` is not whoever measured.
+
+  **Upgrade note:** existing `system.*` and `process.*` series gain a label.
+  Dashboards that sum or select them without a `host` matcher keep working;
+  panels pinned to the exact old labelset need the new dimension.
+
+
 ## [1.4.1] - 2026-09-09
 
 ### Fixed

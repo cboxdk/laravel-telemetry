@@ -43,6 +43,9 @@ final class MonitorCommand extends Command
     /** The last failure reported in daemon mode; '' means healthy. */
     private ?string $lastReported = null;
 
+    /** Memoized: gethostname() is a syscall and the answer cannot change. */
+    private ?string $host = null;
+
     public function handle(TelemetryManager $telemetry): int
     {
         if (! $telemetry->enabled()) {
@@ -148,42 +151,63 @@ final class MonitorCommand extends Command
         Log::error("telemetry:monitor — {$headline}");
     }
 
+    /**
+     * Every gauge this command writes is scoped to ONE machine, and the metric
+     * store is shared by the whole fleet — that is the package's reason to
+     * exist. Without a host label, `system.memory.usage{state=used}` is a
+     * single series that every host overwrites in turn, and the elected
+     * `telemetry:flush` then exports the survivor stamped with its OWN
+     * host.name resource. One host's memory silently reads as another's, and
+     * the rest of the fleet is simply absent.
+     *
+     * The label is bounded by the size of the fleet, which is the one place
+     * host identity legitimately belongs on a metric rather than a resource:
+     * the resource is attached by whoever exports, not by whoever measured.
+     *
+     * @return array{host: string}
+     */
+    private function hostLabels(): array
+    {
+        return ['host' => $this->host ??= (string) gethostname()];
+    }
+
     private function sampleHost(TelemetryManager $telemetry): void
     {
         $metrics = SystemMetrics::class;
+        $host = $this->hostLabels();
 
         if (($cpuPercentage = $this->sampleCpuPercentage()) !== null) {
             $telemetry->gauge('system.cpu.utilization', description: 'CPU busy fraction (0-1)', unit: '1')
-                ->set($cpuPercentage / 100);
+                ->set($cpuPercentage / 100, $host);
         }
 
         if (($memory = $metrics::memory()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.memory.usage', description: 'Memory in use by state', unit: 'By');
-            $gauge->set((float) $memory->usedBytes, ['state' => 'used']);
-            $gauge->set((float) $memory->freeBytes, ['state' => 'free']);
-            $gauge->set((float) $memory->cachedBytes, ['state' => 'cached']);
+            $gauge->set((float) $memory->usedBytes, $host + ['state' => 'used']);
+            $gauge->set((float) $memory->freeBytes, $host + ['state' => 'free']);
+            $gauge->set((float) $memory->cachedBytes, $host + ['state' => 'cached']);
 
             $telemetry->gauge('system.memory.utilization', description: 'Fraction of memory in use (0-1)', unit: '1')
-                ->set($memory->usedPercentage() / 100, ['state' => 'used']);
+                ->set($memory->usedPercentage() / 100, $host + ['state' => 'used']);
         }
 
         if (($load = $metrics::loadAverage()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.cpu.load_average', description: 'System load average', unit: '1');
-            $gauge->set($load->oneMinute, ['period' => '1m']);
-            $gauge->set($load->fiveMinutes, ['period' => '5m']);
-            $gauge->set($load->fifteenMinutes, ['period' => '15m']);
+            $gauge->set($load->oneMinute, $host + ['period' => '1m']);
+            $gauge->set($load->fiveMinutes, $host + ['period' => '5m']);
+            $gauge->set($load->fifteenMinutes, $host + ['period' => '15m']);
         }
 
         if (($storage = $metrics::storage()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.filesystem.usage', description: 'Filesystem bytes by state', unit: 'By');
-            $gauge->set((float) $storage->usedBytes(), ['state' => 'used']);
-            $gauge->set((float) $storage->availableBytes(), ['state' => 'free']);
+            $gauge->set((float) $storage->usedBytes(), $host + ['state' => 'used']);
+            $gauge->set((float) $storage->availableBytes(), $host + ['state' => 'free']);
         }
 
         if (($network = $metrics::network()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.network.io', description: 'Cumulative network bytes by direction (use rate())', unit: 'By');
-            $gauge->set((float) $network->totalBytesReceived(), ['direction' => 'receive']);
-            $gauge->set((float) $network->totalBytesSent(), ['direction' => 'transmit']);
+            $gauge->set((float) $network->totalBytesReceived(), $host + ['direction' => 'receive']);
+            $gauge->set((float) $network->totalBytesSent(), $host + ['direction' => 'transmit']);
         }
     }
 
@@ -237,7 +261,7 @@ final class MonitorCommand extends Command
             $pids = $this->pgrep($pattern);
 
             $telemetry->gauge('process.count', description: 'Matched processes per monitored group', unit: '{processes}')
-                ->set((float) count($pids), ['process' => $name]);
+                ->set((float) count($pids), $this->hostLabels() + ['process' => $name]);
 
             if ($pids === []) {
                 continue;
@@ -254,7 +278,7 @@ final class MonitorCommand extends Command
             }
 
             $telemetry->gauge('process.memory.rss', description: 'Aggregate RSS per monitored process group', unit: 'By')
-                ->set((float) $totalRss, ['process' => $name]);
+                ->set((float) $totalRss, $this->hostLabels() + ['process' => $name]);
         }
     }
 

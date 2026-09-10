@@ -85,7 +85,17 @@ scrape — set `TELEMETRY_SYSTEM_CPU_INTERVAL=0` to skip it.
 Running `telemetry:monitor` (the node_exporter analog) moves host
 sampling off the scrape path entirely: it pushes the same gauges from a
 scheduler tick or a supervisor daemon, with CPU measured as a proper
-between-tick delta. Set `TELEMETRY_SYSTEM_METRICS=false` alongside it.
+between-tick delta (`--once` takes one short blocking sample instead,
+since a single run has no previous tick to compare against). Set
+`TELEMETRY_SYSTEM_METRICS=false` alongside it — running both publishes
+each host gauge twice per flush with two different values for the same
+series, and the backend keeps whichever lands last.
+
+Its gauges carry a `host` label. They have to: the store is shared by the
+fleet, so without one every host would overwrite the same series, and the
+`host.name` resource is attached by whoever *exports* — which under
+`onOneServer` is not whoever measured. Aggregate across the fleet with
+`sum by (state) (system_memory_usage)` and drill in with `{host="..."}`.
 
 ## Route caching
 
