@@ -61,6 +61,45 @@ it('auto-instruments outgoing http client requests', function () {
         ->and($families['http.client.request.duration']->samples[0]->labels['server.address'])->toBe('api.stripe.test');
 });
 
+it('bounds outgoing-host metric labels through classifyHttpHostsUsing', function () {
+    // server.address is a METRIC label, so an app that calls a host the user
+    // supplied — an OAuth issuer pasted into a form, a customer webhook —
+    // grows a permanent series per hostname.
+    Telemetry::classifyHttpHostsUsing(fn (string $host) => str_ends_with($host, '.stripe.test') ? 'stripe' : 'other');
+
+    Http::fake(['*' => Http::response('ok', 200)]);
+
+    Http::get('https://api.stripe.test/v1/charges');
+    Http::get('https://whatever-a-customer-typed.example/.well-known/openid-configuration');
+
+    $labels = collect(Telemetry::collect())
+        ->firstWhere(fn ($family) => $family->name() === 'http.client.request.duration')
+        ->samples;
+
+    expect(collect($labels)->map(fn ($sample) => $sample->labels['server.address'])->unique()->sort()->values()->all())
+        ->toBe(['other', 'stripe']);
+
+    // The span keeps the real hostname — per-occurrence it costs nothing, and
+    // it is what you need when reading the trace.
+    expect(allSpans($this->collector)->pluck('name'))
+        ->toContain('GET whatever-a-customer-typed.example');
+});
+
+it('drops outgoing-host metrics the classifier rejects, keeping the span', function () {
+    Telemetry::classifyHttpHostsUsing(fn (string $host) => str_ends_with($host, '.stripe.test') ? 'stripe' : null);
+
+    Http::fake(['*' => Http::response('ok', 200)]);
+
+    Http::get('https://whatever-a-customer-typed.example/callback');
+
+    $family = collect(Telemetry::collect())
+        ->firstWhere(fn ($f) => $f->name() === 'http.client.request.duration');
+
+    expect($family?->samples ?? [])->toBeEmpty()
+        ->and(allSpans($this->collector)->pluck('name'))
+        ->toContain('GET whatever-a-customer-typed.example');
+});
+
 it('marks 4xx outgoing responses as errors and never captures the query string', function () {
     Http::fake(['api.stripe.test/*' => Http::response('nope', 403)]);
 

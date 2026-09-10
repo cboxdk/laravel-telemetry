@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Telemetry::classifyHttpHostsUsing()`** — bound the outgoing-host metric
+  label. `server.address` goes onto `http.client.request.duration` and
+  `http.client.connection_failures` as a label, which is safe only while every
+  outbound host is one the app chose. An app that calls a host the USER supplied
+  — an OAuth issuer pasted into a form, a customer webhook, a tenant's own API —
+  grew a permanent series per hostname, and there was no way to bound it short
+  of turning `instrument.http_client` off and losing the spans too. The
+  connection-failure counter is the worse half: a hostname that never answered
+  still creates a series, so it needs no cooperation from the host at all.
+
+  The classifier mirrors `classifyCacheKeysUsing()`, which solves the identical
+  problem one instrumentation over. The returned group replaces `server.address`
+  on the metrics only — spans keep the real hostname — and returning `null`
+  drops the metrics for that host while still recording the span. With no
+  classifier registered, behaviour is unchanged.
 ### Fixed
 
 - **`telemetry:monitor` scopes its gauges to the host that measured them.** Every

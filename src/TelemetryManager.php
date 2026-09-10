@@ -64,6 +64,8 @@ class TelemetryManager
 
     private ?Closure $cacheKeyClassifier = null;
 
+    private ?Closure $httpHostClassifier = null;
+
     private ?Closure $sessionResolver = null;
 
     private ?Closure $clientGeoResolver = null;
@@ -452,6 +454,47 @@ class TelemetryManager
         $group = FailSafe::guard(fn () => ($this->cacheKeyClassifier)($store, $key));
 
         return is_string($group) ? $group : null;
+    }
+
+    /**
+     * Classify outgoing HTTP hosts into bounded groups — or drop them from
+     * the metrics. `server.address` is a metric label on
+     * http.client.request.duration and http.client.connection_failures, so
+     * an app that calls a host the USER supplied — an OAuth issuer pasted
+     * into a form, a customer webhook, a tenant's own API — grows a
+     * permanent series per hostname, and the connection-failure counter
+     * grows one even for hosts that never answered.
+     *
+     *     Telemetry::classifyHttpHostsUsing(function (string $host) {
+     *         return str_ends_with($host, '.stripe.com') ? 'stripe' : 'other';
+     *     });
+     *
+     * The returned group replaces `server.address` on the METRICS only;
+     * spans keep the real hostname, because per-occurrence it costs
+     * nothing and it is what you need when reading a trace. Returning null
+     * drops the metrics for that host entirely, span still recorded.
+     *
+     * @param  (Closure(string): ?string)|null  $classifier
+     */
+    public function classifyHttpHostsUsing(?Closure $classifier): void
+    {
+        $this->httpHostClassifier = $classifier;
+    }
+
+    /**
+     * @internal used by the http-client instrumentation
+     *
+     * @return array{0: bool, 1: string} [record, label]
+     */
+    public function classifyHttpHost(string $host): array
+    {
+        if ($this->httpHostClassifier === null) {
+            return [true, $host];
+        }
+
+        $group = FailSafe::guard(fn () => ($this->httpHostClassifier)($host));
+
+        return is_string($group) && $group !== '' ? [true, $group] : [false, $host];
     }
 
     /**

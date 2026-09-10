@@ -26,6 +26,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static void resolveRouteUsing(\Closure|null $resolver)
  * @method static void enrichRequestsUsing(\Closure|null $resolver)
  * @method static void classifyCacheKeysUsing(\Closure|null $classifier)
+ * @method static void classifyHttpHostsUsing(\Closure|null $classifier)
  * @method static void resolveUserUsing(\Closure|null $resolver)
  * @method static void resolveSessionUsing(\Closure|null $resolver)
  * @method static void resolveClientGeoUsing(\Closure|null $resolver)
