@@ -69,13 +69,23 @@ final class HttpClientInstrumentation implements ManagesRequestState
                 $span->setStatus($event->response->status() >= 400 ? SpanStatus::Error : SpanStatus::Ok);
                 $span->end();
 
-                $this->telemetry()
-                    ->histogram('http.client.request.duration', description: 'Outgoing HTTP request duration', unit: 'ms')
-                    ->record($span->durationMs(), [
-                        'http.request.method' => $event->request->method(),
-                        'server.address' => (string) $span->attributes()['server.address'],
-                        'http.response.status_code' => (string) $event->response->status(),
-                    ]);
+                // The span keeps the real hostname; the METRIC takes whatever
+                // the app says is bounded. Without a classifier this is the
+                // hostname, which is only safe while every outbound host is
+                // one the app chose.
+                [$record, $label] = $this->telemetry()->classifyHttpHost(
+                    (string) $span->attributes()['server.address'],
+                );
+
+                if ($record) {
+                    $this->telemetry()
+                        ->histogram('http.client.request.duration', description: 'Outgoing HTTP request duration', unit: 'ms')
+                        ->record($span->durationMs(), [
+                            'http.request.method' => $event->request->method(),
+                            'server.address' => $label,
+                            'http.response.status_code' => (string) $event->response->status(),
+                        ]);
+                }
             }
         });
     }
@@ -91,9 +101,16 @@ final class HttpClientInstrumentation implements ManagesRequestState
                 $span->end();
             }
 
-            $this->telemetry()
-                ->counter('http.client.connection_failures', 'Outgoing HTTP connection failures')
-                ->inc(1, ['server.address' => $host]);
+            // A host that never answered still gets a series here, which is
+            // the worse half of the problem: an attacker-supplied hostname
+            // needs no cooperation from the host to create one.
+            [$record, $label] = $this->telemetry()->classifyHttpHost($host);
+
+            if ($record) {
+                $this->telemetry()
+                    ->counter('http.client.connection_failures', 'Outgoing HTTP connection failures')
+                    ->inc(1, ['server.address' => $label]);
+            }
         });
     }
 

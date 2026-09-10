@@ -92,6 +92,27 @@ With a classifier registered, kept operations carry the group as a
 key stays on the span). Whole stores can be excluded with
 `instrument.cache_ignore_stores`.
 
+## Outgoing host classification — `classifyHttpHostsUsing()`
+
+`server.address` is a **metric** label on `http.client.request.duration`
+and `http.client.connection_failures`. That is safe while every outbound
+host is one your app chose. It stops being safe the moment a host comes
+from a user — an OAuth issuer pasted into a form, a customer webhook, a
+tenant's own API — because each distinct hostname then becomes a
+permanent series. The connection-failure counter is the worse half: a
+hostname that never answered still creates one, so it needs no
+cooperation from the host at all.
+
+```php
+Telemetry::classifyHttpHostsUsing(fn (string $host) =>
+    str_ends_with($host, '.stripe.com') ? 'stripe' : 'other');
+```
+
+The returned group replaces `server.address` on the **metrics only** —
+spans keep the real hostname, because per-occurrence it costs nothing and
+it is what you need when reading a trace. Return `null` to drop the
+metrics for that host entirely while still recording the span.
+
 ## Analytics session id — `resolveSessionUsing()`
 
 Only active when `telemetry.analytics.enabled` is on. Overrides how the
@@ -141,6 +162,7 @@ Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
 | `labelRequestsUsing()` | request metric labels (bounded!) | `fn ($request): array` |
 | `resolveUserUsing()` | user attribution | `fn ($user, ?string $guard): array` |
 | `classifyCacheKeysUsing()` | cache grouping/dropping | `fn (string $store, string $key): ?string` |
+| `classifyHttpHostsUsing()` | outgoing-host metric label (bounded!) | `fn (string $host): ?string` |
 | `redactUsing()` | last-pass redaction | `fn (string $key, string $value): ?string` |
 | `handleExceptionsUsing()` | internal-failure reporting | `fn (Throwable $e): void` |
 | `Telemetry::context()` | ambient dimensions on all signals | — |
