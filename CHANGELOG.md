@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A console process now flushes what it measured before it exits.** Requests
+  flush at terminate, jobs after each job, scheduled tasks after each task — a
+  plain artisan command had no flush point at all unless `instrument.commands`
+  was on, and it defaults to off. With `buffer_writes` on (also the default),
+  every counter, gauge and histogram such a command wrote sat in the in-memory
+  buffer and died with the process. A clean `exit(0)` is not the "hard crash"
+  the performance docs warn about.
+
+  This silently broke a documented metric. `queue.jobs.dispatched` is counted in
+  the DISPATCHING process, so a command queueing 10 000 jobs reported none of
+  them while the worker reported all 10 000 processed — the backlog panel read
+  as permanently healthy. `queue.size`, pushed by `queue:monitor` (a command
+  that exits immediately), could never appear at all.
+
+  A terminating callback now drains the buffer. On the request path it is a
+  no-op against an already-drained buffer, and it catches anything written by
+  other terminating callbacks.
+
 - **The inbound `server.address` metric label is no longer the caller's `Host`
   header.** `http.server.request.duration`, `http.server.memory.peak` and
   `http.server.cpu.time` took `$request->getHost()` whenever the matched route
