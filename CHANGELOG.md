@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-09-10
+
 ### Fixed
 
 - **A console process now flushes what it measured before it exits.** Requests
@@ -1307,7 +1309,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/cboxdk/laravel-telemetry/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/cboxdk/laravel-telemetry/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.3.1...v1.4.0
