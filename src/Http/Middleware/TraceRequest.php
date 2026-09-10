@@ -325,7 +325,9 @@ final class TraceRequest
                 $routeObject = $request->route();
                 $domainPattern = is_object($routeObject) && method_exists($routeObject, 'getDomain') ? $routeObject->getDomain() : null;
 
-                $labels['server.address'] = is_string($domainPattern) && $domainPattern !== '' ? $domainPattern : $request->getHost();
+                $labels['server.address'] = is_string($domainPattern) && $domainPattern !== ''
+                    ? $domainPattern
+                    : $this->boundedHost($request);
             }
 
             // Peak memory and CPU delta for THIS request — per-route,
@@ -368,6 +370,39 @@ final class TraceRequest
 
         $this->telemetry->flush();
         $this->telemetry->resetContext();
+    }
+
+    /**
+     * The concrete host, but only when something has vouched for it.
+     *
+     * `$request->getHost()` is the client's `Host:` header. Symfony validates
+     * it only when the app configured trusted-host patterns, and Laravel ships
+     * with none — so on a default install this is an attacker-controlled string
+     * going straight onto three histograms as a LABEL. A loop with an
+     * incrementing Host mints a permanent series per value, and no store here
+     * has a TTL or a cardinality cap. No route needs to match: an unrouted
+     * request still gets labelled.
+     *
+     * So: trust it when trusted-host patterns exist (Symfony has already
+     * thrown on anything else by the time we are called), otherwise keep it
+     * only when it IS the app's own host — which is the single-domain case,
+     * where the label is a constant anyway and nothing is lost. Everything
+     * else collapses to one bucket.
+     *
+     * A multi-domain app that wants its domains apart should configure
+     * TrustHosts, or register the routes with a domain pattern; both are
+     * bounded by the app rather than by the caller.
+     */
+    private function boundedHost(Request $request): string
+    {
+        if (Request::getTrustedHosts() !== []) {
+            return $request->getHost();
+        }
+
+        $host = $request->getHost();
+        $appHost = Cast::string(parse_url(Cast::string(config('app.url'), ''), PHP_URL_HOST), '');
+
+        return $appHost !== '' && strcasecmp($host, $appHost) === 0 ? $host : 'other';
     }
 
     /**

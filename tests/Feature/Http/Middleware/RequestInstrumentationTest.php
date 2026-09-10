@@ -10,6 +10,7 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\RateLimiter;
@@ -297,7 +298,10 @@ it('captures allowlisted headers but never credentials or session material', fun
         ->and($attributes)->not->toHaveKey('http.request.header.x_api_key');
 });
 
-it('labels request metrics with the domain, preferring the route domain pattern', function () {
+it('labels request metrics with the route domain pattern, and refuses an unvouched-for host', function () {
+    // The pattern is bounded by the app. The concrete host is the caller's
+    // Host header unless trusted-host patterns exist, so it collapses to one
+    // bucket rather than becoming a label anyone can mint values for.
     Route::get('/tenant-home', fn () => 'ok')->domain('{tenant}.acme.test');
 
     $this->get('http://api.acme.test/users/7');
@@ -308,8 +312,23 @@ it('labels request metrics with the domain, preferring the route domain pattern'
 
     $byRoute = collect($samples)->keyBy(fn ($sample) => $sample->labels['http.route']);
 
-    expect($byRoute['/users/{id}']->labels['server.address'])->toBe('api.acme.test')
+    expect($byRoute['/users/{id}']->labels['server.address'])->toBe('other')
         ->and($byRoute['/tenant-home']->labels['server.address'])->toBe('{tenant}.acme.test');
+});
+
+it('labels with the concrete host once the app configured trusted hosts', function () {
+    Request::setTrustedHosts(['^api\\.acme\\.test$']);
+
+    try {
+        $this->get('http://api.acme.test/users/7');
+
+        $samples = collect(Telemetry::collect())
+            ->keyBy(fn ($family) => $family->name())['http.server.request.duration']->samples;
+
+        expect(collect($samples)->first()->labels['server.address'])->toBe('api.acme.test');
+    } finally {
+        Request::setTrustedHosts([]);
+    }
 });
 
 it('omits the domain label when disabled', function () {
