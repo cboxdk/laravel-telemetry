@@ -272,6 +272,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerSelfMetrics();
         $this->registerOctaneReset();
         $this->registerNativePhpReset();
+        $this->registerTerminationFlush();
         $this->registerAboutCommand();
     }
 
@@ -983,6 +984,33 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->make(TelemetryManager::class)->provider(new SystemMetricsProvider(
             cpuInterval: Cast::float($config->get('telemetry.providers.system.cpu_interval'), 0.1),
         ));
+    }
+
+    /**
+     * Flush whatever the process wrote before it exits.
+     *
+     * Requests flush in TraceRequest, jobs in QueueInstrumentation, scheduled
+     * tasks in ScheduleInstrumentation. Nothing covered a plain artisan
+     * command unless `instrument.commands` was on — and it defaults to off.
+     * With `buffer_writes` on (also the default) every counter, gauge and
+     * histogram such a command wrote sat in the in-memory buffer and died
+     * with the process.
+     *
+     * That silently broke a documented metric: `queue.jobs.dispatched` is
+     * counted in the DISPATCHING process, so a command queueing 10 000 jobs
+     * reported none of them while the worker reported all 10 000 processed,
+     * and the backlog panel read as permanently healthy. `queue.size`, pushed
+     * by `queue:monitor` — a command that exits immediately — could never
+     * appear at all.
+     *
+     * A second flush on the request path is a no-op against a drained buffer,
+     * and it catches anything written by other terminating callbacks.
+     */
+    private function registerTerminationFlush(): void
+    {
+        $this->app->terminating(function (): void {
+            FailSafe::guard(fn () => $this->app->make(TelemetryManager::class)->flush());
+        });
     }
 
     private function registerOctaneReset(): void

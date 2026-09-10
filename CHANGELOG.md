@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A console process now flushes what it measured before it exits.** Requests
+  flush at terminate, jobs after each job, scheduled tasks after each task — a
+  plain artisan command had no flush point at all unless `instrument.commands`
+  was on, and it defaults to off. With `buffer_writes` on (also the default),
+  every counter, gauge and histogram such a command wrote sat in the in-memory
+  buffer and died with the process. A clean `exit(0)` is not the "hard crash"
+  the performance docs warn about.
+
+  This silently broke a documented metric. `queue.jobs.dispatched` is counted in
+  the DISPATCHING process, so a command queueing 10 000 jobs reported none of
+  them while the worker reported all 10 000 processed — the backlog panel read
+  as permanently healthy. `queue.size`, pushed by `queue:monitor` (a command
+  that exits immediately), could never appear at all.
+
+  A terminating callback now drains the buffer. On the request path it is a
+  no-op against an already-drained buffer, and it catches anything written by
+  other terminating callbacks.
+
+- **The inbound `server.address` metric label is no longer the caller's `Host`
+  header.** `http.server.request.duration`, `http.server.memory.peak` and
+  `http.server.cpu.time` took `$request->getHost()` whenever the matched route
+  had no domain pattern — which is almost every route. Symfony validates that
+  header only when the app configured trusted-host patterns, and Laravel ships
+  with none, so on a default install an unauthenticated loop with an
+  incrementing `Host:` minted a permanent series per value across three
+  histograms. No route needs to match; an unrouted request is labelled too. No
+  store in this package has a TTL or a cardinality cap, so nothing ages out.
+
+  The route's domain pattern still wins and is unchanged. Without one the
+  concrete host is used only when something the APP controls has vouched for
+  it — trusted-host patterns exist (Symfony has already rejected anything else
+  by then), or the host is the app's own, which is the single-domain case where
+  the label is a constant and nothing is lost. Everything else reports `other`.
+
+  **Upgrade note:** a multi-domain app with no `TrustHosts` and no domain routes
+  now sees `other` where it saw its domains. Configure `TrustHosts`, or register
+  the routes with a domain pattern; both are bounded by the app rather than by
+  the caller.
+
+
 ## [1.5.0] - 2026-09-10
 
 ### Added

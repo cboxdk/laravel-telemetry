@@ -481,7 +481,14 @@ return [
         // Add the domain as a server.address label on http.server.*
         // metrics. Routes with a domain pattern report the PATTERN
         // ("{tenant}.app.example"), keeping wildcard-tenant cardinality
-        // bounded; everything else reports the concrete host.
+        // bounded.
+        //
+        // Without a pattern the concrete host is only used when something
+        // has vouched for it — trusted-host patterns are configured, or it
+        // is the app's own host. Anything else reports "other", because
+        // $request->getHost() is otherwise just the caller's Host header
+        // and a label must never be caller-controlled. Configure
+        // TrustHosts to tell your domains apart.
         'host_label' => env('TELEMETRY_INSTRUMENT_HOST_LABEL', true),
 
         // Request headers captured on the span as http.request.header.*
