@@ -8,6 +8,10 @@ on:
   pull_request:
     paths:
       - '**.php'
+      # A pint bump changes the style rules without touching a .php file.
+      - 'composer.json'
+      - 'composer.lock'
+      - 'pint.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
