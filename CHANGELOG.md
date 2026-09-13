@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Broadcasting instrumentation no longer breaks a concrete
+  `BroadcastManager` type hint.** The binding was replaced with a decorator that
+  implemented `Contracts\Broadcasting\Factory` but did not extend Laravel's
+  `BroadcastManager` — the class the container binds and the class app code
+  hints. Any controller, service or resolving callback taking
+  `BroadcastManager $broadcast` got a `TypeError` the moment this package was
+  installed, which is an observability package breaking the app it observes.
+  `__call` covered forwarded *calls* but can do nothing about a *type*.
+
+  It now extends the concrete class, the same fix the filesystem got in 1.1.0.
+  Behaviour is still delegated to the wrapped manager rather than inherited —
+  the real manager owns the resolved drivers and anything registered through
+  `extend()` — so every public method of the parent is overridden rather than
+  left to run against this instance's empty state.
+
+- **Filesystem instrumentation keeps drivers registered before it booted.** It
+  replaced the `filesystem` binding by constructing a fresh manager and
+  discarding the one it was extending, taking `$customCreators` and `$disks`
+  with it. A provider that ran `Storage::extend('dropbox', …)` earlier in the
+  boot order simply vanished, and the next resolution of that disk failed with
+  *Driver [dropbox] is not supported*. A `Storage::fake()` set before the swap
+  was dropped the same way. The replacement now adopts both.
+
+
 ## [1.5.1] - 2026-09-10
 
 ### Fixed

@@ -8,6 +8,7 @@ use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Contracts\Filesystem\Factory;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Filesystem\FilesystemManager;
 
 /**
  * Driver-agnostic filesystem/storage instrumentation: `storage.operations`
@@ -36,7 +37,11 @@ final class FilesystemInstrumentation
                     return $manager;
                 }
 
-                return new InstrumentedFilesystemManager($app, $app->make(TelemetryManager::class));
+                return new InstrumentedFilesystemManager(
+                    $app,
+                    $app->make(TelemetryManager::class),
+                    $manager instanceof FilesystemManager ? $manager : null,
+                );
             });
         });
     }
