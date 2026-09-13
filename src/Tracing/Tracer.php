@@ -260,6 +260,37 @@ final class Tracer
         return $this->stack === [] ? null : $this->stack[array_key_last($this->stack)];
     }
 
+    /**
+     * End every span still on the stack, innermost first.
+     *
+     * For the shutdown path only. A fatal error — max_execution_time, an
+     * allocation over memory_limit, an uncaught Error — unwinds nothing: the
+     * request span and every child stay open, so `drain()` returns them not at
+     * all and the trace for the request that actually died is the one trace
+     * missing. Ending them marks the work as what it was rather than pretending
+     * it completed.
+     *
+     * @return int how many spans were still open
+     */
+    public function endOpenSpans(string $reason): int
+    {
+        $closed = 0;
+
+        while (($span = $this->currentSpan()) !== null) {
+            $span->setStatus(SpanStatus::Error, $reason);
+            $span->end();
+            $closed++;
+
+            // end() splices the span out through finish(); guard against a
+            // span that somehow fails to leave, so shutdown cannot hang.
+            if ($this->currentSpan() === $span) {
+                array_pop($this->stack);
+            }
+        }
+
+        return $closed;
+    }
+
     public function traceId(): ?string
     {
         return $this->currentSpan()->traceId ?? $this->traceId;
