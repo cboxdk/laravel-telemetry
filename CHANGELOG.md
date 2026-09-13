@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One job attempt is counted once.** Laravel dispatches BOTH `JobFailed` and
+  `JobProcessed` for a single attempt on two ordinary paths: a job calling
+  `$this->fail($e)` (`Job::fail()` dispatches `JobFailed`, `fire()` then returns
+  normally and the worker raises `JobProcessed`), and a job arriving past
+  `--tries` (`markJobAsFailedIfAlreadyExceedsMaxAttempts` fails it, then
+  `if ($job->isDeleted()) return $this->raiseAfterJobEvent(…)`). Both were
+  counted, so `queue.jobs.failed` and `queue.jobs.processed` each rose by one
+  for the same attempt and every success-rate panel overstated success in
+  proportion to the failure rate — the worse the day, the better it looked.
+
+  The second call also popped the span stack again, which in a sync-inside-async
+  dispatch ended the OUTER job's span early and recorded its duration against
+  the inner job's outcome. Completion is now latched per attempt, in a `WeakMap`
+  so a long-running worker neither grows an entry per job nor latches a later
+  job through a reused `spl_object_id()`.
+
 - **A partially failed metric flush no longer replays the writes that
   succeeded.** `BufferedMetricStore::flushBuffer()` cleared its buffer only
   after every write had landed, so a store throwing partway — a Redis blip on
