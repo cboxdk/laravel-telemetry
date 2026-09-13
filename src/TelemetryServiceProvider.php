@@ -273,6 +273,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerOctaneReset();
         $this->registerNativePhpReset();
         $this->registerTerminationFlush();
+        $this->registerFatalErrorFlush();
         $this->registerAboutCommand();
     }
 
@@ -984,6 +985,50 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->app->make(TelemetryManager::class)->provider(new SystemMetricsProvider(
             cpuInterval: Cast::float($config->get('telemetry.providers.system.cpu_interval'), 0.1),
         ));
+    }
+
+    /**
+     * Deliver what was recorded when the process dies without terminating.
+     *
+     * A fatal error — max_execution_time, an allocation over memory_limit, an
+     * uncaught Error — never reaches Kernel::terminate(), so neither the
+     * terminating callback nor the request middleware's flush ever runs.
+     * Laravel's own shutdown handler DOES convert the fatal into a FatalError
+     * and push it through report(), which this package's reportable() hook
+     * turns into an exception record — and that record then sat in the event
+     * buffer and died with the process. So the one class of failure you most
+     * want an error tracker for produced nothing at all: no error, no trace,
+     * and an open request span that was never exported.
+     *
+     * Registered after Laravel's handler (the HandleExceptions bootstrapper
+     * runs long before providers boot), and shutdown functions run in
+     * registration order — so by the time this executes, the fatal has already
+     * been reported and is in the buffer waiting.
+     */
+    private function registerFatalErrorFlush(): void
+    {
+        register_shutdown_function($this->flushOnShutdown(...));
+    }
+
+    /**
+     * The shutdown handler's body, separated so it can be exercised directly —
+     * a `register_shutdown_function` callback only runs as the process ends,
+     * which is exactly when a test can no longer assert anything.
+     *
+     * @internal
+     */
+    public function flushOnShutdown(): void
+    {
+        FailSafe::guard(function (): void {
+            $telemetry = $this->app->make(TelemetryManager::class);
+
+            // Nothing unwound, so every span is still open. Close them as
+            // errors rather than leaving the trace for the request that
+            // actually died as the one trace missing.
+            $telemetry->tracer()->endOpenSpans('process terminated without completing');
+
+            $telemetry->flush();
+        });
     }
 
     /**

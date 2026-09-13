@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A fatal error now delivers its error record and its trace.** A fatal —
+  `max_execution_time`, an allocation over `memory_limit`, an uncaught `Error` —
+  never reaches `Kernel::terminate()`, so neither the terminating callback nor
+  the request middleware's flush ever ran. Laravel's own shutdown handler *did*
+  convert the fatal into a `FatalError` and push it through `report()`, which
+  this package turns into an exception record — and that record then sat in the
+  event buffer and died with the process, along with the still-open request
+  span. So the one class of failure you most want an error tracker for produced
+  nothing at all: no error, no trace, nothing. For anyone replacing Sentry with
+  this, that was the hole.
+
+  A `register_shutdown_function` now closes any spans left open (as errors, not
+  as if they had completed) and flushes. It is registered after Laravel's own
+  handler — the `HandleExceptions` bootstrapper runs long before providers boot,
+  and shutdown functions run in registration order — so by the time it executes,
+  the fatal has already been reported and is waiting in the buffer.
+
 - **One job attempt is counted once.** Laravel dispatches BOTH `JobFailed` and
   `JobProcessed` for a single attempt on two ordinary paths: a job calling
   `$this->fail($e)` (`Job::fail()` dispatches `JobFailed`, `fire()` then returns
