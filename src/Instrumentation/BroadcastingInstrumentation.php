@@ -45,7 +45,7 @@ final class BroadcastingInstrumentation
                     return $manager;
                 }
 
-                return new InstrumentedBroadcastManager($manager, $app->make(TelemetryManager::class));
+                return new InstrumentedBroadcastManager($manager, $app->make(TelemetryManager::class), $app);
             });
         });
     }

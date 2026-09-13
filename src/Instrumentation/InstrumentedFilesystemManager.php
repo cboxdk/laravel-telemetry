@@ -52,8 +52,21 @@ class InstrumentedFilesystemManager extends FilesystemManager
     public function __construct(
         Application $app,
         private readonly TelemetryManager $telemetry,
+        ?FilesystemManager $replacing = null,
     ) {
         parent::__construct($app);
+
+        // Adopt the state of the manager being replaced. Building a fresh one
+        // and discarding it threw away every driver registered through
+        // Storage::extend() — so a provider that booted before telemetry (a
+        // Dropbox or SFTP driver, say) simply vanished, and the next disk
+        // resolution failed with "Driver [x] is not supported". Already-resolved
+        // disks come across too, which is what keeps a Storage::fake() set
+        // before this binding is replaced from being silently dropped.
+        if ($replacing instanceof FilesystemManager) {
+            $this->customCreators = $replacing->customCreators;
+            $this->disks = $replacing->disks;
+        }
     }
 
     /** @var list<string>|null memoized — disk() runs on every Storage call */

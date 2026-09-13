@@ -3,10 +3,14 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\InstrumentedBroadcastManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
+use Illuminate\Broadcasting\Broadcasters\NullBroadcaster;
+use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Broadcasting\PrivateChannel;
+use Illuminate\Contracts\Broadcasting\Broadcaster;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Support\Collection;
 
@@ -99,4 +103,35 @@ it('creates no detail span outside a sampled trace, but keeps the tally', functi
     Telemetry::flush();
 
     expect(broadcastSpans($this->collector))->toBeEmpty();
+});
+
+/**
+ * The container binds the CONCRETE BroadcastManager, and app code hints it —
+ * Laravel's own docs show `public function __construct(BroadcastManager $b)`.
+ * A decorator that only implemented the Factory contract satisfied the
+ * interface but failed instanceof, so installing telemetry turned any such
+ * constructor into a TypeError: an observability package breaking the app it
+ * observes.
+ */
+it('still satisfies a concrete BroadcastManager type hint', function () {
+    $manager = app(BroadcastManager::class);
+
+    expect($manager)->toBeInstanceOf(InstrumentedBroadcastManager::class)
+        ->and($manager)->toBeInstanceOf(BroadcastManager::class);
+
+    $takesConcrete = fn (BroadcastManager $broadcast): string => $broadcast::class;
+
+    expect($takesConcrete($manager))->toBe(InstrumentedBroadcastManager::class);
+});
+
+it('delegates driver registration to the real manager rather than its own empty state', function () {
+    // Extending on the decorator's inherited state would register a driver
+    // that the resolution path never consults.
+    config()->set('broadcasting.connections.probe', ['driver' => 'probe']);
+
+    $manager = app(BroadcastManager::class);
+
+    $manager->extend('probe', fn () => new NullBroadcaster);
+
+    expect($manager->connection('probe'))->toBeInstanceOf(Broadcaster::class);
 });
