@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Redaction now reaches the span status description.** `recordException()`
+  writes the exception message to two places: the `exception.message` event
+  attribute, and the span's status description, which OTLP exports as
+  `status.message`. The redaction engine scrubbed attributes and events but
+  never the status, so an exception carrying a credential went out redacted in
+  one field and **verbatim in the other** — the leak wearing the mask's own
+  clothes. Reproduced with a bearer token: the event read
+  `upstream rejected Bearer [REDACTED]` while the status carried the whole key.
+
+  The existing test asserted only the event attribute, which is why this passed
+  for so long; it now asserts both, so the pair cannot diverge again.
+
 - **Broadcasting instrumentation no longer breaks a concrete
   `BroadcastManager` type hint.** The binding was replaced with a decorator that
   implemented `Contracts\Broadcasting\Factory` but did not extend Laravel's
