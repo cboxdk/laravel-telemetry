@@ -136,6 +136,18 @@ final class Redactor
                 fn (SpanEvent $event): SpanEvent => new SpanEvent($event->name, $event->timeUnixNano, $this->attributes($event->attributes)),
                 $span->events(),
             ));
+
+            // The status description is free text and is exported as
+            // status.message, but it was the one field redaction never saw.
+            // recordException() puts the exception message in BOTH the event
+            // attribute and here, so a credential inside it went out scrubbed
+            // in one place and verbatim in the other — the leak wearing the
+            // mask's own clothes.
+            $description = $span->statusDescription();
+
+            if (is_string($description) && $description !== '') {
+                $span->setStatus($span->status(), $this->value('exception.message', $description));
+            }
         }
 
         return $spans;

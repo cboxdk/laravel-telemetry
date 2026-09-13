@@ -28,7 +28,11 @@ it('redacts sensitive span attributes at flush', function () {
         ->and($attributes['order.id'])->toBe('42');
 });
 
-it('scrubs secrets from exception messages on span events', function () {
+it('scrubs secrets from exception messages on span events AND the span status', function () {
+    // recordException() writes the same message to two places: the event
+    // attribute and the span's status description, which OTLP exports as
+    // status.message. Asserting only the first is why a credential could go
+    // out scrubbed in one field and verbatim in the other.
     try {
         Telemetry::span('http.call', function () {
             throw new RuntimeException('upstream rejected Bearer abcdef1234567890abcdef');
@@ -38,9 +42,10 @@ it('scrubs secrets from exception messages on span events', function () {
 
     Telemetry::flush();
 
-    $event = flushedSpans($this->collector)[0]->events()[0];
+    $span = flushedSpans($this->collector)[0];
 
-    expect($event->attributes['exception.message'])->toBe('upstream rejected Bearer [REDACTED]');
+    expect($span->events()[0]->attributes['exception.message'])->toBe('upstream rejected Bearer [REDACTED]')
+        ->and($span->statusDescription())->toBe('upstream rejected Bearer [REDACTED]');
 });
 
 it('redacts event attributes and applies the custom hook', function () {
