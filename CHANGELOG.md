@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A partially failed metric flush no longer replays the writes that
+  succeeded.** `BufferedMetricStore::flushBuffer()` cleared its buffer only
+  after every write had landed, so a store throwing partway — a Redis blip on
+  the third counter — left the earlier, successful writes in the buffer, and the
+  next flush applied them a second time. In a long-running worker a write that
+  keeps failing inflates its predecessors on every retry. Each series is now
+  dropped as its write lands, making a partial flush exactly-once for what
+  landed and leaving only the remainder to retry.
+
+- **Metric bookkeeping repairs itself instead of disappearing until a
+  restart.** `initialize()` memoized "done" per process *before* its writes, so
+  one transient failure disabled initialization for the life of that process.
+  Worse, the memo was permanent: the meta, `__since` and index entries live in
+  Redis/APCu, which can lose them in ways this package does not control — a
+  restart without persistence, a `FLUSHDB`, an eviction under `maxmemory`, or
+  APCu expunging its whole cache when the segment fills. A warm process then
+  kept writing data nobody could read, because `collect()` walks the index and
+  drops any family whose meta is gone. The metric vanished from every scrape
+  until a *cold* process happened to write it again — which, for a series with
+  one long-lived writer, is never. The memo now records the time of the last
+  SUCCESSFUL write and is redone every five minutes.
+
 - **A job killed by its timeout is recorded.** Laravel raises `JobTimedOut` and
   then `posix_kill(SIGKILL)`s the worker — no shutdown function, no terminating
   callback. The listener only incremented a counter into the in-memory buffer

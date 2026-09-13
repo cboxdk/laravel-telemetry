@@ -36,7 +36,7 @@ use Illuminate\Redis\Connections\Connection;
  */
 final class RedisMetricStore implements MetricStore
 {
-    /** @var array<string, true> */
+    /** @var array<string, int> unix time of the last successful initialization, per metric */
     private array $initialized = [];
 
     public function __construct(
@@ -145,20 +145,39 @@ final class RedisMetricStore implements MetricStore
      * buckets/description refreshes it; `__since` keeps the first-ever
      * write time for OTLP cumulative start timestamps.
      */
+    /**
+     * How long a successful initialization is trusted before it is written
+     * again. Three commands per metric per process per interval is far
+     * cheaper than a metric silently disappearing until a deploy.
+     */
+    private const REINITIALIZE_AFTER_SECONDS = 300;
+
     private function initialize(MetricDefinition $definition, string $key): void
     {
         $memo = $definition->type->value.':'.$definition->name;
+        $now = time();
 
-        if (isset($this->initialized[$memo])) {
+        // Re-run periodically rather than once per process. The bookkeeping
+        // lives in Redis, and Redis can lose it in ways this package does not
+        // control — a restart without persistence, a FLUSHDB, an eviction of
+        // the index set under maxmemory. A process that had already memoized
+        // "done" kept writing data nobody could read: collect() walks the
+        // index and drops any family whose __meta is missing, so the metric
+        // vanished from every scrape until a COLD process happened to write
+        // it again — which, for a series with one long-lived writer, is never.
+        if (($this->initialized[$memo] ?? 0) > $now - self::REINITIALIZE_AFTER_SECONDS) {
             return;
         }
-
-        $this->initialized[$memo] = true;
 
         $connection = $this->connection();
         $connection->hset($key, '__meta', $this->encodeMeta($definition));
         $connection->hsetnx($key, '__since', (string) ((int) (microtime(true) * 1e9)));
         $connection->sadd($this->indexKey($definition->type), $definition->name);
+
+        // Memoize only once the writes landed. Setting it first meant a single
+        // transient failure disabled initialization for the life of the
+        // process, permanently.
+        $this->initialized[$memo] = $now;
     }
 
     public function collect(): array

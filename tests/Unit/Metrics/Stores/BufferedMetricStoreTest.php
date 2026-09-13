@@ -194,3 +194,89 @@ it('flushes the buffer on manager flush even without spans or events', function 
 
     expect($counting->writes)->toBe(1);
 });
+
+/**
+ * Fails every write to one particular series, and passes the rest through.
+ */
+final class FlakyStore implements MetricStore
+{
+    public function __construct(
+        private readonly string $failLabel,
+        private readonly ArrayMetricStore $inner = new ArrayMetricStore,
+    ) {}
+
+    public function incrementCounter(MetricDefinition $definition, array $labels, float $by): void
+    {
+        if (($labels['tenant'] ?? null) === $this->failLabel) {
+            throw new RuntimeException('store unavailable');
+        }
+
+        $this->inner->incrementCounter($definition, $labels, $by);
+    }
+
+    public function setGauge(MetricDefinition $definition, array $labels, float $value): void
+    {
+        $this->inner->setGauge($definition, $labels, $value);
+    }
+
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
+    {
+        $this->inner->addGauge($definition, $labels, $delta);
+    }
+
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
+    {
+        $this->inner->recordHistogram($definition, $labels, $value, $exemplar);
+    }
+
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
+    {
+        $this->inner->mergeHistogram($definition, $labels, $bucketCounts, $sum, $count, $exemplar);
+    }
+
+    public function collect(): array
+    {
+        return $this->inner->collect();
+    }
+
+    public function wipe(): void
+    {
+        $this->inner->wipe();
+    }
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $this->inner->forgetSeries($definition, $labels);
+    }
+}
+
+/**
+ * Clearing the buffer only after every write succeeded meant a store that threw
+ * partway left the writes that had ALREADY landed sitting in the buffer, and
+ * the next flush applied them a second time. In a long-running worker, a write
+ * that keeps failing inflates its predecessors on every single retry.
+ */
+it('does not replay writes that already landed when a later one throws', function () {
+    $inner = new ArrayMetricStore;
+    $store = new BufferedMetricStore(new FlakyStore('boom', $inner));
+
+    $store->incrementCounter(counterDefinition(), ['tenant' => 'ok'], 1.0);
+    $store->incrementCounter(counterDefinition(), ['tenant' => 'boom'], 1.0);
+
+    // First attempt: 'ok' lands, 'boom' throws.
+    try {
+        $store->flushBuffer();
+    } catch (RuntimeException) {
+    }
+
+    // Second attempt: 'boom' throws again. 'ok' must NOT be applied twice.
+    try {
+        $store->flushBuffer();
+    } catch (RuntimeException) {
+    }
+
+    $samples = collect($inner->collect()[0]->samples)
+        ->keyBy(fn ($sample) => $sample->labels['tenant']);
+
+    expect($samples['ok']->value)->toBe(1.0);
+});

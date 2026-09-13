@@ -25,7 +25,7 @@ use Cbox\Telemetry\Metrics\Sample;
  */
 final class ApcuMetricStore implements MetricStore
 {
-    /** @var array<string, true> per-process memo of indexed series */
+    /** @var array<string, int> unix time of the last successful index write, per series */
     private array $indexed = [];
 
     public function __construct(
@@ -286,16 +286,26 @@ final class ApcuMetricStore implements MetricStore
      * this entirely. Meta uses apcu_store so definition changes (buckets,
      * description) propagate on deploy; `since` keeps the first write.
      */
+    /** How long a successful index write is trusted before it is redone. */
+    private const REINDEX_AFTER_SECONDS = 300;
+
     private function index(MetricDefinition $definition, string $series): void
     {
         $type = $definition->type;
         $memo = "{$type->value}:{$definition->name}:{$series}";
 
-        if (isset($this->indexed[$memo])) {
+        $now = time();
+
+        // Re-run periodically, and memoize only after the writes land. APCu's
+        // failure mode is worse than Redis': when the segment fills it expunges
+        // the WHOLE cache, taking meta and both indexes with it — and a process
+        // that had memoized "done" would then write data that collect() can
+        // never find. appendUnique() also gives up after ~10ms of lock
+        // contention, which previously disabled indexing for that series for
+        // the life of the process.
+        if (($this->indexed[$memo] ?? 0) > $now - self::REINDEX_AFTER_SECONDS) {
             return;
         }
-
-        $this->indexed[$memo] = true;
 
         apcu_store($this->metaKey($type, $definition->name), json_encode([
             'description' => $definition->description,
@@ -307,6 +317,8 @@ final class ApcuMetricStore implements MetricStore
 
         $this->appendUnique($this->nameIndexKey($type), $definition->name);
         $this->appendUnique($this->seriesIndexKey($type, $definition->name), $series);
+
+        $this->indexed[$memo] = $now;
     }
 
     /**
