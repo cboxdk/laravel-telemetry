@@ -244,3 +244,40 @@ it('records redis command spans but never for the telemetry connections', functi
 
     expect(collect($families['redis.commands']->samples)->pluck('labels.command'))->toContain('SET');
 })->group('redis');
+
+/**
+ * The bookkeeping (meta, __since, the index set) lives in Redis, and Redis can
+ * lose it in ways this package does not control — a restart without
+ * persistence, a FLUSHDB, an eviction under maxmemory. A process that had
+ * memoized "initialized" kept writing data nobody could read: collect() walks
+ * the index and drops any family whose __meta is gone, so the metric vanished
+ * from every scrape until a COLD process happened to write it again — which,
+ * for a series with one long-lived writer, is never.
+ */
+it('re-creates its bookkeeping after the keys are lost underneath it', function () {
+    $definition = new MetricDefinition('orders.created', MetricType::Counter);
+
+    $this->store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    expect($this->store->collect())->not->toBeEmpty();
+
+    // Redis loses the lot; the same warm process keeps writing.
+    app(Factory::class)->connection()->flushdb();
+    $this->store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    expect($this->store->collect())->toBeEmpty('the warm process cannot re-register within the trust window');
+
+    // Age the memo past its trust window — NOT clear it. Clearing would also
+    // "pass" against a memo that is merely a boolean, which is the thing being
+    // fixed: the old memo said done forever, so the window is the whole point.
+    (function () {
+        $this->initialized['counter:orders.created'] = time() - 3600;
+    })->call($this->store);
+
+    $this->store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    $families = $this->store->collect();
+
+    expect($families)->not->toBeEmpty()
+        ->and($families[0]->name())->toBe('orders.created');
+})->group('redis');

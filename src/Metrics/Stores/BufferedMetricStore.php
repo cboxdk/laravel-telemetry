@@ -127,26 +127,44 @@ final class BufferedMetricStore implements MetricStore
 
     /**
      * Push the aggregated buffer to the inner store.
+     *
+     * Each series is dropped from the buffer the moment its write lands.
+     * Clearing only at the end meant that a store throwing partway — a Redis
+     * blip on the third counter — left every write that had ALREADY succeeded
+     * sitting in the buffer, and the next flush applied it a second time.
+     * Counters and histogram counts inflated by exactly the successful prefix,
+     * once per failure, which in a long-running worker compounds every time
+     * the same later write fails.
+     *
+     * Dropping as we go makes a partial flush exactly-once for what landed and
+     * leaves only the remainder to retry.
      */
     public function flushBuffer(): void
     {
-        foreach ($this->counters as $family) {
+        foreach ($this->counters as $name => $family) {
             foreach ($family['series'] as $series => $delta) {
                 $this->inner->incrementCounter($family['definition'], Labels::decode($series), $delta);
+                unset($this->counters[$name]['series'][$series]);
             }
+
+            unset($this->counters[$name]);
         }
 
-        foreach ($this->gauges as $family) {
+        foreach ($this->gauges as $name => $family) {
             foreach ($family['series'] as $series => $entry) {
                 if ($entry['set'] !== null) {
                     $this->inner->setGauge($family['definition'], Labels::decode($series), $entry['set']);
                 } elseif ($entry['add'] !== 0.0) {
                     $this->inner->addGauge($family['definition'], Labels::decode($series), $entry['add']);
                 }
+
+                unset($this->gauges[$name]['series'][$series]);
             }
+
+            unset($this->gauges[$name]);
         }
 
-        foreach ($this->histograms as $family) {
+        foreach ($this->histograms as $name => $family) {
             foreach ($family['series'] as $series => $entry) {
                 $this->inner->mergeHistogram(
                     $family['definition'],
@@ -156,12 +174,13 @@ final class BufferedMetricStore implements MetricStore
                     $entry['count'],
                     $entry['exemplar'],
                 );
+
+                unset($this->histograms[$name]['series'][$series]);
             }
+
+            unset($this->histograms[$name]);
         }
 
-        $this->counters = [];
-        $this->gauges = [];
-        $this->histograms = [];
         $this->pending = 0;
     }
 
