@@ -56,7 +56,10 @@ final class QueueInstrumentation implements ManagesRequestState
     /** @var array<string, array<string, string>> worker gauge labelsets written by THIS process, keyed by encoded labels */
     private array $workerGaugeLabels = [];
 
-    public function __construct(private readonly Container $container) {}
+    public function __construct(private readonly Container $container)
+    {
+        $this->completedAttempts = new \WeakMap;
+    }
 
     /**
      * Resolved per event so Telemetry::fake() swaps take effect.
@@ -165,6 +168,7 @@ final class QueueInstrumentation implements ManagesRequestState
                         $event->job->getQueue(),
                         'timed_out',
                         $event->connectionName === 'sync',
+                        $event->job,
                     );
                 });
             }
@@ -273,6 +277,32 @@ final class QueueInstrumentation implements ManagesRequestState
         });
     }
 
+    /**
+     * Attempts already closed out, keyed by the job object.
+     *
+     * Laravel dispatches BOTH JobFailed and JobProcessed for a single attempt
+     * on two ordinary paths: a job calling $this->fail($e) (Job::fail()
+     * dispatches JobFailed, fire() then returns normally and the worker raises
+     * JobProcessed), and a job arriving past --tries
+     * (markJobAsFailedIfAlreadyExceedsMaxAttempts fails it, then
+     * `if ($job->isDeleted()) return $this->raiseAfterJobEvent(...)`).
+     *
+     * Counting both made queue.jobs.failed and queue.jobs.processed each +1 for
+     * one attempt, so every success-rate panel overstated success in proportion
+     * to the failure rate. And because completeJob() pops the span stack, the
+     * spurious second call popped the OUTER job's span in a sync-inside-async
+     * dispatch — ending it early and recording its duration against the inner
+     * job's outcome.
+     *
+     * A WeakMap, not an id-keyed array: the worker is long-running, so an
+     * array would grow one entry per job forever — and spl_object_id() is
+     * reused once an object is collected, which would latch a LATER job by
+     * accident. The map drops each entry when its job is.
+     *
+     * @var \WeakMap<object, true>
+     */
+    private \WeakMap $completedAttempts;
+
     private function jobProcessed(JobProcessed $event): void
     {
         $this->completeJob(
@@ -280,6 +310,7 @@ final class QueueInstrumentation implements ManagesRequestState
             queue: $event->job->getQueue(),
             outcome: 'processed',
             sync: $event->connectionName === 'sync',
+            attempt: $event->job,
         );
     }
 
@@ -324,11 +355,20 @@ final class QueueInstrumentation implements ManagesRequestState
             queue: $event->job->getQueue(),
             outcome: 'failed',
             sync: $event->connectionName === 'sync',
+            attempt: $event->job,
         );
     }
 
-    private function completeJob(string $job, ?string $queue, string $outcome, bool $sync): void
+    private function completeJob(string $job, ?string $queue, string $outcome, bool $sync, ?object $attempt = null): void
     {
+        if ($attempt !== null) {
+            if (isset($this->completedAttempts[$attempt])) {
+                return;
+            }
+
+            $this->completedAttempts[$attempt] = true;
+        }
+
         FailSafe::guard(function () use ($job, $queue, $outcome) {
             // "job.name", not "job" — a bare `job` label collides with
             // Prometheus' reserved scrape-job label and gets overwritten

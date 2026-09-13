@@ -10,6 +10,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobTimedOut;
@@ -125,4 +126,35 @@ it('closes out and ships a job killed by its timeout', function () {
 
     expect($families)->toHaveKey('queue.jobs.timed_out')
         ->and($families['queue.jobs.timed_out']->samples[0]->value)->toBe(1.0);
+});
+
+/**
+ * Laravel dispatches BOTH JobFailed and JobProcessed for a single attempt on
+ * two ordinary paths: a job calling $this->fail($e) (Job::fail() dispatches
+ * JobFailed, fire() then returns normally and the worker raises JobProcessed),
+ * and a job arriving past --tries (markJobAsFailedIfAlreadyExceedsMaxAttempts
+ * fails it, then `if ($job->isDeleted()) return $this->raiseAfterJobEvent()`).
+ *
+ * Counting both made every success-rate panel overstate success in proportion
+ * to the failure rate — the worse the day, the better it looked.
+ */
+it('counts one attempt once, even when Laravel reports it failed and processed', function () {
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfFailingJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    $events = app('events');
+    $events->dispatch(new JobProcessing('redis', $job));
+    $events->dispatch(new JobFailed('redis', $job, new RuntimeException('nope')));
+    $events->dispatch(new JobProcessed('redis', $job));
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->toHaveKey('queue.jobs.failed')
+        ->and($families['queue.jobs.failed']->samples[0]->value)->toBe(1.0)
+        ->and($families)->not->toHaveKey('queue.jobs.processed');
 });
