@@ -3,12 +3,16 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
+use Cbox\Telemetry\Instrumentation\InstrumentedFilesystemManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\Filesystem as Flysystem;
+use League\Flysystem\Local\LocalFilesystemAdapter;
 use Mockery\Exception;
 
 beforeEach(function () {
@@ -374,4 +378,33 @@ it('records an exception and rethrows on a failing operation', function () {
 
     expect($spans)->toHaveCount(1)
         ->and($spans[0]->name)->toBe('storage readStream');
+});
+
+/**
+ * The instrumented manager REPLACES the 'filesystem' binding. Building a fresh
+ * one and discarding the manager being extended threw away everything
+ * registered through Storage::extend(), so a provider that booted before
+ * telemetry simply vanished and the next resolution failed with
+ * "Driver [x] is not supported" — an observability package breaking the app
+ * it observes.
+ */
+it('keeps custom drivers registered before telemetry replaced the manager', function () {
+    $app = app();
+
+    // A provider that booted first, registering on the ORIGINAL manager.
+    $app->forgetInstance('filesystem');
+    $app->make('filesystem')->extend('probe', function (): FilesystemAdapter {
+        $adapter = new LocalFilesystemAdapter(sys_get_temp_dir().'/telemetry-probe-disk');
+
+        return new FilesystemAdapter(new Flysystem($adapter), $adapter, []);
+    });
+    config()->set('filesystems.disks.probe', ['driver' => 'probe']);
+
+    // Telemetry boots afterwards and swaps the binding.
+    (new FilesystemInstrumentation)->register($app);
+
+    $manager = $app->make('filesystem');
+
+    expect($manager)->toBeInstanceOf(InstrumentedFilesystemManager::class)
+        ->and($manager->disk('probe'))->toBeInstanceOf(Filesystem::class);
 });
