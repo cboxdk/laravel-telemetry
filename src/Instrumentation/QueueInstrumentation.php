@@ -152,9 +152,20 @@ final class QueueInstrumentation implements ManagesRequestState
             // Timeouts kill the attempt without a JobFailed on this path.
             if (class_exists(JobTimedOut::class)) {
                 $events->listen(JobTimedOut::class, function ($event) {
-                    FailSafe::guard(fn () => $this->telemetry()
-                        ->counter('queue.jobs.timed_out', 'Jobs killed by their timeout')
-                        ->inc(1, ['job.name' => $event->job->resolveName(), 'queue' => $event->job->getQueue() ?? 'default']));
+                    // completeJob() ends the span, records duration/memory/CPU
+                    // AND increments queue.jobs.timed_out — one source, so the
+                    // counter cannot drift from the spans.
+                    //
+                    // It has to happen here: Laravel raises JobTimedOut and
+                    // then SIGKILLs the worker, so nothing else will ever close
+                    // this attempt. The trace for a timed-out job — exactly the
+                    // job you went looking for — was simply absent.
+                    $this->completeJob(
+                        $event->job->resolveName(),
+                        $event->job->getQueue(),
+                        'timed_out',
+                        $event->connectionName === 'sync',
+                    );
                 });
             }
 
@@ -163,6 +174,14 @@ final class QueueInstrumentation implements ManagesRequestState
             // worker.memory.* series in the shared store forever.
             $events->listen(WorkerStopping::class, function () {
                 FailSafe::guard(fn () => $this->forgetWorkerGauges());
+
+                // Last chance to ship anything. On the timeout path Laravel
+                // follows this with posix_kill(SIGKILL), which runs no
+                // shutdown function and no terminating callback — so without
+                // this the buffered queue.jobs.timed_out counter and the span
+                // above died with the process, and the metric read a flat zero
+                // no matter how many jobs were timing out.
+                FailSafe::guard(fn () => $this->telemetry()->flush());
             });
 
             // `artisan queue:monitor` fires this above its size threshold.
