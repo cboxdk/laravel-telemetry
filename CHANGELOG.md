@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A job killed by its timeout is recorded.** Laravel raises `JobTimedOut` and
+  then `posix_kill(SIGKILL)`s the worker — no shutdown function, no terminating
+  callback. The listener only incremented a counter into the in-memory buffer
+  and left the consumer span open, so nothing ever closed the attempt: the trace
+  for a timed-out job, which is precisely the job you went looking for, was
+  simply absent, and `queue.jobs.timed_out` read a flat zero no matter how many
+  were timing out. It only bit when the attempt would be retried; with
+  `tries=1` Laravel raises `JobFailed` first and that path flushed.
+
+  The timeout now closes the attempt through the same `completeJob()` path as
+  every other outcome — one source for the span, the duration, the
+  memory/CPU attribution and the counter, so they cannot drift apart — and
+  `WorkerStopping` flushes before the kill.
+
 - **Redaction now reaches the span status description.** `recordException()`
   writes the exception message to two places: the `exception.message` event
   attribute, and the span's status description, which OTLP exports as
