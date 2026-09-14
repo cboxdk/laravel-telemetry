@@ -3,3 +3,6 @@
 .DS_Store
 .idea
 .vscode
+
+# Local cbox sandbox scaffolding
+/.cbox
