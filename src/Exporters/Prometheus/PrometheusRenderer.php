@@ -90,10 +90,12 @@ final class PrometheusRenderer
     }
 
     /**
-     * A duplicate family name would fail the entire Prometheus scrape
-     * ("duplicate metric family"). Merge same-type duplicates (e.g. a
-     * stored push gauge and an observable from another process sharing a
-     * name); on a type conflict the first family wins.
+     * A duplicate family name is invalid exposition in both grammars — a
+     * strict OpenMetrics parser rejects the document outright, and Prometheus'
+     * own text parser overwrites its metadata cache and then sees the repeated
+     * series. Merge same-type duplicates (e.g. a stored push gauge and an
+     * observable from another process sharing a name); on a type conflict the
+     * first family wins.
      *
      * @param  list<MetricFamily>  $families
      * @return list<MetricFamily>
@@ -118,11 +120,24 @@ final class PrometheusRenderer
                 // format writes only `<name>_total`, so it does NOT collide
                 // with a gauge of the bare name, though it would in
                 // OpenMetrics, where its metadata drops the suffix.
-                $taken = array_intersect($names, array_keys($ownerOf));
+                // Hash lookups, not array_intersect(array_keys(...)): that
+                // rebuilt and scanned the whole accumulated name list once per
+                // family, which is quadratic in the number of families. On
+                // 10 000 distinct gauges it turned a 7 ms render into 4.4 s —
+                // long enough to blow a scrape timeout on a big app.
+                $taken = false;
 
-                if ($taken !== []) {
-                    // Emitting both would declare one name twice and fail the
-                    // scrape for every metric. First one wins, as on a type
+                foreach ($names as $name) {
+                    if (isset($ownerOf[$name])) {
+                        $taken = true;
+
+                        break;
+                    }
+                }
+
+                if ($taken) {
+                    // Emitting both would declare one name twice, which is
+                    // invalid in both grammars. First one wins, as on a type
                     // conflict.
                     continue;
                 }
@@ -148,8 +163,12 @@ final class PrometheusRenderer
             // Same type is not enough: `latency` in seconds and
             // `latency_seconds` in microseconds render to one name, and
             // merging them would report microseconds under a seconds suffix.
+            // Compared on the CANONICAL unit, because raw string equality made
+            // `By` and `bytes` — which this renderer deliberately treats as one
+            // unit, both suffixing `_bytes` — look incompatible, and the second
+            // family was then dropped entirely rather than merged.
             if ($existing->type() === $family->type()
-                && $existing->definition->unit === $family->definition->unit) {
+                && $this->canonicalUnit($existing->definition->unit) === $this->canonicalUnit($family->definition->unit)) {
                 $byKey[$key] = new MetricFamily(
                     $existing->definition,
                     $this->mergeSamples($existing->samples, $family->samples),
@@ -162,7 +181,14 @@ final class PrometheusRenderer
     }
 
     /**
-     * Every name this family will write, metadata and samples alike.
+     * Every name this family will write, metadata and samples alike — plus,
+     * in OpenMetrics, the suffixes the format RESERVES for it even when this
+     * renderer does not emit them.
+     *
+     * `_created` is the reserved one: OpenMetrics lets a counter or histogram
+     * carry an optional `<name>_created` sample, so a gauge literally named
+     * `<name>.created` is a forbidden clash whether or not the optional sample
+     * is present. Classic text reserves nothing, so there the name is free.
      *
      * @return list<string>
      */
@@ -173,10 +199,31 @@ final class PrometheusRenderer
         return match ($family->type()) {
             // Classic: metadata and samples both under `<name>_total`.
             // OpenMetrics: metadata under `<name>`, samples under `<name>_total`.
-            MetricType::Counter => $openMetrics ? [$base, $base.'_total'] : [$base.'_total'],
-            MetricType::Histogram => [$base, $base.'_bucket', $base.'_sum', $base.'_count'],
+            MetricType::Counter => $openMetrics
+                ? [$base, $base.'_total', $base.'_created']
+                : [$base.'_total'],
+            MetricType::Histogram => $openMetrics
+                ? [$base, $base.'_bucket', $base.'_sum', $base.'_count', $base.'_created']
+                : [$base, $base.'_bucket', $base.'_sum', $base.'_count'],
             default => [$base],
         };
+    }
+
+    /**
+     * The unit reduced to what it actually MEANS on the wire.
+     *
+     * Two families only ever compete for a name when their name suffixes
+     * match, so comparing the suffix compares exactly the claim the output
+     * makes: `By` and `bytes` both say `_bytes` and are the same unit, while
+     * `s` (`_seconds`) and `us` (no suffix) are not. Units this renderer has
+     * no suffix for fall back to their raw spelling, so `us` and `ns` — which
+     * would render under one bare name — still count as different.
+     */
+    private function canonicalUnit(string $unit): string
+    {
+        $suffix = $this->unitSuffix($unit);
+
+        return $suffix !== '' ? $suffix : $unit;
     }
 
     /**
@@ -344,7 +391,8 @@ final class PrometheusRenderer
      *
      * Sorting matters too: the same labelset arriving in a different key order
      * — a stored gauge versus a cross-process observable — would otherwise
-     * render as two different series lines for one series.
+     * render as two different series lines for one series. So does dropping
+     * empty values, which Prometheus treats as absent labels.
      *
      * @param  array<string, string>  $labels
      * @param  array<string, string>  $extra
@@ -362,6 +410,12 @@ final class PrometheusRenderer
                 $merged[$this->sanitizeLabelName((string) $key)] = $value;
             }
         }
+
+        // An empty label value is not a label: Prometheus defines
+        // `foo{route=""}` and `foo` as the SAME series. Keeping the empty key
+        // made them two array keys, so a family carrying both emitted two
+        // lines for one series and the ingester silently dropped one value.
+        $merged = array_filter($merged, static fn ($value): bool => $value !== '' && $value !== null);
 
         ksort($merged);
 

@@ -47,9 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Three ways the Prometheus renderer could fail the entire scrape.** A parse
-  error is not scoped to the offending metric: the target goes `up=0` and every
-  metric from the app disappears.
+- **Three ways the Prometheus renderer emitted invalid exposition.** What it
+  costs differs per case, and they are called out individually below rather
+  than under one blanket claim: a parse error is not scoped to the offending
+  metric — the target goes `up=0` and every metric from the app disappears —
+  while repeated metadata or a repeated series costs values, not the target.
 
   - *Duplicate label names.* Labels were merged on their RAW keys and sanitized
     afterwards, so a user label `host.name` — the dotted style the docs
@@ -62,11 +64,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gauge called `payload.count` collides with a histogram called `payload`.
     A counter occupies `<name>_total` in the classic format and both `<name>`
     and `<name>_total` in OpenMetrics, so whether it collides with a
-    same-named gauge depends on the format being rendered. `orders.created` and `orders_created` are two
-    legal, distinct families that both render as `orders_created_total`, and both
-    were emitted with their own `# HELP`/`# TYPE`. Dedupe now keys on the
-    rendered name, which is also the one the render loop uses, so they cannot
-    drift.
+    same-named gauge depends on the format being rendered. `orders.created` and
+    `orders_created` are two legal, distinct families that both render as
+    `orders_created_total`, and both were emitted with their own
+    `# HELP`/`# TYPE`. Dedupe now keys on the rendered name, which is also the
+    one the render loop uses, so they cannot drift. (Repeated metadata for one
+    name is invalid under both grammars and is rejected outright by a strict
+    OpenMetrics parser; Prometheus' own text parser is more forgiving and
+    updates its metadata cache instead, so on that path the cost is the wrong
+    `# HELP`/`# TYPE` plus whatever duplicate series follow.)
   - *Duplicate samples.* Merging two same-name families concatenated their
     samples without deduplicating labelsets, so a stored push gauge and a
     cross-process observable sharing a name and a labelset produced two
@@ -75,6 +81,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     silently lost value — the family and label cases above take the target
     down.) This now runs for every family, not only when two are merged: a
     single family carrying both spellings of one labelset was never checked.
+
+- **Prometheus rendering, four smaller correctness fixes.**
+
+  - *Collision checking was quadratic.* Each family was intersected against
+    the whole accumulated name list, so the cost grew with the square of the
+    family count: 10 000 gauges measured 3.6 s against 19 ms after the fix —
+    long enough to blow a scrape timeout on an app with many series.
+  - *`By` and `bytes` were treated as different units.* Both suffix `_bytes`,
+    so two such families render under one name, but the merge compared the raw
+    unit strings, called them incompatible, and dropped the second family's
+    samples entirely.
+  - *Empty label values are absent labels.* Prometheus defines `foo{route=""}`
+    and `foo` as the same series; emitting both lost one of the two values at
+    ingestion. Empty values are now dropped before rendering.
+  - *OpenMetrics reserves `_created`.* A counter or histogram may carry an
+    optional `<name>_created` sample, so a gauge named `<name>.created` is a
+    forbidden clash whether or not that sample is emitted. It now counts as a
+    collision in OpenMetrics, and stays legal in classic text, which reserves
+    nothing.
 
 - **OpenMetrics counter family names no longer carry `_total`.** The spec puts
   that suffix on the SAMPLE, not the family, so `# TYPE foo_total counter`

@@ -145,12 +145,26 @@ resolution.
 > extra fields (region/city), or your own logic:
 
 ```php
-Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-    'geo.country.iso_code' => $request->header('CF-IPCountry'),
-    // ISO 3166-2, so country + region CODE — CF-Region is the region NAME.
-    'geo.region.iso_code'  => $request->header('CF-IPCountry').'-'.$request->header('CF-Region-Code'),
-    'geo.locality.name'    => $request->header('CF-IPCity'),
-]));
+Telemetry::resolveClientGeoUsing(function ($request) {
+    $country = $request->header('CF-IPCountry');
+
+    // XX (unknown) and T1 (Tor) are sentinels, not countries. Returning an
+    // EMPTY array falls through to the built-in resolvers, including MaxMind;
+    // returning a half-built one suppresses them.
+    if (! is_string($country) || in_array($country, ['', 'XX', 'T1'], true)) {
+        return [];
+    }
+
+    $region = $request->header('CF-Region-Code');
+
+    return array_filter([
+        'geo.country.iso_code' => strtoupper($country),
+        // ISO 3166-2, so country + region CODE — CF-Region is the region NAME,
+        // and a missing code must not mint "US-".
+        'geo.region.iso_code'  => $region ? strtoupper($country.'-'.$region) : null,
+        'geo.locality.name'    => $request->header('CF-IPCity'),
+    ]);
+});
 ```
 
 ## The full hook surface

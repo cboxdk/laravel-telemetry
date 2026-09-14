@@ -179,6 +179,13 @@ final class ScheduleInstrumentation
      * therefore the app's own cardinality. Otherwise the label is the artisan
      * command NAME with its arguments dropped, which is bounded by the number
      * of commands that exist.
+     *
+     * The description escape hatch is a real one: `Schedule::job()` sets the
+     * description from the job's `displayName()` without the app asking, so a
+     * job that names itself per tenant is unbounded here too. Nothing this
+     * class can do distinguishes that from a description deliberately chosen
+     * to be fine-grained — override `displayName()` or call `->name('…')` with
+     * a bounded label if a scheduled job varies its own name.
      */
     private function taskName(object $task): string
     {
@@ -194,30 +201,36 @@ final class ScheduleInstrumentation
 
         $summary = (string) $task->getSummaryForDisplay();
 
-        // Schedule::command() always quotes the artisan path; exec() does not.
-        $isArtisan = preg_match("/^'[^']*' 'artisan' /", $summary) === 1
-            || str_starts_with($summary, "'artisan' ");
+        // Strip EXACTLY the two tokens Schedule::command() puts in front — the
+        // quoted php binary and the quoted artisan path — and nothing else.
+        // A greedy run of quoted tokens ate the command name too whenever the
+        // app quoted it itself (`command("'tenant:sync' 48213")`), promoting
+        // the ARGUMENT to the label: the unbounded case this exists to close.
+        $stripped = 0;
+        $summary = (string) preg_replace("/^('[^']*'\s+)?'artisan'\s+/", '', $summary, 1, $stripped);
 
-        // Drop the quoted binary/artisan path, then the shell redirection.
-        // The redirection is whitespace + an optional fd + '>', NOT any '2':
-        // a `[>2]` class turned `reports:v2:send` into `reports:v`, silently
-        // merging two different commands into one series.
-        $summary = (string) preg_replace("/^('[^']*' )+/", '', $summary);
+        // Whether those tokens were there is what separates Schedule::command()
+        // from Schedule::exec(), whose summary is an arbitrary shell line.
+        $isArtisan = $stripped === 1;
+
+        // Then the shell redirection: whitespace + an optional fd + '>', NOT
+        // any '2' — a `[>2]` class turned `reports:v2:send` into `reports:v`,
+        // silently merging two different commands into one series.
         $summary = (string) preg_replace('/\s+\d?>.*$/', '', $summary);
         $summary = trim($summary);
 
-        $name = $summary === '' ? false : strtok($summary, ' ');
+        // Any whitespace separates the name from its arguments, not just a
+        // space: a tab-separated command line kept its arguments in the label.
+        $name = preg_split('/\s+/', $summary, 2)[0] ?? '';
+        $name = trim($name, "'\"");
 
-        // Only an ARTISAN command name is safe to use. Schedule::command()
-        // always builds its summary as "'<php>' 'artisan' <name> <args>", so
-        // the quoted artisan token is what distinguishes it from
-        // Schedule::exec(), whose summary is an arbitrary shell line. Without
-        // that check, stripping the quoted binary promotes the ARGUMENT:
+        // Only an ARTISAN command name is safe to use. Without that check,
+        // stripping a leading quoted token promotes the ARGUMENT:
         // `'/usr/bin/printf' alice` would have labelled the series `alice`,
         // and a varying argument is exactly the unbounded case being closed.
         // exec() tasks collapse to one bucket; give one a description if you
         // want it apart.
-        if (! $isArtisan || ! is_string($name)) {
+        if (! $isArtisan || $name === '') {
             return $summary === '' ? 'closure' : 'exec';
         }
 

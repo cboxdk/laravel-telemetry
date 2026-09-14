@@ -130,6 +130,21 @@ it('labels a scheduled task by its command name, not its arguments', function ()
     $task->summary = '/srv/tenants/acme/run.sh --tenant=acme';
     expect($name($task))->toBe('exec');
 
+    // An app that quotes its own command name used to lose it: a greedy run
+    // of quoted tokens ate `'tenant:sync'` along with the php and artisan
+    // tokens, and the label became the tenant id.
+    $task->summary = "'/usr/bin/php' 'artisan' 'tenant:sync' 48213 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('tenant:sync');
+
+    // Whitespace, not just a space, ends the command name.
+    $task->summary = "'/usr/bin/php' 'artisan' tenant:sync\t48213";
+    expect($name($task))->toBe('tenant:sync');
+
+    // ARTISAN_BINARY without a php binary in front is the other shape
+    // formatCommandString() can produce.
+    $task->summary = "'artisan' queue:prune-batches --hours=48";
+    expect($name($task))->toBe('queue:prune-batches');
+
     // A description the app set is the app's own cardinality, so it wins.
     $task->description = 'nightly reconciliation';
     expect($name($task))->toBe('nightly reconciliation');

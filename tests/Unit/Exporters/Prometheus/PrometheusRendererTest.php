@@ -309,6 +309,85 @@ it('detects a collision on a histogram suffix', function () {
         new MetricFamily(new MetricDefinition('payload.count', MetricType::Gauge, 'Count'), [new Sample([], 9.0)]),
     ]);
 
+    // Asserting only that the gauge is gone would also pass an implementation
+    // that dropped BOTH participants, so the histogram's own output is
+    // asserted in full: first one wins, it is not a mutual annihilation.
     expect(substr_count($output, '# TYPE payload_count'))->toBe(0)
-        ->and($output)->not->toContain(' 9');
+        ->and($output)->not->toContain(' 9')
+        ->and($output)->toContain('# TYPE payload histogram')
+        ->and($output)->toContain('payload_bucket{le="10"} 1')
+        ->and($output)->toContain('payload_bucket{le="+Inf"} 1')
+        ->and($output)->toContain('payload_sum 5')
+        ->and($output)->toContain('payload_count 1');
+});
+
+it('merges families whose units are different spellings of one unit', function () {
+    // `By` and `bytes` both suffix `_bytes`, so the two families render under
+    // one name. Comparing the raw strings called them incompatible and dropped
+    // the second family's samples entirely.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('cache.size', MetricType::Gauge, 'Size', 'By'),
+            [new Sample(['cache' => 'a'], 1.0)]),
+        new MetricFamily(new MetricDefinition('cache_size', MetricType::Gauge, 'Size', 'bytes'),
+            [new Sample(['cache' => 'b'], 2.0)]),
+    ]);
+
+    expect(substr_count($output, '# TYPE cache_size_bytes gauge'))->toBe(1)
+        ->and($output)->toContain('cache_size_bytes{cache="a"} 1')
+        ->and($output)->toContain('cache_size_bytes{cache="b"} 2');
+});
+
+it('treats an empty label value as an absent label', function () {
+    // Prometheus defines `foo{route=""}` and `foo` as the SAME series, so
+    // emitting both lines cost one of the two values at ingestion.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('requests', MetricType::Gauge, 'Requests'), [
+            new Sample([], 1.0),
+            new Sample(['route' => ''], 2.0),
+        ]),
+    ]);
+
+    expect(substr_count($output, "\nrequests"))->toBe(1)
+        ->and($output)->not->toContain('route=""');
+});
+
+it('reserves the OpenMetrics _created suffix for counters and histograms', function () {
+    // OpenMetrics lets a counter carry an optional `<name>_created` sample, so
+    // a gauge named `<name>.created` is a forbidden clash even though this
+    // renderer never emits that sample. Classic text reserves nothing.
+    $families = [
+        new MetricFamily(new MetricDefinition('jobs', MetricType::Counter, 'Jobs'), [new Sample([], 1.0)]),
+        new MetricFamily(new MetricDefinition('jobs.created', MetricType::Gauge, 'Created'), [new Sample([], 9.0)]),
+    ];
+
+    $open = (new PrometheusRenderer)->render($families, [], openMetrics: true);
+
+    expect($open)->not->toContain('jobs_created')
+        ->and($open)->toContain('# TYPE jobs counter');
+
+    expect((new PrometheusRenderer)->render($families))->toContain('# TYPE jobs_created gauge');
+});
+
+it('renders a large family without quadratic collision checking', function () {
+    // Every family used to be intersected against the whole accumulated name
+    // list, so this grew with the SQUARE of the family count: 10 000 gauges
+    // measured 3.6 s against 19 ms here — long enough to blow a scrape timeout
+    // on an app with many series. The threshold is two orders of magnitude
+    // above the linear cost, so it catches a return of the quadratic term
+    // without turning CI timing noise into a failure.
+    $families = [];
+
+    for ($i = 0; $i < 10_000; $i++) {
+        $families[] = new MetricFamily(
+            new MetricDefinition("metric.n{$i}", MetricType::Gauge, 'N'),
+            [new Sample([], (float) $i)],
+        );
+    }
+
+    $started = microtime(true);
+    $output = (new PrometheusRenderer)->render($families);
+    $elapsed = microtime(true) - $started;
+
+    expect(substr_count($output, '# TYPE '))->toBe(10_000)
+        ->and($elapsed)->toBeLessThan(2.0);
 });

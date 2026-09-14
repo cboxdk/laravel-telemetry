@@ -613,12 +613,14 @@ class TelemetryManager
      * Provide `geo.*` for the request span and analytics events —
      * e.g. from Cloudflare's edge headers, so no geo database is needed:
      *
-     *     Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-     *         'geo.country.iso_code'      => $request->header('CF-IPCountry'),
-     *         // ISO 3166-2: country + region CODE, not CF-Region (a NAME).
-     *         'geo.region.iso_code'       => $request->header('CF-IPCountry').'-'.$request->header('CF-Region-Code'),
-     *         'client.address'          => $request->header('CF-Connecting-IP'),
-     *     ]));
+     *     Telemetry::resolveClientGeoUsing(
+     *         fn ($request) => CloudflareHeaders::geo($request)
+     *     );
+     *
+     * Rolling your own: an ISO 3166-2 region is country + region CODE, not
+     * CF-Region (a NAME), and a missing code must not mint "US-". Return an
+     * EMPTY array when the edge gave you nothing — a non-empty result wins
+     * outright and suppresses the built-in resolvers, MaxMind included.
      *
      * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
      */
