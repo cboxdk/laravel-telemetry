@@ -7,6 +7,8 @@ use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use GuzzleHttp\Psr7\Request as GuzzleRequest;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Bus\Queueable;
 use Illuminate\Console\Events\CommandFinished;
@@ -14,6 +16,12 @@ use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Events\ConnectionFailed;
+use Illuminate\Http\Client\Events\RequestSending;
+use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Http\Client\Request;
+use Illuminate\Http\Client\Response;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Bus;
@@ -245,4 +253,74 @@ it('samples host and process metrics via telemetry:monitor --once', function () 
     if (isset($families['system.filesystem.usage'])) {
         expect($families['system.filesystem.usage']->samples)->not->toBeEmpty();
     }
+});
+
+/**
+ * Laravel builds a FRESH Request wrapper for the connection-failure path
+ * (`new Request($e->getRequest())` in PendingRequest::marshalTransportException),
+ * so identity misses. The span was never ended and never exported — and because
+ * it stayed on the tracer stack, every later span in the request was parented
+ * under the HTTP call that had already failed. A failing dependency quietly
+ * rewrote the shape of the whole trace.
+ */
+it('closes the client span when a connection fails, and does not swallow later spans', function () {
+    $events = app('events');
+
+    $psr = new GuzzleRequest('GET', 'https://down.example/v1/thing');
+
+    // Two DIFFERENT wrappers around the same call, which is what Laravel does.
+    // Both are held: dropping the first lets PHP reuse its spl_object_id for
+    // the second, which would make identity match by accident and hide the bug.
+    $sent = new Request($psr);
+    $failedWrapper = new Request($psr);
+
+    expect(spl_object_id($sent))->not->toBe(spl_object_id($failedWrapper));
+
+    $events->dispatch(new RequestSending($sent));
+    $events->dispatch(new ConnectionFailed($failedWrapper, new ConnectionException('could not connect')));
+
+    Telemetry::span('after.the.failure', fn () => null);
+
+    $spans = allSpans($this->collector);
+    $failed = $spans->firstWhere('name', 'GET down.example');
+    $after = $spans->firstWhere('name', 'after.the.failure');
+
+    expect($failed)->not->toBeNull('the failed call must be exported')
+        ->and($failed->status())->toBe(SpanStatus::Error)
+        ->and($after)->not->toBeNull()
+        ->and($after->parentSpanId)->not->toBe($failed->spanId, 'later work must not be parented under the dead call');
+});
+
+/**
+ * Http::pool() sends several requests concurrently, and they may be identical.
+ * Matching a failure to a span by method/host/path would close whichever
+ * lookalike happened to be open — swapping two calls' statuses and durations.
+ * The PSR request is the identity the framework actually preserves.
+ */
+it('matches a failure to its own span among identical concurrent requests', function () {
+    $events = app('events');
+
+    $psrA = new GuzzleRequest('GET', 'https://twin.example/thing');
+    $psrB = new GuzzleRequest('GET', 'https://twin.example/thing');
+
+    // Capture which span belongs to which call as it opens — asserting only
+    // "one Error and one Ok" would pass even if the two outcomes were swapped,
+    // which is precisely the bug a shape-match fallback causes.
+    $events->dispatch(new RequestSending(new Request($psrA)));
+    $idA = Telemetry::currentSpan()->spanId;
+
+    $events->dispatch(new RequestSending(new Request($psrB)));
+    $idB = Telemetry::currentSpan()->spanId;
+
+    expect($idA)->not->toBe($idB);
+
+    // A fails; B succeeds. Both wrapped in fresh wrappers, as Laravel does.
+    $events->dispatch(new ConnectionFailed(new Request($psrA), new ConnectionException('nope')));
+    $events->dispatch(new ResponseReceived(new Request($psrB), new Response(new GuzzleResponse(200))));
+
+    $byId = allSpans($this->collector)->where('name', 'GET twin.example')->keyBy(fn ($span) => $span->spanId);
+
+    expect($byId)->toHaveCount(2)
+        ->and($byId[$idA]->status())->toBe(SpanStatus::Error, 'the failure must close the call that failed')
+        ->and($byId[$idB]->status())->toBe(SpanStatus::Ok, 'the response must close the call that answered');
 });

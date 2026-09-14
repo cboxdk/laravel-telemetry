@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Client spans are no longer left open when the framework hands back a
+  different object.** Two instrumentations tracked their in-flight span by
+  `spl_object_id()` of an object the framework does not promise to reuse:
+
+  - A failed outgoing HTTP call arrives with a FRESH `Request` wrapper
+    (`new Request($e->getRequest())` in
+    `PendingRequest::marshalTransportException`), so the lookup missed on every
+    connection failure.
+  - `AbstractTransport::send()` does `$message = clone $message` on its first
+    line and `SentMessage` keeps that clone as its "original", so the lookup
+    missed on every *successful* mail send.
+
+  In both cases the span was never ended and never exported — and because it
+  stayed on the tracer stack, every later span in the request was parented under
+  it. A failing dependency, or simply sending mail, quietly rewrote the shape of
+  the whole trace.
+
+  HTTP now keys on the PSR request, which the framework *does* preserve across
+  both wrappers, so it stays exact even for concurrent `Http::pool()` calls to
+  the same URL. Mail keys on the message and falls back to the innermost open
+  send, because sends nest strictly and the inner one completes first.
+
+  Neither guesses by what the call looks like. Some paths still go unmatched
+  and leave that one span open until `flushRequestState()`: a redirect (one
+  `ResponseReceived` for several `RequestSending`s), Guzzle's streaming handler
+  cloning the request, and a `beforeSending` callback replacing it — that last
+  on the exception path only, since success closes through the stored wrapper.
+  Mail's fallback is a heuristic with a known boundary, documented at the call
+  site. Leaving a span open is much the lesser evil against closing one with
+  someone else's duration and status, which reads as data.
+
 - **A fatal error now delivers its error record and its trace.** A fatal —
   `max_execution_time`, an allocation over `memory_limit`, an uncaught `Error` —
   never reaches `Kernel::terminate()`, so neither the terminating callback nor

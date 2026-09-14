@@ -5,11 +5,17 @@ declare(strict_types=1);
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Mail\SentMessage as LaravelSentMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\Mailer\Envelope;
+use Symfony\Component\Mailer\SentMessage;
+use Symfony\Component\Mime\Email;
 
 beforeEach(function () {
     $this->collector = new CollectingExporter;
@@ -194,4 +200,78 @@ it('ignores configured cache stores entirely', function () {
 
     expect($spans->firstWhere('name', 'cache.miss'))->toBeNull()
         ->and(collect(Telemetry::collect())->keyBy(fn ($family) => $family->name()))->not->toHaveKey('cache.operations');
+});
+
+/**
+ * Symfony's AbstractTransport::send() does `$message = clone $message` on its
+ * first line, and SentMessage keeps THAT clone as its "original" — so the
+ * object reaching MessageSent is never the one MessageSending carried, and
+ * identity misses on every successful send. The span was never ended and never
+ * exported, and because it stayed on the tracer stack every later span in the
+ * request was parented under the mail call.
+ */
+it('closes the mail span even though Symfony clones the message', function () {
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    $message = (new Email)->from('app@example.test')->to('someone@example.test')->subject('Welcome')->text('hi');
+
+    // What the transport really hands back: a clone, not the original.
+    $delivered = clone $message;
+
+    expect(spl_object_id($message))->not->toBe(spl_object_id($delivered));
+
+    $events = app('events');
+    $events->dispatch(new MessageSending($message));
+    $events->dispatch(new MessageSent(new LaravelSentMessage(new SentMessage($delivered, Envelope::create($delivered)))));
+
+    Telemetry::span('after.the.mail', fn () => null);
+    Telemetry::flush();
+
+    $spans = collect($collector->batches())->flatMap(fn ($batch) => $batch->spans);
+    $mail = $spans->firstWhere('name', 'mail.send');
+    $after = $spans->firstWhere('name', 'after.the.mail');
+
+    expect($mail)->not->toBeNull('the mail span must be exported')
+        ->and($after)->not->toBeNull()
+        ->and($after->parentSpanId)->not->toBe($mail->spanId, 'later work must not be parented under the mail call');
+});
+
+/**
+ * Mail sends nest — a MessageSending listener can send its own mail — and they
+ * nest strictly, so the innermost completes first. Falling back to the OLDEST
+ * open span would close the outer one from the inner send, before the outer
+ * message had even reached its transport.
+ */
+it('closes the innermost mail span first when sends nest', function () {
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    $outer = (new Email)->from('a@example.test')->to('outer@example.test')->subject('Outer')->text('o');
+    $inner = (new Email)->from('a@example.test')->to('inner@example.test')->subject('Inner')->text('i');
+
+    $events = app('events');
+
+    // Outer starts; its listener sends the inner message, which completes first.
+    $events->dispatch(new MessageSending($outer));
+    $events->dispatch(new MessageSending($inner));
+
+    $deliveredInner = clone $inner;
+    $events->dispatch(new MessageSent(new LaravelSentMessage(new SentMessage($deliveredInner, Envelope::create($deliveredInner)))));
+
+    $deliveredOuter = clone $outer;
+    $events->dispatch(new MessageSent(new LaravelSentMessage(new SentMessage($deliveredOuter, Envelope::create($deliveredOuter)))));
+
+    Telemetry::flush();
+
+    $spans = collect($collector->batches())->flatMap(fn ($batch) => $batch->spans)
+        ->where('name', 'mail.send')->values();
+
+    expect($spans)->toHaveCount(2);
+
+    // The inner span must have closed first, so it is the shorter of the two
+    // and is not the parent of the outer one.
+    $subjects = $spans->map(fn ($span) => $span->attributes()['mail.subject'])->all();
+
+    expect($subjects)->toBe(['Inner', 'Outer']);
 });
