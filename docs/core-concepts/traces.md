@@ -179,7 +179,7 @@ That enables per-plan latency in PromQL:
 
 ```promql
 histogram_quantile(0.95, sum by (le, plan)
-  (rate(http_server_request_duration_milliseconds_bucket[5m])))
+  (rate(http_server_request_duration_seconds_bucket[5m])))
 ```
 
 Core labels (`http.route`, method, status) always win over resolver

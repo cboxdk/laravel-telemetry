@@ -23,11 +23,11 @@ groups:
         # 5xx share of traffic. Critical page.
         expr: |
           100 * sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_milliseconds_count{http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
           )
           /
           sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_milliseconds_count[5m])
+            rate(http_server_request_duration_seconds_count[5m])
           ) > 5
         for: 5m
         labels:
@@ -39,11 +39,11 @@ groups:
       - alert: ElevatedRequestErrorRate
         expr: |
           100 * sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_milliseconds_count{http_response_status_code=~"5.."}[5m])
+            rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m])
           )
           /
           sum by (service_name, deployment_environment_name) (
-            rate(http_server_request_duration_milliseconds_count[5m])
+            rate(http_server_request_duration_seconds_count[5m])
           ) > 1
         for: 10m
         labels:
@@ -53,19 +53,20 @@ groups:
           description: "{{ printf \"%.1f\" $value }}% of requests are returning 5xx over the last 10m."
 
       - alert: HighRequestLatencyP95
-        # p95 request duration, in milliseconds, over a 5m window.
+        # p95 request duration, in SECONDS, over a 5m window. This metric is a
+        # stable OTel semconv name, so its unit is fixed to seconds by spec.
         expr: |
           histogram_quantile(0.95,
             sum by (le, service_name, deployment_environment_name) (
-              rate(http_server_request_duration_milliseconds_bucket[5m])
+              rate(http_server_request_duration_seconds_bucket[5m])
             )
-          ) > 1000
+          ) > 1
         for: 10m
         labels:
           severity: warning
         annotations:
           summary: "p95 request latency above 1s on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
-          description: "p95 is {{ printf \"%.0f\" $value }}ms over the last 5m (threshold 1000ms)."
+          description: "p95 is {{ printf \"%.2f\" $value }}s over the last 5m (threshold 1s)."
 
   # ---------------------------------------------------------------------------
   # Exceptions — the "throw away Sentry" signal. exceptions.reported counts

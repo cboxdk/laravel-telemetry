@@ -606,3 +606,27 @@ it('captures a profile event for a slow request when excimer is available', func
     expect($event)->not->toBeNull()
         ->and($event->attributes['profile.top_functions'])->toBeString();
 })->group('excimer');
+
+/**
+ * http.server.request.duration is a STABLE OpenTelemetry metric whose unit is
+ * fixed to seconds. Emitting it in milliseconds meant every stock dashboard and
+ * alert looking for http_server_request_duration_seconds_bucket found nothing,
+ * and a collector fed this alongside any other OTel SDK saw one metric name
+ * arrive with two different units.
+ */
+it('records the semconv request duration in seconds, not milliseconds', function () {
+    $this->get('/users/7');
+
+    $family = collect(Telemetry::collect())
+        ->first(fn ($f) => $f->name() === 'http.server.request.duration');
+
+    expect($family)->not->toBeNull()
+        ->and($family->definition->unit)->toBe('s');
+
+    $sample = $family->samples[0];
+
+    // A test request is milliseconds of work; in seconds that is well under
+    // one, and in milliseconds it would be well over.
+    expect($sample->sum)->toBeLessThan(1.0)
+        ->and($family->definition->buckets)->toBe([0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]);
+});
