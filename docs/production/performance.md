@@ -151,3 +151,12 @@ covers them:
 Nothing to configure; detection is automatic (the Octane event classes'
 presence). Under FPM none of this runs — the process ends after each
 request anyway.
+
+The boundary that matters is the one you do NOT get for free: a
+long-running CLI process that is neither Octane nor a queue worker — an
+artisan command looping over thousands of HTTP calls or mail sends — has
+no reset between iterations, so any half-open client span accumulates for
+the life of the command. See
+[Traces → Half-open client spans](../core-concepts/traces.md#half-open-client-spans)
+for which operations can go unpaired and why the package refuses to guess
+its way out of it.

@@ -300,6 +300,59 @@ index.php`), the request trace includes a backdated `laravel.bootstrap`
 span covering framework boot up to the middleware stack, and the request
 span carries `laravel.bootstrap_ms`.
 
+## Half-open client spans
+
+A client span is opened on one framework event and closed on another —
+`RequestSending` / `ResponseReceived`, `MessageSending` / `MessageSent`.
+Where the framework hands back a different object than it started with,
+the two cannot always be paired, and an unpaired span is neither ended nor
+exported.
+
+The pairing is by identity wherever an identity survives: outgoing HTTP
+keys on the PSR-7 request, which both `Request` wrappers share, so it is
+exact even for concurrent `Http::pool()` calls to the same URL. Mail has
+no such key — Laravel sets no `Message-ID` before dispatching
+`MessageSending`, and most transports clone the message — so it falls
+back to the innermost open send.
+
+Deliberately, nothing guesses by what the call *looks* like. Matching a
+failure to a span by method/host/path closes whichever lookalike happens
+to be open, and two concurrent calls then swap their statuses and
+durations. **A missing span is much the lesser evil than one carrying
+someone else's outcome, which reads as data.**
+
+These paths therefore go unmatched today:
+
+| Path | Why |
+|---|---|
+| A redirect | One `ResponseReceived` for several `RequestSending`s; the earlier hops never pair |
+| `withOptions(['stream' => true])` | Guzzle's streaming handler clones the request to add `Connection: close` |
+| Cloning Guzzle middleware | Same shape as the above |
+| `beforeSending` returning a replacement | The **exception** path only; success still pairs through the stored wrapper |
+| A mail transport that throws, caught by the caller | Its span stays newest until something else pops it |
+
+### What it costs, and where
+
+The consequence is twofold: that one call is missing from the trace, and
+while the span sits on the context stack, later work in the same unit of
+work is parented under it.
+
+`ManagesRequestState::flushRequestState()` drops the half-open state, and
+it runs on **Octane/NativePHP request and tick boundaries**, and at the
+start of each **non-sync queue job** (the latter only when
+`instrument.queue` is on). Those are the boundaries that bound it.
+
+Under **FPM there is nothing to bound** — the process ends after the
+request, so nothing survives to accumulate.
+
+The case with no boundary is a **long-running CLI process that is neither
+Octane nor a queue worker**: an artisan command looping over thousands of
+redirected HTTP calls, or mail sends whose transport keeps throwing, holds
+one entry per unmatched operation for the life of the command. If you have
+such a command, give it explicit boundaries — process in chunks and let the
+work happen in queued jobs rather than inline, which restores the per-job
+reset.
+
 ## Buffering
 
 Finished spans buffer in memory and flush at terminate — export latency
