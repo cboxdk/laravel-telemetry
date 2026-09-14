@@ -9,49 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`http.request.method` was an unbounded metric label.** It carried
-  `$request->method()` — whatever the caller put on the request line,
-  uppercased, with nothing restricting it to a real verb. Unmatched requests
-  are measured too, so anyone could mint a permanent series from outside the
-  app without authenticating or hitting a route: three requests with invented
-  methods produced three `http.server.request.duration` series. An app cannot
-  fix this for itself, because core labels win over `labelRequestsUsing()`.
+- **`http.request.method` was an unbounded metric label.** It carried the
+  method from the request line — whatever the caller sent, with nothing
+  restricting it to a real verb. Unmatched requests are measured too, so
+  anyone could mint permanent series from outside the app without
+  authenticating or hitting a route. An app could not fix it for itself:
+  core labels win over `labelRequestsUsing()`.
 
-  semconv anticipates exactly this case: unknown methods report `_OTHER`, and
-  the original travels on the span as `http.request.method_original`. Both are
-  now done — on the server span, the server metric, the analytics page-view
-  event, and the outgoing client span and metric, so the attribute means the
-  same thing everywhere it appears.
+  semconv covers this — an unknown method reports `_OTHER`, the original
+  goes on the span as `http.request.method_original`, and the span NAME uses
+  `HTTP` rather than the raw method, since a name is caller-controlled
+  otherwise and anything deriving a dimension from names inherits the same
+  unbounded set. Applied at every site the attribute appears: server span and
+  name, server metric, analytics page-view event, outgoing client span, name
+  and metric.
 
   The nine semconv names are not every real method (WebDAV alone adds
-  PROPFIND, MKCOL and REPORT), so the list is configurable:
-  `instrument.known_http_methods`. An app that serves them adds them and gets
-  its breakdown back instead of one bucket.
+  PROPFIND, MKCOL and REPORT), so the list is configurable via
+  `instrument.known_http_methods` — an explicitly empty array is an override
+  too, for an app that wants everything bucketed.
 
-  **Upgrade note.** A caller sending a method outside the list now lands in
-  `_OTHER` rather than its own series. If you deliberately serve a
-  non-semconv method, add it to `instrument.known_http_methods` before
-  upgrading or its history will split.
+  **Upgrade note.** A method outside the list now lands in `_OTHER` and its
+  span name starts `HTTP`. If you deliberately serve a non-semconv method,
+  add it to `instrument.known_http_methods` before upgrading or its history
+  will split.
 
-- **Credential query parameters were only redacted under their bare names.**
-  `SENSITIVE_QUERY_PARAMS` matched `token`, `key`, `secret` and friends
-  exactly, so `api_token`, `access_token`, `client_secret` and `x-api-key` —
-  the spellings apps actually use — passed straight through into `url.query`
-  on an exported span. Prefix segments are now allowed before the name. Each
-  must end in a separator and the parameter must start the pair, which is what
-  keeps `monkey`, `zipcode` and `estate` out of it.
+- **Credentials in query strings survived redaction almost everywhere.**
+  `url.query` was scrubbed by exact parameter name, so `api_token`,
+  `accessToken`, `_token`, `token[]` and percent-encoded spellings all went
+  out intact — and the same secret reached the exporter untouched through
+  `http.request.header.referer` and any `exception.message` quoting a URL,
+  neither of which that scrubbing ever saw.
 
-- **A failed job's error record could not say whose it was.** `completeJob()`
-  reset the ambient context at the end of every non-sync job, failures
-  included. Laravel dispatches `JobFailed` from inside
-  `Worker::handleJobException()`, which then rethrows — the exception only
-  reaches the handler, and through it this package's reportable listener, in
-  `Worker::runNextJob()`'s catch. So the error event was always built after
-  the reset, with no ambient dimensions at all: the one record where "whose is
-  this" matters most was the one that could not answer. Context now survives a
-  failure. Nothing inherits it — `JobProcessing` resets and restores from the
-  payload at the start of every non-sync job, and `WorkerStopping` clears it on
-  the way out.
+  Fixed where it belongs: two default patterns in `Redactor`, the one choke
+  point every attribute value passes through, so one rule covers the query
+  string, the referer, exception messages and log lines alike. Words that are
+  always credentials match loosely; `code`, `state`, `key` and `auth` match
+  exactly, because `?code=` on an OAuth callback is an authorization code
+  while `postal_code=` is an address.
+
+- **A failed job's error record could not say whose it was.** A queue worker
+  tears the job down before it reports: Laravel dispatches `JobFailed` — or
+  `JobReleasedAfterException`, which is every attempt but the last when
+  `tries > 1` — from inside `Worker::handleJobException()` and only rethrows
+  afterwards, so the exception reaches the handler in `Worker::runJob()`'s
+  catch with the job's context already gone.
+
+  The dimensions are now snapshotted at that teardown and merged into the
+  error event by the reportable listener, which clears the snapshot as it
+  reads it. Live context still wins; this only supplies what is missing.
+  Deliberately a snapshot rather than keeping the context alive: alive means
+  every later span, log, event and outgoing `baggage` header in that worker
+  process inherits a dead job's tenant, including the worker's own lifetime
+  span.
 
 ## [2.0.0] - 2026-09-14
 

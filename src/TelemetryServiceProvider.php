@@ -955,10 +955,19 @@ class TelemetryServiceProvider extends ServiceProvider
                         // (OTLP log → Loki) with a fingerprint — captured even
                         // out of a trace or when the trace is sampled away.
                         $span = $telemetry->currentSpan();
+
+                        // A queue worker has already torn the job down by the
+                        // time it reports: Laravel dispatches JobFailed from
+                        // inside handleJobException() and rethrows afterwards,
+                        // so the live context is empty here and the error
+                        // record could not say whose failure it was. The
+                        // snapshot taken at that teardown fills the gap, and
+                        // reading it clears it. Live context still wins — this
+                        // only supplies what is missing.
                         $telemetry->recordEvent(new TelemetryEvent(
                             name: 'exception',
                             timeUnixNano: (int) (microtime(true) * 1e9),
-                            attributes: $telemetry->contextAttributes() + $attributes,
+                            attributes: $telemetry->contextAttributes() + $telemetry->takeFailureContext() + $attributes,
                             traceId: $span->traceId ?? $telemetry->traceId(),
                             spanId: $span?->spanId,
                             severityNumber: 17, // ERROR

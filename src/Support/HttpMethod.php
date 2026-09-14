@@ -40,23 +40,49 @@ final class HttpMethod
     }
 
     /**
-     * The value for `http.request.method_original`, or null when the method
-     * needs no explaining — the attribute is only meaningful when the
-     * normalized one hid something.
+     * The value for `http.request.method_original`, or null when nothing was
+     * hidden.
+     *
+     * Compares against what normalize() actually returns rather than asking
+     * whether the method is known — `GeT` is known, and normalizing it to
+     * `GET` still changes it, so the original belongs on the span.
      */
     public static function original(string $method): ?string
     {
-        return self::isKnown($method) ? null : $method;
+        return self::normalize($method) === $method ? null : $method;
+    }
+
+    /**
+     * The method portion of a span NAME.
+     *
+     * semconv is explicit that an unknown method must not reach the name
+     * either: the name would otherwise be caller-controlled, and anything
+     * deriving a dimension from span names inherits the same unbounded set.
+     */
+    public static function forSpanName(string $method): string
+    {
+        return self::isKnown($method) ? strtoupper($method) : 'HTTP';
     }
 
     private static function isKnown(string $method): bool
     {
+        return in_array(strtoupper($method), self::known(), true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function known(): array
+    {
         $configured = config('telemetry.instrument.known_http_methods');
 
-        $known = is_array($configured) && $configured !== []
-            ? array_map(static fn (mixed $m): string => strtoupper(Cast::string($m)), $configured)
-            : self::SEMCONV;
+        // An explicitly empty array is an override, not an absence: an app
+        // that wants every method bucketed is entitled to say so. Only a
+        // missing or non-array value falls back to the defaults.
+        if (! is_array($configured)) {
+            return self::SEMCONV;
+        }
 
-        return in_array(strtoupper($method), $known, true);
+        return array_values(array_map(strtoupper(...), Cast::stringList($configured)));
     }
 }

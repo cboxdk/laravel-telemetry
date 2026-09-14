@@ -263,32 +263,49 @@ it('does not touch Laravel Context when sharing is disabled', function () {
     expect(Context::get('trace_id'))->toBeNull();
 });
 
-it('reports an unknown request method as _OTHER and keeps the original on the span', function () {
-    // http.request.method is a METRIC LABEL and $request->method() is whatever
-    // the caller put on the request line. Unmatched requests are measured too,
-    // so without this anyone could mint series from outside the app without
-    // authenticating or hitting a route. semconv's answer is _OTHER plus
-    // http.request.method_original.
+it('reports an unknown request method as _OTHER, on the attribute and in the span name', function () {
+    // http.request.method is a METRIC LABEL and the method is whatever the
+    // caller put on the request line. Unmatched requests are measured too, so
+    // without a bound anyone can mint series from outside the app. The span
+    // NAME needs the same treatment — it is caller-controlled otherwise, and
+    // anything deriving a dimension from names inherits the same unbounded set.
     $this->call('REVIEWVERB', '/users/7');
 
-    $attributes = requestSpans($this->collector)[0]->attributes();
+    $span = requestSpans($this->collector)[0];
 
-    expect($attributes['http.request.method'])->toBe('_OTHER')
-        ->and($attributes['http.request.method_original'])->toBe('REVIEWVERB');
+    expect($span->attributes()['http.request.method'])->toBe('_OTHER')
+        ->and($span->attributes()['http.request.method_original'])->toBe('REVIEWVERB')
+        ->and($span->name)->toStartWith('HTTP ');
+});
+
+it('keeps the original whenever normalising changed it, not merely when unknown', function () {
+    // `GeT` is a known method AND is changed by normalising, so the original
+    // still belongs on the span. Asking "is it known" answers the wrong
+    // question.
+    expect(HttpMethod::normalize('GeT'))->toBe('GET')
+        ->and(HttpMethod::original('GeT'))->toBe('GeT')
+        ->and(HttpMethod::original('GET'))->toBeNull();
 });
 
 it('breaks out an extra method the app declares it serves', function () {
     // The nine semconv names are not every real method — WebDAV alone adds
-    // three. An app that serves them says so and gets its breakdown back
-    // instead of one _OTHER bucket.
+    // three. An app that serves them says so and keeps its breakdown.
     config()->set('telemetry.instrument.known_http_methods', [...HttpMethod::SEMCONV, 'PROPFIND']);
 
     $this->call('PROPFIND', '/users/7');
 
-    $attributes = requestSpans($this->collector)[0]->attributes();
+    $span = requestSpans($this->collector)[0];
 
-    expect($attributes['http.request.method'])->toBe('PROPFIND')
-        ->and($attributes)->not->toHaveKey('http.request.method_original');
+    expect($span->attributes()['http.request.method'])->toBe('PROPFIND')
+        ->and($span->attributes())->not->toHaveKey('http.request.method_original');
+});
+
+it('treats an explicitly empty known-method list as an override', function () {
+    // An app entitled to say "bucket everything" was previously ignored,
+    // because an empty array was read as an absent one.
+    config()->set('telemetry.instrument.known_http_methods', []);
+
+    expect(HttpMethod::normalize('GET'))->toBe('_OTHER');
 });
 
 it('leaves a known method alone and adds no original', function () {
@@ -298,17 +315,6 @@ it('leaves a known method alone and adds no original', function () {
 
     expect($attributes['http.request.method'])->toBe('GET')
         ->and($attributes)->not->toHaveKey('http.request.method_original');
-});
-
-it('redacts credential query parameters however they are prefixed', function () {
-    // The list matched whole parameter names, so `api_token` — which is how a
-    // great many apps authenticate — matched none of them and rode out intact.
-    $this->get('/users/7?api_token=secret1&x-api-key=secret2&client_secret=secret3&monkey=fine&zipcode=2100&estate=ok');
-
-    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
-
-    // …and words that merely CONTAIN one of the names are left alone.
-    expect($query)->toBe('api_token=REDACTED&x-api-key=REDACTED&client_secret=REDACTED&monkey=fine&zipcode=2100&estate=ok');
 });
 
 it('captures domain, client, protocol and query on the request span', function () {

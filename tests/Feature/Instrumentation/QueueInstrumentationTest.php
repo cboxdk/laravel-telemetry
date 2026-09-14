@@ -15,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\InteractsWithQueue;
@@ -159,13 +160,12 @@ it('closes out and ships a job killed by its timeout', function () {
  * Counting both made every success-rate panel overstate success in proportion
  * to the failure rate — the worse the day, the better it looked.
  */
-it('keeps the ambient context alive past a failure, so the worker can still report who it was for', function () {
+it('hands a failed job\'s dimensions to whoever reports the exception', function () {
     // Laravel dispatches JobFailed from inside Worker::handleJobException(),
-    // which then RETHROWS — the exception only reaches the handler, and through
-    // it this package's reportable listener, in Worker::runNextJob()'s catch.
-    // Resetting context on the failure path meant that listener built the error
-    // event with no ambient dimensions: the failed job, the one record where
-    // "whose is this" matters most, was the one that could not say.
+    // which then rethrows — the exception only reaches the handler, and
+    // through it this package's reportable listener, in Worker::runJob()'s
+    // catch. Everything the job set is torn down before that, so the error
+    // record could not say whose failure it was.
     app('queue');
 
     $job = Mockery::mock(Job::class);
@@ -181,16 +181,22 @@ it('keeps the ambient context alive past a failure, so the worker can still repo
 
     $events->dispatch(new JobFailed('redis', $job, new RuntimeException('nope')));
 
-    expect(Telemetry::contextAttributes())->toHaveKey('tenant');
+    // The live context is cleared, as it always was — leaving it alive would
+    // stamp the dead job's tenant on every later span, log and outgoing
+    // baggage header in this worker process.
+    expect(Telemetry::contextAttributes())->toBe([]);
+
+    // …but the snapshot is there for the reporter.
+    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme']);
 });
 
-it('does drop the context after a job that succeeded', function () {
-    // The next job restores its own from the payload either way, but there is
-    // no reporter waiting on a success and nothing should outlive it.
+it('does the same for an attempt released for retry', function () {
+    // Released attempts are reported exactly like terminal ones, so with the
+    // default tries > 1 every attempt but the last was unattributable.
     app('queue');
 
     $job = Mockery::mock(Job::class);
-    $job->shouldReceive('resolveName')->andReturn('App\Jobs\FineJob');
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\RetryingJob');
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -200,9 +206,16 @@ it('does drop the context after a job that succeeded', function () {
 
     Telemetry::context(['tenant' => 'acme']);
 
-    $events->dispatch(new JobProcessed('redis', $job));
+    $events->dispatch(new JobReleasedAfterException('redis', $job));
 
-    expect(Telemetry::contextAttributes())->not->toHaveKey('tenant');
+    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme']);
+});
+
+it('gives the snapshot to one report and no more', function () {
+    Telemetry::rememberFailureContext(['tenant' => 'acme']);
+
+    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme'])
+        ->and(Telemetry::takeFailureContext())->toBe([]);
 });
 
 it('counts one attempt once, even when Laravel reports it failed and processed', function () {

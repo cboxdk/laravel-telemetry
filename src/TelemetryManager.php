@@ -307,6 +307,49 @@ class TelemetryManager
     }
 
     /**
+     * Context as it was when a unit of work failed, held for whoever reports
+     * the exception next.
+     *
+     * @var array<string, scalar|null>
+     */
+    private array $failureContext = [];
+
+    /**
+     * Keep the current dimensions for the reporter that has not run yet.
+     *
+     * A queue worker tears the job down before the exception reaches the
+     * handler: Laravel dispatches JobFailed (or JobReleasedAfterException)
+     * from inside Worker::handleJobException(), and only rethrows afterwards,
+     * so by the time report() runs the job's context is gone and the error
+     * record cannot say whose failure it was.
+     *
+     * A snapshot rather than leaving the live context alive, because "alive"
+     * means every later span, log, event and outgoing baggage header in that
+     * worker process inherits a dead job's tenant.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function rememberFailureContext(array $attributes): void
+    {
+        $this->failureContext = $attributes;
+    }
+
+    /**
+     * Consume the snapshot. Reading it clears it, so one failure decorates one
+     * report and nothing later picks it up.
+     *
+     * @return array<string, scalar|null>
+     */
+    public function takeFailureContext(): array
+    {
+        $taken = $this->failureContext;
+
+        $this->failureContext = [];
+
+        return $taken;
+    }
+
+    /**
      * Name request root spans yourself — essential behind catch-all
      * routes (Statamic, wildcard APIs) where the route pattern names
      * every request identically. Return null to keep the default

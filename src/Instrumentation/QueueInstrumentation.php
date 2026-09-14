@@ -331,6 +331,12 @@ final class QueueInstrumentation implements ManagesRequestState
             }
         });
 
+        // A released attempt is reported exactly like a terminal one — the
+        // worker rethrows and the handler runs after this teardown — so with
+        // tries > 1 every attempt but the last produced an unattributable
+        // error record.
+        $this->rememberFailureContext();
+
         $this->completeJob(
             job: $event->job->resolveName(),
             queue: $event->job->getQueue(),
@@ -342,6 +348,8 @@ final class QueueInstrumentation implements ManagesRequestState
     private function jobFailed(JobFailed $event): void
     {
         FailSafe::guard(fn () => $this->currentJobSpan()?->recordException($event->exception));
+
+        $this->rememberFailureContext();
 
         $this->completeJob(
             job: $event->job->resolveName(),
@@ -442,27 +450,32 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
             });
 
-            FailSafe::guard(function () use ($outcome) {
+            FailSafe::guard(function () {
                 $this->telemetry()->flush();
-
-                // Context is NOT dropped after a failure. Laravel dispatches
-                // JobFailed from inside Worker::handleJobException(), which
-                // then rethrows — and only in Worker::runNextJob()'s catch
-                // does the exception reach the handler and, through it, the
-                // package's own reportable listener. Clearing here meant that
-                // listener built the error event with no ambient dimensions at
-                // all: the failed job, the one record where "whose is this"
-                // matters most, was the one record that could not say.
-                //
-                // Leaving it costs nothing. JobProcessing resets and restores
-                // from the payload at the start of every non-sync job, so the
-                // next job never inherits it, and WorkerStopping clears it on
-                // the way out.
-                if ($outcome !== 'failed' && $outcome !== 'timed_out') {
-                    $this->telemetry()->resetContext();
-                }
+                $this->telemetry()->resetContext();
             });
         }
+    }
+
+    /**
+     * Hand the job's dimensions to whoever reports the exception next.
+     *
+     * Laravel dispatches JobFailed and JobReleasedAfterException from inside
+     * Worker::handleJobException(), which then rethrows; only in
+     * Worker::runJob()'s catch does the exception reach the handler and,
+     * through it, this package's own reportable listener. Everything below
+     * runs before that, teardown included — so the snapshot is taken here and
+     * the context is still reset as it always was.
+     */
+    private function rememberFailureContext(): void
+    {
+        FailSafe::guard(function (): void {
+            $context = $this->telemetry()->contextAttributes();
+
+            if ($context !== []) {
+                $this->telemetry()->rememberFailureContext($context);
+            }
+        });
     }
 
     private function currentJobSpan(): ?Span

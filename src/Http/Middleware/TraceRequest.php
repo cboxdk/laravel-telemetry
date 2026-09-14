@@ -86,12 +86,12 @@ final class TraceRequest
             }
 
             $span = $this->telemetry->tracer()->startSpan(
-                $request->method().' '.$request->path(),
+                HttpMethod::forSpanName($request->method()).' '.$request->path(),
                 SpanKind::Server,
                 array_filter([
                     'http.request.method' => HttpMethod::normalize($request->method()),
-                    // Present only when the normalized value hid something,
-                    // which is exactly when the reader needs it.
+                    // Only when normalizing hid something, which is exactly
+                    // when the reader needs it.
                     'http.request.method_original' => HttpMethod::original($request->method()),
                     'url.path' => '/'.ltrim($request->path(), '/'),
                     'url.scheme' => $request->getScheme(),
@@ -185,7 +185,7 @@ final class TraceRequest
             // then "METHOD <logical route>".
             if (! $span->hasCustomName()) {
                 $span->updateName($this->telemetry->resolveRequestName($request, $response)
-                    ?? $request->method().' '.$route);
+                    ?? HttpMethod::forSpanName($request->method()).' '.$route);
             }
 
             $span->setAttributes([
@@ -461,12 +461,7 @@ final class TraceRequest
             return null;
         }
 
-        // Optional prefix SEGMENTS, so `api_token`, `access-token`,
-        // `client_secret` and `x-api-key` are caught as well as the bare
-        // names. Each segment must end in a separator, and the parameter must
-        // start right after `&` — which together keep `monkey`, `zipcode` and
-        // `estate` out of it.
-        $pattern = '/(^|&)((?:[a-z0-9]+[-_])*(?:'.implode('|', self::SENSITIVE_QUERY_PARAMS).'))=[^&]*/i';
+        $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
 
         return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
     }

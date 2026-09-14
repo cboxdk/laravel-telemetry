@@ -88,6 +88,25 @@ final class Redactor
             '/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{16,}/i' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
+            // A credential carried as a query parameter, wherever the string
+            // came from: url.query, a referer header, an exception message
+            // that quotes a URL, a log line. One pattern here reaches all of
+            // them, because every attribute value passes through this class —
+            // scrubbing url.query alone left the same secret in the other
+            // three.
+            //
+            // The name matches loosely on purpose: `api_token`, `accessToken`,
+            // `_token`, `token[]` and percent-encoded spellings are all the
+            // same secret. Only words that are ALWAYS credentials are matched
+            // this way — `code`, `state` and `key` are ordinary parameters as
+            // often as they are secrets, and redacting `postal_code` protects
+            // nothing while destroying real telemetry.
+            '/((?:^|[?&;])[^=&;\s]*(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[^=&;\s]*=)[^&;\s"\']+/i' => '$1REDACTED',
+            // The ambiguous words, matched EXACTLY and never with a prefix.
+            // `?code=` on an OAuth callback is an authorization code and the
+            // reason this list exists; `postal_code=` is an address. The
+            // boundary is what tells them apart.
+            '/((?:^|[?&;])(?:code|state|key|auth)=)[^&;\s"\']+/i' => '$1REDACTED',
         ];
     }
 

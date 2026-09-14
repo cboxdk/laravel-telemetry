@@ -50,7 +50,7 @@ final class HttpClientInstrumentation implements ManagesRequestState
             $path = (string) (parse_url($event->request->url(), PHP_URL_PATH) ?: '/');
 
             $this->inFlight[$this->keyFor($event->request)] = $this->telemetry()->tracer()->startSpan(
-                $event->request->method().' '.$host,
+                HttpMethod::forSpanName($event->request->method()).' '.$host,
                 SpanKind::Client,
                 [
                     'http.request.method' => HttpMethod::normalize($event->request->method()),
