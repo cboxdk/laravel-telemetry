@@ -54,8 +54,7 @@ final class MailInstrumentation implements ManagesRequestState
     private function sent(MessageSent $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $span = $this->sending[spl_object_id($event->sent->getOriginalMessage())] ?? null;
-            unset($this->sending[spl_object_id($event->sent->getOriginalMessage())]);
+            $span = $this->pullSpanFor($event->sent->getOriginalMessage());
 
             if ($span !== null) {
                 $span->setStatus(SpanStatus::Ok);
@@ -66,6 +65,51 @@ final class MailInstrumentation implements ManagesRequestState
                 ->counter('mail.sent', 'Mail messages sent')
                 ->inc();
         });
+    }
+
+    /**
+     * Find the span for a message the transport may already have copied.
+     *
+     * Symfony's AbstractTransport::send() does `$message = clone $message` on
+     * its first line and SentMessage keeps THAT clone as its "original", so on
+     * those transports the object reaching MessageSent is not the one
+     * MessageSending carried and identity misses. (The array and log
+     * transports do preserve it, so identity is tried first and usually wins.)
+     * The span was then never ended, and because it stayed on the tracer stack
+     * every later span in the request was parented under the mail call.
+     *
+     * The fallback takes the NEWEST open mail span, not the oldest. Sends
+     * nest — a MessageSending listener can send its own mail — and they nest
+     * strictly, so the innermost completes first. LIFO closes that one.
+     * Oldest-first would have closed the OUTER span from the inner send,
+     * before the outer message had even reached its transport.
+     *
+     * There is no exact key available: Laravel sets no Message-ID before
+     * dispatching MessageSending, so once a transport clones there is nothing
+     * shared to match on. LIFO is therefore a heuristic, and it has a known
+     * boundary — if an inner send's transport THROWS and the caller swallows
+     * it, that abandoned inner span stays newest and the outer send's
+     * completion pops it, reporting the failed inner send as Ok and leaving the
+     * outer one open. The alternative is keying on identity alone, which misses
+     * on every SMTP send and leaks a span each time. A rare mis-pairing beats a
+     * guaranteed leak, but it is a trade, not a correct answer.
+     */
+    private function pullSpanFor(object $message): ?Span
+    {
+        $key = spl_object_id($message);
+
+        if (! isset($this->sending[$key])) {
+            $key = array_key_last($this->sending);
+        }
+
+        if ($key === null) {
+            return null;
+        }
+
+        $span = $this->sending[$key];
+        unset($this->sending[$key]);
+
+        return $span;
     }
 
     public function flushRequestState(): void

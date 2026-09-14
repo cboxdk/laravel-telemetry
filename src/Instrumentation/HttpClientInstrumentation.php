@@ -15,6 +15,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Client\Events\ConnectionFailed;
 use Illuminate\Http\Client\Events\RequestSending;
 use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Http\Client\Request;
 
 /**
  * Outgoing HTTP instrumentation: a client span per Http-client request,
@@ -47,7 +48,7 @@ final class HttpClientInstrumentation implements ManagesRequestState
             $host = (string) (parse_url($event->request->url(), PHP_URL_HOST) ?: 'unknown');
             $path = (string) (parse_url($event->request->url(), PHP_URL_PATH) ?: '/');
 
-            $this->inFlight[spl_object_id($event->request)] = $this->telemetry()->tracer()->startSpan(
+            $this->inFlight[$this->keyFor($event->request)] = $this->telemetry()->tracer()->startSpan(
                 $event->request->method().' '.$host,
                 SpanKind::Client,
                 [
@@ -116,11 +117,55 @@ final class HttpClientInstrumentation implements ManagesRequestState
 
     private function pull(object $request): ?Span
     {
-        $key = spl_object_id($request);
+        $key = $this->keyFor($request);
         $span = $this->inFlight[$key] ?? null;
         unset($this->inFlight[$key]);
 
         return $span;
+    }
+
+    /**
+     * Key on the PSR request, which the framework DOES preserve.
+     *
+     * Laravel does not hand the same `Illuminate\Http\Client\Request` wrapper
+     * to every event — the connection-failure path builds a fresh one
+     * (`new Request($e->getRequest())` in
+     * PendingRequest::marshalTransportException) — so keying on the wrapper
+     * missed on every failure, and the span was never ended. Because it stayed
+     * on the tracer stack, every later span in the request was parented under
+     * the call that had already failed. Both wrappers wrap the SAME PSR
+     * instance, so that is the identity to use, and it stays exact for
+     * concurrent pools where guessing by method/host/path could not.
+     *
+     * It is not preserved on every path, and the fallbacks that would paper
+     * over that were removed because each one could close the WRONG span:
+     *
+     *  - Guzzle's streaming handler clones an HTTP/1.1 request to add
+     *    `Connection: close`, so a failure on `withOptions(['stream' => true])`
+     *    carries the clone. Any cloning middleware does the same.
+     *  - A `beforeSending` callback returning a replacement request breaks the
+     *    EXCEPTION path only; success still closes normally, because
+     *    ResponseReceived carries the stored original wrapper.
+     *  - A redirect emits RequestSending per hop but one ResponseReceived, so
+     *    the earlier hops never match.
+     *
+     * Those leave their span open until flushRequestState() — which the Octane
+     * and NativePHP request hooks and the non-sync job start call — rather than
+     * closing a span with someone else's outcome. A missing span is much the
+     * lesser evil; a span with the wrong duration and status is a lie that
+     * reads as data.
+     */
+    private function keyFor(object $request): int
+    {
+        if ($request instanceof Request) {
+            $psr = FailSafe::guard(fn (): object => $request->toPsrRequest());
+
+            if (is_object($psr)) {
+                return spl_object_id($psr);
+            }
+        }
+
+        return spl_object_id($request);
     }
 
     public function flushRequestState(): void
