@@ -42,7 +42,7 @@ final class PrometheusRenderer
         $this->resourceLabels = $resourceLabels;
         $output = [];
 
-        foreach ($this->deduplicate($families) as $family) {
+        foreach ($this->deduplicate($families, $openMetrics) as $family) {
             $name = $this->renderedName($family);
 
             // In OpenMetrics a Counter MetricFamily's name MUST NOT carry the
@@ -98,38 +98,49 @@ final class PrometheusRenderer
      * @param  list<MetricFamily>  $families
      * @return list<MetricFamily>
      */
-    private function deduplicate(array $families): array
+    private function deduplicate(array $families, bool $openMetrics): array
     {
-        /** @var array<string, MetricFamily> $byName */
-        $byName = [];
+        /** @var array<string, MetricFamily> $byKey */
+        $byKey = [];
+        /** @var array<string, string> $ownerOf name => key that already writes it */
+        $ownerOf = [];
 
         foreach ($families as $family) {
-            // Key on the RENDERED name, not the OTel one. MetricDefinition
-            // allows `_` in an OTel name, so `orders.created` and
-            // `orders_created` are two legal, distinct families that both
-            // render as `orders_created_total` — they passed this dedupe and
-            // then emitted two `# HELP`/`# TYPE` blocks for one name. A
-            // Prometheus parse error fails the WHOLE scrape, so one such
-            // collision takes every metric from the app down with it.
-            // Key on BOTH names a family occupies. A counter writes samples as
-            // `jobs_total` but its OpenMetrics metadata as `jobs`, so keying on
-            // the sample name alone let a counter `jobs` and a gauge `jobs`
-            // through — and they then emitted `# TYPE jobs counter` AND
-            // `# TYPE jobs gauge`, one family name declared twice.
-            $key = $this->renderedName($family)."\0".$this->familyName($family);
-            $existing = $byName[$key] ?? null;
+            $names = $this->occupiedNames($family, $openMetrics);
+            $key = implode("\0", $names);
+            $existing = $byKey[$key] ?? null;
 
             if ($existing === null) {
-                $collision = $this->collidingKey($byName, $family);
+                // Every name this family will write must be free. A histogram
+                // `payload` writes payload_bucket/_sum/_count, so a gauge
+                // `payload.count` collides with it even though neither of their
+                // own "rendered names" match — and a counter in the classic
+                // format writes only `<name>_total`, so it does NOT collide
+                // with a gauge of the bare name, though it would in
+                // OpenMetrics, where its metadata drops the suffix.
+                $taken = array_intersect($names, array_keys($ownerOf));
 
-                if ($collision !== null) {
-                    // Two families that cannot be merged but would occupy the
-                    // same name. Emitting both fails the scrape for everything;
-                    // the first one wins, as it does on a type conflict.
+                if ($taken !== []) {
+                    // Emitting both would declare one name twice and fail the
+                    // scrape for every metric. First one wins, as on a type
+                    // conflict.
                     continue;
                 }
 
-                $byName[$key] = $family;
+                // Deduplicate WITHIN the family too. Two labelsets that differ
+                // only in spelling or key order — `host.name` and `host_name`,
+                // or the same keys written in another order by a different
+                // process — render as one series, and a family that never got
+                // merged with another was previously never checked at all.
+                $byKey[$key] = new MetricFamily(
+                    $family->definition,
+                    $this->mergeSamples([], $family->samples),
+                    $family->startUnixNano,
+                );
+
+                foreach ($names as $name) {
+                    $ownerOf[$name] = $key;
+                }
 
                 continue;
             }
@@ -139,7 +150,7 @@ final class PrometheusRenderer
             // merging them would report microseconds under a seconds suffix.
             if ($existing->type() === $family->type()
                 && $existing->definition->unit === $family->definition->unit) {
-                $byName[$key] = new MetricFamily(
+                $byKey[$key] = new MetricFamily(
                     $existing->definition,
                     $this->mergeSamples($existing->samples, $family->samples),
                     $existing->startUnixNano ?? $family->startUnixNano,
@@ -147,25 +158,25 @@ final class PrometheusRenderer
             }
         }
 
-        return array_values($byName);
+        return array_values($byKey);
     }
 
     /**
-     * Whether some already-kept family would render under one of this one's
-     * two names — the sample name or the metadata name.
+     * Every name this family will write, metadata and samples alike.
      *
-     * @param  array<string, MetricFamily>  $byName
+     * @return list<string>
      */
-    private function collidingKey(array $byName, MetricFamily $family): ?string
+    private function occupiedNames(MetricFamily $family, bool $openMetrics): array
     {
-        foreach ($byName as $key => $kept) {
-            if ($this->renderedName($kept) === $this->renderedName($family)
-                || $this->familyName($kept) === $this->familyName($family)) {
-                return $key;
-            }
-        }
+        $base = $this->familyName($family);
 
-        return null;
+        return match ($family->type()) {
+            // Classic: metadata and samples both under `<name>_total`.
+            // OpenMetrics: metadata under `<name>`, samples under `<name>_total`.
+            MetricType::Counter => $openMetrics ? [$base, $base.'_total'] : [$base.'_total'],
+            MetricType::Histogram => [$base, $base.'_bucket', $base.'_sum', $base.'_count'],
+            default => [$base],
+        };
     }
 
     /**

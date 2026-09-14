@@ -56,8 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     recommend — alongside the pre-sanitized `host_name` resource label rendered
     as `{host_name="web-1",host_name="db-3"}`. Merging now happens on the
     sanitized name.
-  - *Duplicate family names.* Dedupe keyed on the OTel name, but the name
-    WRITTEN is the Prometheus one. `orders.created` and `orders_created` are two
+  - *Duplicate family names.* Dedupe keyed on the OTel name, but the names
+    WRITTEN are the Prometheus ones — and a family writes several: a histogram
+    occupies `<name>`, `<name>_bucket`, `<name>_sum` and `<name>_count`, so a
+    gauge called `payload.count` collides with a histogram called `payload`.
+    A counter occupies `<name>_total` in the classic format and both `<name>`
+    and `<name>_total` in OpenMetrics, so whether it collides with a
+    same-named gauge depends on the format being rendered. `orders.created` and `orders_created` are two
     legal, distinct families that both render as `orders_created_total`, and both
     were emitted with their own `# HELP`/`# TYPE`. Dedupe now keys on the
     rendered name, which is also the one the render loop uses, so they cannot
@@ -68,7 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     identical lines. One sample per labelset now wins. (Prometheus drops the
     duplicate and continues rather than failing the scrape, so this one cost a
     silently lost value — the family and label cases above take the target
-    down.)
+    down.) This now runs for every family, not only when two are merged: a
+    single family carrying both spellings of one labelset was never checked.
 
 - **OpenMetrics counter family names no longer carry `_total`.** The spec puts
   that suffix on the SAMPLE, not the family, so `# TYPE foo_total counter`

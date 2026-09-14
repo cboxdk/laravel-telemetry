@@ -265,3 +265,50 @@ it('renders one labelset once however its keys were ordered', function () {
 
     expect(substr_count($output, 'queue_depth{'))->toBe(1);
 });
+
+it('deduplicates a labelset inside a single family', function () {
+    // Sample dedupe previously ran only when two families were merged, so a
+    // family carrying both spellings of one labelset was never checked.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('queue.depth', MetricType::Gauge, 'Depth'), [
+            new Sample(['host.name' => 'a'], 1.0),
+            new Sample(['host_name' => 'a'], 2.0),
+        ]),
+    ]);
+
+    expect(substr_count($output, 'queue_depth{host_name="a"}'))->toBe(1);
+});
+
+it('keeps a counter and a gauge that only collide in OpenMetrics', function () {
+    // Classic format writes the counter as `work_items_total` and the gauge as
+    // `work_items` — distinct names, so dropping one was a regression. In
+    // OpenMetrics the counter's METADATA is `work_items`, and then they do
+    // collide.
+    $families = [
+        new MetricFamily(new MetricDefinition('work.items', MetricType::Counter, 'Counter'), [new Sample([], 1.0)]),
+        new MetricFamily(new MetricDefinition('work_items', MetricType::Gauge, 'Gauge'), [new Sample([], 2.0)]),
+    ];
+
+    $classic = (new PrometheusRenderer)->render($families);
+
+    expect($classic)->toContain('# TYPE work_items_total counter')
+        ->and($classic)->toContain('# TYPE work_items gauge');
+
+    $open = (new PrometheusRenderer)->render($families, [], openMetrics: true);
+
+    expect(substr_count($open, '# TYPE work_items '))->toBe(1);
+});
+
+it('detects a collision on a histogram suffix', function () {
+    // A histogram `payload` writes payload_bucket/_sum/_count, so a gauge
+    // `payload.count` collides with it even though neither of their own
+    // family names match.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('payload', MetricType::Histogram, 'Sizes', '', [10.0]),
+            [new HistogramSample([], [10.0], [1, 0], 5.0, 1)]),
+        new MetricFamily(new MetricDefinition('payload.count', MetricType::Gauge, 'Count'), [new Sample([], 9.0)]),
+    ]);
+
+    expect(substr_count($output, '# TYPE payload_count'))->toBe(0)
+        ->and($output)->not->toContain(' 9');
+});
