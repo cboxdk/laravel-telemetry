@@ -12,7 +12,7 @@ beforeEach(function () {
 
 it('does not recurse when auth is unbootable during report()', function () {
     // A persistently failing auth resolution — the exact mid-failure state
-    // the enduser.id lookup runs into when e.g. the database is down. The
+    // the user.id lookup runs into when e.g. the database is down. The
     // factory throws a bounded number of times so a regression surfaces as
     // a call-count explosion instead of memory exhaustion.
     $calls = 0;

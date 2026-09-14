@@ -134,7 +134,7 @@ is also propagated to the browser (via the `@telemetryBrowser` directive's
 ## Client geo — `resolveClientGeoUsing()`
 
 Only active when `telemetry.analytics.enabled` is on. Supplies
-`client.geo.*` (and may override `client.address`) for the request span and
+`geo.*` (and may override `client.address`) for the request span and
 the browser ingest endpoint. This hook always **wins** over the built-in
 resolution.
 
@@ -146,9 +146,9 @@ resolution.
 
 ```php
 Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-    'client.geo.country' => $request->header('CF-IPCountry'),
-    'client.geo.region'  => $request->header('CF-Region'),
-    'client.geo.city'    => $request->header('CF-IPCity'),
+    'geo.country_iso_code' => $request->header('CF-IPCountry'),
+    'geo.region_iso_code'  => $request->header('CF-Region'),
+    'geo.locality.name'    => $request->header('CF-IPCity'),
 ]));
 ```
 

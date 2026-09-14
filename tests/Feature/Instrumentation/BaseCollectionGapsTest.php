@@ -204,7 +204,7 @@ it('records command metrics alongside command spans', function () {
 it('enriches user attribution through the opt-in resolver', function () {
     Route::get('/me', fn () => 'ok');
 
-    Telemetry::resolveUserUsing(fn ($user) => ['enduser.name' => $user->name ?? 'unknown']);
+    Telemetry::resolveUserUsing(fn ($user) => ['user.name' => $user->name ?? 'unknown']);
 
     $this->actingAs(new GenericUser(['id' => 9, 'name' => 'Jared']));
 
@@ -212,8 +212,8 @@ it('enriches user attribution through the opt-in resolver', function () {
 
     $span = allSpans($this->collector)->firstWhere('name', 'GET /me');
 
-    expect($span->attributes()['enduser.id'])->toBe('9')
-        ->and($span->attributes()['enduser.name'])->toBe('Jared');
+    expect($span->attributes()['user.id'])->toBe('9')
+        ->and($span->attributes()['user.name'])->toBe('Jared');
 });
 
 it('self-reports worker memory after each job for leak tracking', function () {

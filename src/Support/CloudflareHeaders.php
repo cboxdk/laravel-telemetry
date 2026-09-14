@@ -7,7 +7,7 @@ namespace Cbox\Telemetry\Support;
 use Illuminate\Http\Request;
 
 /**
- * `client.geo.*` from Cloudflare's edge headers — free country-level geo on
+ * `geo.*` from Cloudflare's edge headers — free country-level geo on
  * every plan (CF-IPCountry) with no MaxMind database to ship or update.
  *
  * These headers only exist on the server request, never in the browser, so
@@ -52,9 +52,9 @@ final class CloudflareHeaders
         // Region/city arrive only on Enterprise + a Managed Transform; on
         // every other plan they are simply absent and filtered out here.
         return array_filter([
-            'client.geo.country' => strtoupper($country),
-            'client.geo.region' => $request->headers->get('CF-Region'),
-            'client.geo.city' => $request->headers->get('CF-IPCity'),
+            'geo.country_iso_code' => strtoupper($country),
+            'geo.region_iso_code' => $request->headers->get('CF-Region'),
+            'geo.locality.name' => $request->headers->get('CF-IPCity'),
         ], static fn ($v): bool => $v !== null && $v !== '');
     }
 }

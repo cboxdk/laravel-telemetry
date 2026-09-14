@@ -201,7 +201,7 @@ it('attributes the request span to the authenticated user', function () {
 
     $span = requestSpans($this->collector)[0];
 
-    expect($span->attributes()['enduser.id'])->toBe('42');
+    expect($span->attributes()['user.id'])->toBe('42');
 });
 
 it('omits user attribution when disabled', function () {
@@ -211,7 +211,7 @@ it('omits user attribution when disabled', function () {
 
     $this->get('/users/7');
 
-    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('enduser.id');
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('user.id');
 });
 
 it('marks 5xx responses as errors', function () {
@@ -345,16 +345,16 @@ it('omits the domain label when disabled', function () {
 it('disambiguates users across auth guards', function () {
     config()->set('auth.guards.admin', ['driver' => 'session', 'provider' => 'users']);
 
-    Telemetry::resolveUserUsing(fn ($user, ?string $guard) => ['enduser.plan' => $guard === 'admin' ? 'staff' : 'pro']);
+    Telemetry::resolveUserUsing(fn ($user, ?string $guard) => ['user.plan' => $guard === 'admin' ? 'staff' : 'pro']);
 
     $this->actingAs(new GenericUser(['id' => 7]), 'admin')->get('/users/7');
 
     $attributes = requestSpans($this->collector)[0]->attributes();
 
-    expect($attributes['enduser.id'])->toBe('7')
-        ->and($attributes['enduser.type'])->toBe('generic_user')
-        ->and($attributes['enduser.guard'])->toBe('admin')
-        ->and($attributes['enduser.plan'])->toBe('staff');
+    expect($attributes['user.id'])->toBe('7')
+        ->and($attributes['user.type'])->toBe('generic_user')
+        ->and($attributes['user.guard'])->toBe('admin')
+        ->and($attributes['user.plan'])->toBe('staff');
 });
 
 it('attributes login and logout requests via the remembered identity', function () {
@@ -371,9 +371,9 @@ it('attributes login and logout requests via the remembered identity', function 
 
     $attributes = requestSpans($this->collector)[0]->attributes();
 
-    expect($attributes['enduser.id'])->toBe('42')
-        ->and($attributes['enduser.type'])->toBe('generic_user')
-        ->and($attributes['enduser.guard'])->toBe('web');
+    expect($attributes['user.id'])->toBe('42')
+        ->and($attributes['user.type'])->toBe('generic_user')
+        ->and($attributes['user.guard'])->toBe('web');
 });
 
 it('forgets the remembered identity when context resets', function () {
@@ -383,7 +383,7 @@ it('forgets the remembered identity when context resets', function () {
 
     $this->get('/users/7');
 
-    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('enduser.id');
+    expect(requestSpans($this->collector)[0]->attributes())->not->toHaveKey('user.id');
 });
 
 it('lets the app name request spans behind catch-all routes', function () {

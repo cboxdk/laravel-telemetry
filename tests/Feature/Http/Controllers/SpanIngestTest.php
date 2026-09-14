@@ -277,7 +277,7 @@ it('enriches ingested browser spans with server-side Cloudflare geo', function (
 
     ingestWith(['spans' => [browserSpan()]], ['CF-IPCountry' => 'DK']);
 
-    expect(ingestedSpans($this->collector)[0]->attributes()['client.geo.country'])->toBe('DK');
+    expect(ingestedSpans($this->collector)[0]->attributes()['geo.country_iso_code'])->toBe('DK');
 
     Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
 });
@@ -296,7 +296,7 @@ it('enriches ingested browser events with server geo and parsed User-Agent', fun
     );
 
     $attrs = ingestedEvents($this->collector)[0]->attributes;
-    expect($attrs['client.geo.country'])->toBe('DK')
+    expect($attrs['geo.country_iso_code'])->toBe('DK')
         ->and($attrs['user_agent.name'])->toBe('Safari')
         ->and($attrs['os.name'])->toBe('iOS')
         ->and($attrs['device.type'])->toBe('mobile');
@@ -309,11 +309,11 @@ it('lets server-side geo win over a spoofed client geo attribute', function () {
     Request::setTrustedProxies(['127.0.0.1'], Request::HEADER_X_FORWARDED_FOR);
 
     ingestWith(
-        ['spans' => [browserSpan(['attributes' => ['client.geo.country' => 'US']])]],
+        ['spans' => [browserSpan(['attributes' => ['geo.country_iso_code' => 'US']])]],
         ['CF-IPCountry' => 'DK'],
     );
 
-    expect(ingestedSpans($this->collector)[0]->attributes()['client.geo.country'])->toBe('DK');
+    expect(ingestedSpans($this->collector)[0]->attributes()['geo.country_iso_code'])->toBe('DK');
 
     Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
 });
@@ -323,7 +323,7 @@ it('does not enrich geo from an untrusted ingest origin', function () {
 
     ingestWith(['spans' => [browserSpan()]], ['CF-IPCountry' => 'DK']);
 
-    expect(ingestedSpans($this->collector)[0]->attributes())->not->toHaveKey('client.geo.country');
+    expect(ingestedSpans($this->collector)[0]->attributes())->not->toHaveKey('geo.country_iso_code');
 });
 
 it('derives analytics.utm.* + click-id from the browser-sent landing url when analytics.utm is on', function () {

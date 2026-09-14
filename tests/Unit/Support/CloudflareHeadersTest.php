@@ -26,7 +26,7 @@ it('reads CF-IPCountry only when the request is from a trusted proxy', function 
 
     $geo = CloudflareHeaders::geo(cfRequest(['CF-IPCountry' => 'DK']));
 
-    expect($geo)->toBe(['client.geo.country' => 'DK']);
+    expect($geo)->toBe(['geo.country_iso_code' => 'DK']);
 });
 
 it('ignores CF headers from an untrusted origin (spoofable)', function () {
@@ -59,8 +59,8 @@ it('passes through region and city when Cloudflare supplies them', function () {
     ]));
 
     expect($geo)->toBe([
-        'client.geo.country' => 'US',   // normalized to upper-case ISO
-        'client.geo.region' => 'California',
-        'client.geo.city' => 'San Francisco',
+        'geo.country_iso_code' => 'US',   // normalized to upper-case ISO
+        'geo.region_iso_code' => 'California',
+        'geo.locality.name' => 'San Francisco',
     ]);
 });

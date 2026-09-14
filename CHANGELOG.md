@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Span attributes now use the OpenTelemetry names, not lookalikes.** The docs
+  promise "exactly one canonical vocabulary"; three namespaces were not it.
+
+  | Was | Now | Why |
+  |---|---|---|
+  | `enduser.id` / `.type` / `.guard` | `user.id` / `.type` / `.guard` | `enduser.*` was deprecated in semconv 1.27; collector processors and Tempo's user attribution key on `user.id` |
+  | `client.geo.country` / `.region` / `.city` / `.continent.code` | `geo.country_iso_code` / `geo.region_iso_code` / `geo.locality.name` / `geo.continent.code` | `client.geo.*` is Elastic ECS naming; OTel's registry is the flat `geo.*` namespace, so nothing downstream recognised the old keys |
+  | `db.namespace` = the Laravel connection | `laravel.db.connection` | semconv's `db.namespace` is the database/schema name; putting the connection there read as wrong data in Tempo's DB views. The Redis and transaction instrumentations used `db.connection` for the same concept — all three now agree |
+
+  **Upgrade note.** TraceQL queries, dashboards and collector processors keying
+  on the old attribute names must be updated. The bundled Grafana suite is
+  regenerated. Attributes an app supplies itself through `resolveUserUsing()`
+  are untouched — only the names this package emits changed.
+
+
+### Changed
+
 - **`http.server.request.duration` and `http.client.request.duration` are now
   recorded in SECONDS**, on a ladder FINER than semconv's advisory one
   (`0.0005 … 10`, sixteen buckets). Both are stable semconv metrics whose unit the spec fixes to

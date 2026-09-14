@@ -7,7 +7,7 @@ namespace Cbox\Telemetry\Support;
 use Cbox\Telemetry\TelemetryManager;
 
 /**
- * Resolves `client.geo.*` from an IP using a MaxMind GeoLite2/GeoIP2 database
+ * Resolves `geo.*` from an IP using a MaxMind GeoLite2/GeoIP2 database
  * at collection time — so a raw IP can be dropped afterwards (privacy).
  *
  * The `geoip2/geoip2` package is an OPTIONAL suggestion, not a requirement:
@@ -41,8 +41,8 @@ final class GeoResolver
             $record = $reader->country($ip); // @phpstan-ignore-line optional dep
 
             return array_filter([
-                'client.geo.country' => $record->country->isoCode,
-                'client.geo.continent.code' => $record->continent->code,
+                'geo.country_iso_code' => $record->country->isoCode,
+                'geo.continent.code' => $record->continent->code,
             ], static fn ($v): bool => $v !== null && $v !== '');
         } catch (\Throwable) {
             // Private/unknown IP (AddressNotFoundException) or a bad db — geo

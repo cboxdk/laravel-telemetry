@@ -53,7 +53,7 @@
         "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export.",
         "ext-pdo_sqlite": "Required when using the sqlite metric store or spool (NativePHP mobile/desktop).",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
-        "geoip2/geoip2": "Resolve client.geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",
+        "geoip2/geoip2": "Resolve geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",
         "laravel/horizon": "Supervisor/master state, long-wait detection, process restarts and OOM metrics when Horizon runs your queues.",
         "laravel/pennant": "Feature flag check counters (feature.checks, feature.unknown).",
         "laravel/reverb": "WebSocket message/channel/connection metrics when Reverb is your broadcasting server.",
