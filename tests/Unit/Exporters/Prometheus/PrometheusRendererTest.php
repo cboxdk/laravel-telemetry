@@ -155,3 +155,76 @@ it('stamps resource identity labels on every scraped series', function () {
         ->and($out)->toContain('host_name="web-01"')
         ->and($out)->toContain('http_route="/x"'); // original sample label preserved
 });
+
+/**
+ * A Prometheus parse error fails the WHOLE scrape: the target goes up=0 and
+ * every metric from the app disappears, not just the offending one. These three
+ * are each one line of legal-looking input away.
+ */
+it('never emits a duplicate label name, however the keys were spelled', function () {
+    // The docs tell users to write dotted label keys, so a user label
+    // `host.name` alongside the pre-sanitized `host_name` resource label was
+    // two distinct array keys that rendered as the same Prometheus name.
+    $output = (new PrometheusRenderer)->render(
+        [new MetricFamily(
+            new MetricDefinition('orders.created', MetricType::Counter, 'Orders created'),
+            [new Sample(['host.name' => 'web-1'], 1.0)],
+        )],
+        ['host_name' => 'db-3'],
+    );
+
+    expect(substr_count($output, 'host_name='))->toBe(1);
+});
+
+it('never emits one rendered family name twice', function () {
+    // MetricDefinition allows `_` in an OTel name, so these are two legal,
+    // distinct families that both render as orders_created_total.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('orders.created', MetricType::Counter, 'Dotted'),
+            [new Sample(['tenant' => 'a'], 1.0)],
+        ),
+        new MetricFamily(
+            new MetricDefinition('orders_created', MetricType::Counter, 'Underscored'),
+            [new Sample(['tenant' => 'b'], 2.0)],
+        ),
+    ]);
+
+    expect(substr_count($output, '# TYPE orders_created_total'))->toBe(1)
+        ->and(substr_count($output, '# HELP orders_created_total'))->toBe(1);
+});
+
+it('never emits the same labelset twice when merging families', function () {
+    // A stored push gauge and a cross-process observable can share a name AND
+    // a labelset; concatenating the samples produced `duplicate sample`.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('queue.depth', MetricType::Gauge, 'Depth'),
+            [new Sample(['queue' => 'default'], 1.0)],
+        ),
+        new MetricFamily(
+            new MetricDefinition('queue.depth', MetricType::Gauge, 'Depth'),
+            [new Sample(['queue' => 'default'], 2.0)],
+        ),
+    ]);
+
+    expect(substr_count($output, 'queue_depth{queue="default"}'))->toBe(1);
+});
+
+it('drops _total from the family name in OpenMetrics, where the sample keeps it', function () {
+    // OpenMetrics: a Counter MetricFamily's name MUST NOT carry _total — the
+    // sample carries it. Registering metadata under a name no metric has hides
+    // it from Prometheus' metadata API.
+    $output = (new PrometheusRenderer)->render(
+        [new MetricFamily(
+            new MetricDefinition('orders.created', MetricType::Counter, 'Orders created'),
+            [new Sample([], 1.0)],
+        )],
+        [],
+        openMetrics: true,
+    );
+
+    expect($output)->toContain('# TYPE orders_created counter')
+        ->and($output)->toContain('orders_created_total 1')
+        ->and($output)->not->toContain('# TYPE orders_created_total');
+});

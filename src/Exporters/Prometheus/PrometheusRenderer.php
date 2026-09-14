@@ -43,11 +43,14 @@ final class PrometheusRenderer
         $output = [];
 
         foreach ($this->deduplicate($families) as $family) {
-            $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+            $name = $this->renderedName($family);
 
-            if ($family->type() === MetricType::Counter) {
-                $name .= '_total';
-            }
+            // In OpenMetrics a Counter MetricFamily's name MUST NOT carry the
+            // `_total` suffix — the SAMPLE carries it, the family does not.
+            // Emitting `# TYPE foo_total counter` registers the metadata under
+            // a name no metric has, so Prometheus' UI and metadata API show
+            // none for `foo`, and strict OpenMetrics consumers reject it.
+            $familyName = $openMetrics ? $this->familyName($family) : $name;
 
             $help = $family->definition->description;
 
@@ -56,10 +59,16 @@ final class PrometheusRenderer
             }
 
             if ($help !== '') {
-                $output[] = '# HELP '.$name.' '.$this->escapeHelp($help);
+                $output[] = '# HELP '.$familyName.' '.$this->escapeHelp($help);
             }
 
-            $output[] = '# TYPE '.$name.' '.$family->type()->value;
+            $output[] = '# TYPE '.$familyName.' '.$family->type()->value;
+
+            if ($openMetrics && $family->definition->unit !== '' && $this->unitSuffix($family->definition->unit) !== '') {
+                // OpenMetrics requires the UNIT metadata line when the name
+                // carries a unit suffix, and it must agree with that suffix.
+                $output[] = '# UNIT '.$familyName.' '.ltrim($this->unitSuffix($family->definition->unit), '_');
+            }
 
             foreach ($family->samples as $sample) {
                 if ($sample instanceof HistogramSample) {
@@ -94,24 +103,74 @@ final class PrometheusRenderer
         $byName = [];
 
         foreach ($families as $family) {
-            $existing = $byName[$family->name()] ?? null;
+            // Key on the RENDERED name, not the OTel one. MetricDefinition
+            // allows `_` in an OTel name, so `orders.created` and
+            // `orders_created` are two legal, distinct families that both
+            // render as `orders_created_total` — they passed this dedupe and
+            // then emitted two `# HELP`/`# TYPE` blocks for one name. A
+            // Prometheus parse error fails the WHOLE scrape, so one such
+            // collision takes every metric from the app down with it.
+            $key = $this->renderedName($family);
+            $existing = $byName[$key] ?? null;
 
             if ($existing === null) {
-                $byName[$family->name()] = $family;
+                $byName[$key] = $family;
 
                 continue;
             }
 
             if ($existing->type() === $family->type()) {
-                $byName[$family->name()] = new MetricFamily(
+                $byName[$key] = new MetricFamily(
                     $existing->definition,
-                    [...$existing->samples, ...$family->samples],
+                    $this->mergeSamples($existing->samples, $family->samples),
                     $existing->startUnixNano ?? $family->startUnixNano,
                 );
             }
         }
 
         return array_values($byName);
+    }
+
+    /**
+     * Merge two families' samples, keeping ONE per labelset.
+     *
+     * Concatenating them meant a stored push gauge and a cross-process
+     * observable sharing a name AND a labelset produced two identical series
+     * lines — `duplicate sample`, and again the whole scrape fails rather than
+     * the one metric.
+     *
+     * @param  list<Sample|HistogramSample>  $existing
+     * @param  list<Sample|HistogramSample>  $incoming
+     * @return list<Sample|HistogramSample>
+     */
+    private function mergeSamples(array $existing, array $incoming): array
+    {
+        $byLabels = [];
+
+        foreach ([...$existing, ...$incoming] as $sample) {
+            $byLabels[json_encode($sample->labels) ?: ''] ??= $sample;
+        }
+
+        return array_values($byLabels);
+    }
+
+    /**
+     * The family name for metadata lines. Identical to the sample name except
+     * for an OpenMetrics counter, whose family name drops `_total`.
+     */
+    private function familyName(MetricFamily $family): string
+    {
+        return $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+    }
+
+    /**
+     * The name this family will actually be written as.
+     */
+    private function renderedName(MetricFamily $family): string
+    {
+        $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+
+        return $family->type() === MetricType::Counter ? $name.'_total' : $name;
     }
 
     /**
@@ -210,14 +269,29 @@ final class PrometheusRenderer
             return '';
         }
 
+        // Merge on the SANITIZED name, not the raw key. Sanitizing after the
+        // merge meant two keys that differ only in the characters Prometheus
+        // forbids — a user label `host.name` alongside the `host_name`
+        // resource label, which the docs actively encourage by writing label
+        // keys dotted — both survived and rendered as
+        // `{host_name="web-1",host_name="db-3"}`. The Go text parser rejects
+        // duplicate label names, and a parse error fails the WHOLE scrape: the
+        // target goes up=0 and every metric from the app disappears, not just
+        // the offending one.
         $parts = [];
 
         foreach ($all as $key => $value) {
             // Array keys may be ints (json_decode of numeric label names).
-            $parts[] = $this->sanitizeLabelName((string) $key).'="'.$this->escapeLabelValue($value).'"';
+            $parts[$this->sanitizeLabelName((string) $key)] = $this->escapeLabelValue($value);
         }
 
-        return '{'.implode(',', $parts).'}';
+        $rendered = [];
+
+        foreach ($parts as $name => $value) {
+            $rendered[] = $name.'="'.$value.'"';
+        }
+
+        return '{'.implode(',', $rendered).'}';
     }
 
     private function sanitizeLabelName(string $name): string

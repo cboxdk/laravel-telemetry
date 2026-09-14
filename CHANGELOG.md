@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Three ways the Prometheus renderer could fail the entire scrape.** A parse
+  error is not scoped to the offending metric: the target goes `up=0` and every
+  metric from the app disappears.
+
+  - *Duplicate label names.* Labels were merged on their RAW keys and sanitized
+    afterwards, so a user label `host.name` — the dotted style the docs
+    recommend — alongside the pre-sanitized `host_name` resource label rendered
+    as `{host_name="web-1",host_name="db-3"}`. Merging now happens on the
+    sanitized name.
+  - *Duplicate family names.* Dedupe keyed on the OTel name, but the name
+    WRITTEN is the Prometheus one. `orders.created` and `orders_created` are two
+    legal, distinct families that both render as `orders_created_total`, and both
+    were emitted with their own `# HELP`/`# TYPE`. Dedupe now keys on the
+    rendered name, which is also the one the render loop uses, so they cannot
+    drift.
+  - *Duplicate samples.* Merging two same-name families concatenated their
+    samples without deduplicating labelsets, so a stored push gauge and a
+    cross-process observable sharing a name and a labelset produced two
+    identical lines. One sample per labelset now wins.
+
+- **OpenMetrics counter family names no longer carry `_total`.** The spec puts
+  that suffix on the SAMPLE, not the family, so `# TYPE foo_total counter`
+  registered the metadata under a name no metric has — Prometheus' UI and
+  metadata API showed none for `foo`, and strict consumers reject it. The
+  required `# UNIT` line is emitted too, where the name carries a unit suffix.
+
+
 ### Changed
 
 - **Span attributes now use the OpenTelemetry names, not lookalikes.** The docs
