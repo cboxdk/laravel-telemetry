@@ -353,14 +353,20 @@ final class TraceRequest
                 $this->reportProfile($profile, $span->durationMs(), $labels);
             }
 
-            // Seconds, with the semconv advisory buckets. This name is a STABLE
-            // OpenTelemetry metric whose unit is fixed to seconds; emitting it
-            // in milliseconds meant every stock dashboard and alert looking for
+            // Seconds. This name is a STABLE OpenTelemetry metric whose unit
+            // is fixed to seconds; emitting it in milliseconds meant every
+            // stock dashboard and alert looking for
             // http_server_request_duration_seconds_bucket found nothing, and a
             // collector fed this alongside any other OTel SDK saw the same
             // metric name arrive with two different units.
+            //
+            // The ladder is FINER than semconv's advisory one below 5ms, which
+            // would have put every sub-5ms request in one bucket — coarser than
+            // the millisecond ladder it replaces. The unit is fixed by the
+            // spec; the buckets are only advisory, so there is no reason to
+            // lose resolution to gain conformance.
             $this->telemetry
-                ->histogram('http.server.request.duration', buckets: [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10], description: 'HTTP server request duration', unit: 's')
+                ->histogram('http.server.request.duration', buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10], description: 'HTTP server request duration', unit: 's')
                 ->record($span->durationMs() / 1000, $labels);
 
             if ($measured !== null) {

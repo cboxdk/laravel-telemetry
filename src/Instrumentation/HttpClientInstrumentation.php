@@ -82,7 +82,7 @@ final class HttpClientInstrumentation implements ManagesRequestState
                     // Seconds, per semconv — see the note on the server-side
                     // histogram in TraceRequest.
                     $this->telemetry()
-                        ->histogram('http.client.request.duration', buckets: [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10], description: 'Outgoing HTTP request duration', unit: 's')
+                        ->histogram('http.client.request.duration', buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10], description: 'Outgoing HTTP request duration', unit: 's')
                         ->record($span->durationMs() / 1000, [
                             'http.request.method' => $event->request->method(),
                             'server.address' => $label,

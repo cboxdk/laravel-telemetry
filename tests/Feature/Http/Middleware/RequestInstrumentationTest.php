@@ -628,5 +628,5 @@ it('records the semconv request duration in seconds, not milliseconds', function
     // A test request is milliseconds of work; in seconds that is well under
     // one, and in milliseconds it would be well over.
     expect($sample->sum)->toBeLessThan(1.0)
-        ->and($family->definition->buckets)->toBe([0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10]);
+        ->and($family->definition->buckets)->toBe([0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10]);
 });

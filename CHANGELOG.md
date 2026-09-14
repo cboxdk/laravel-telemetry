@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`http.server.request.duration` and `http.client.request.duration` are now
-  recorded in SECONDS**, with the OpenTelemetry advisory buckets
-  (`0.005 … 10`). Both are stable semconv metrics whose unit the spec fixes to
+  recorded in SECONDS**, on a ladder FINER than semconv's advisory one
+  (`0.0005 … 10`, sixteen buckets). Both are stable semconv metrics whose unit the spec fixes to
   seconds; emitting them in milliseconds meant every stock dashboard and alert
   looking for `http_server_request_duration_seconds_bucket` found nothing,
   because this package produced `…_milliseconds_bucket` — and a collector fed
@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different units, which the Prometheus/Mimir OTLP receiver treats as a
   conflict. Reusing a semconv name with a non-semconv unit is the worst of both
   worlds.
+
+  The unit is fixed by the spec; the buckets are only advisory. Semconv's
+  advisory ladder starts at 5ms, which is COARSER at the low end than the
+  millisecond ladder it replaces — so the buckets go finer instead, down to
+  0.5ms. Conformance costs no resolution.
 
   **Upgrade note — this renames two Prometheus series.** Panels and alerts on
   `http_server_request_duration_milliseconds_*` or
