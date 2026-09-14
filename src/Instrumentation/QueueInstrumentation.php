@@ -199,6 +199,15 @@ final class QueueInstrumentation implements ManagesRequestState
             // Sync jobs run inline inside the dispatcher's context — the
             // consumer span nests naturally and the caller's trace must
             // survive the job. Only real workers reset + continue.
+            // Drop any snapshot the previous attempt left behind. Nothing
+            // else is guaranteed to: the reporter clears it as it reads it,
+            // but report() does not always run — Worker::$reportJobExceptions
+            // is a public static an app can turn off, and shouldReport() and
+            // $dontReport skip it too. Unclaimed, it would be picked up by
+            // whatever exception happened to be reported next, which is the
+            // leak the snapshot exists to avoid.
+            $this->telemetry()->takeFailureContext();
+
             if ($event->connectionName !== 'sync') {
                 $this->telemetry()->resetContext();
 

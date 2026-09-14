@@ -211,6 +211,26 @@ it('does the same for an attempt released for retry', function () {
     expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme']);
 });
 
+it('drops an unclaimed snapshot when the next job starts', function () {
+    // report() does not always run — Worker::$reportJobExceptions is a public
+    // static an app can turn off, and shouldReport()/$dontReport skip it too.
+    // An unclaimed snapshot would otherwise be picked up by whatever exception
+    // was reported next, which is the leak it exists to avoid.
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\AnyJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    Telemetry::rememberFailureContext(['tenant' => 'acme']);
+
+    app('events')->dispatch(new JobProcessing('redis', $job));
+
+    expect(Telemetry::takeFailureContext())->toBe([]);
+});
+
 it('gives the snapshot to one report and no more', function () {
     Telemetry::rememberFailureContext(['tenant' => 'acme']);
 
