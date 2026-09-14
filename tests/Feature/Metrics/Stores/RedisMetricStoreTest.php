@@ -140,7 +140,7 @@ it('wipes everything it wrote', function () {
 });
 
 it('forgets a single series without touching its siblings', function () {
-    $gauge = new MetricDefinition('worker.memory.php', MetricType::Gauge, unit: 'By');
+    $gauge = new MetricDefinition('queue.worker.memory.php', MetricType::Gauge, unit: 'By');
     $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0]);
 
     $this->store->setGauge($gauge, ['pid' => '1'], 100);
@@ -153,8 +153,8 @@ it('forgets a single series without touching its siblings', function () {
 
     $families = collect($this->store->collect())->keyBy(fn ($f) => $f->name());
 
-    expect($families['worker.memory.php']->samples)->toHaveCount(1)
-        ->and($families['worker.memory.php']->samples[0]->labels['pid'])->toBe('2')
+    expect($families['queue.worker.memory.php']->samples)->toHaveCount(1)
+        ->and($families['queue.worker.memory.php']->samples[0]->labels['pid'])->toBe('2')
         ->and($families['req.duration']->samples)->toHaveCount(1)
         ->and($families['req.duration']->samples[0]->labels['route'])->toBe('/b');
 });

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Console\Events\ScheduledTaskFailed;
@@ -81,4 +82,70 @@ it('ignores background tasks to avoid double collection', function () {
     app('events')->dispatch(new ScheduledTaskStarting($task));
 
     expect(scheduleSpans($this->collector))->toBeEmpty();
+});
+
+/**
+ * getSummaryForDisplay() returns the whole built command line when no
+ * description is set — every argument, plus the redirection. Keeping that as a
+ * metric LABEL meant the arguments became the cardinality, and the arguments
+ * are exactly what varies:
+ *
+ *   $schedule->command('reports:send --date='.now()->toDateString())
+ *      -> a new label value every day
+ *   foreach ($tenants as $t) { $schedule->command("tenant:sync {$t->id}") }
+ *      -> one per tenant, 15 histogram series each, kept forever
+ */
+it('labels a scheduled task by its command name, not its arguments', function () {
+    $name = (new ReflectionMethod(ScheduleInstrumentation::class, 'taskName'))
+        ->getClosure(new ScheduleInstrumentation(app()));
+
+    $task = new class
+    {
+        public ?string $description = null;
+
+        public string $summary = '';
+
+        public function getSummaryForDisplay(): string
+        {
+            return $this->summary;
+        }
+    };
+
+    $task->summary = "'/usr/bin/php' 'artisan' reports:send --date=2026-09-14 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('reports:send');
+
+    $task->summary = "'/usr/bin/php' 'artisan' tenant:sync 48213 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('tenant:sync');
+
+    // A `2` inside the command name is not a redirection. Treating it as one
+    // silently merged two different commands into one series.
+    $task->summary = "'/usr/bin/php' 'artisan' reports:v2:send --date=2026-09-14 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('reports:v2:send');
+
+    // exec() summaries are arbitrary shell lines: stripping the quoted binary
+    // promotes the ARGUMENT, and a varying argument is the unbounded case.
+    $task->summary = "'/usr/bin/printf' alice";
+    expect($name($task))->toBe('exec');
+
+    $task->summary = '/srv/tenants/acme/run.sh --tenant=acme';
+    expect($name($task))->toBe('exec');
+
+    // An app that quotes its own command name used to lose it: a greedy run
+    // of quoted tokens ate `'tenant:sync'` along with the php and artisan
+    // tokens, and the label became the tenant id.
+    $task->summary = "'/usr/bin/php' 'artisan' 'tenant:sync' 48213 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('tenant:sync');
+
+    // Whitespace, not just a space, ends the command name.
+    $task->summary = "'/usr/bin/php' 'artisan' tenant:sync\t48213";
+    expect($name($task))->toBe('tenant:sync');
+
+    // ARTISAN_BINARY without a php binary in front is the other shape
+    // formatCommandString() can produce.
+    $task->summary = "'artisan' queue:prune-batches --hours=48";
+    expect($name($task))->toBe('queue:prune-batches');
+
+    // A description the app set is the app's own cardinality, so it wins.
+    $task->description = 'nightly reconciliation';
+    expect($name($task))->toBe('nightly reconciliation');
 });

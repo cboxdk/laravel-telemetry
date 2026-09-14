@@ -150,7 +150,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=\"db.query\" && duration>${minms}ms} | select(span.db.query.text, span.db.namespace)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && name=\"db.query\" && duration>${minms}ms} | select(span.db.query.text, span.laravel.db.connection)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"

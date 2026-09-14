@@ -23,7 +23,7 @@ use Illuminate\Contracts\Events\Dispatcher;
  * attack, `lockout` is the throttle catching it.
  *
  * Deliberately no user identifiers on the metric (bounded labels only);
- * the request trace already carries enduser.* for the who.
+ * the request trace already carries user.* for the who.
  */
 final class AuthInstrumentation
 {

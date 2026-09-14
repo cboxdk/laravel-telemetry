@@ -42,12 +42,15 @@ final class PrometheusRenderer
         $this->resourceLabels = $resourceLabels;
         $output = [];
 
-        foreach ($this->deduplicate($families) as $family) {
-            $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+        foreach ($this->deduplicate($families, $openMetrics) as $family) {
+            $name = $this->renderedName($family);
 
-            if ($family->type() === MetricType::Counter) {
-                $name .= '_total';
-            }
+            // In OpenMetrics a Counter MetricFamily's name MUST NOT carry the
+            // `_total` suffix — the SAMPLE carries it, the family does not.
+            // Emitting `# TYPE foo_total counter` registers the metadata under
+            // a name no metric has, so Prometheus' UI and metadata API show
+            // none for `foo`, and strict OpenMetrics consumers reject it.
+            $familyName = $openMetrics ? $this->familyName($family) : $name;
 
             $help = $family->definition->description;
 
@@ -56,10 +59,17 @@ final class PrometheusRenderer
             }
 
             if ($help !== '') {
-                $output[] = '# HELP '.$name.' '.$this->escapeHelp($help);
+                $output[] = '# HELP '.$familyName.' '.$this->escapeHelp($help);
             }
 
-            $output[] = '# TYPE '.$name.' '.$family->type()->value;
+            $output[] = '# TYPE '.$familyName.' '.$family->type()->value;
+
+            if ($openMetrics && $family->definition->unit !== '' && $this->unitSuffix($family->definition->unit) !== '') {
+                // OpenMetrics allows the UNIT metadata line and requires it to
+                // agree with the name's suffix when present. Emitting it makes
+                // the unit machine-readable instead of only living in the name.
+                $output[] = '# UNIT '.$familyName.' '.ltrim($this->unitSuffix($family->definition->unit), '_');
+            }
 
             foreach ($family->samples as $sample) {
                 if ($sample instanceof HistogramSample) {
@@ -80,38 +90,186 @@ final class PrometheusRenderer
     }
 
     /**
-     * A duplicate family name would fail the entire Prometheus scrape
-     * ("duplicate metric family"). Merge same-type duplicates (e.g. a
-     * stored push gauge and an observable from another process sharing a
-     * name); on a type conflict the first family wins.
+     * A duplicate family name is invalid exposition in both grammars — a
+     * strict OpenMetrics parser rejects the document outright, and Prometheus'
+     * own text parser overwrites its metadata cache and then sees the repeated
+     * series. Merge same-type duplicates (e.g. a stored push gauge and an
+     * observable from another process sharing a name); on a type conflict the
+     * first family wins.
      *
      * @param  list<MetricFamily>  $families
      * @return list<MetricFamily>
      */
-    private function deduplicate(array $families): array
+    private function deduplicate(array $families, bool $openMetrics): array
     {
-        /** @var array<string, MetricFamily> $byName */
-        $byName = [];
+        /** @var array<string, MetricFamily> $byKey */
+        $byKey = [];
+        /** @var array<string, string> $ownerOf name => key that already writes it */
+        $ownerOf = [];
 
         foreach ($families as $family) {
-            $existing = $byName[$family->name()] ?? null;
+            $names = $this->occupiedNames($family, $openMetrics);
+            $key = implode("\0", $names);
+            $existing = $byKey[$key] ?? null;
 
             if ($existing === null) {
-                $byName[$family->name()] = $family;
+                // Every name this family will write must be free. A histogram
+                // `payload` writes payload_bucket/_sum/_count, so a gauge
+                // `payload.count` collides with it even though neither of their
+                // own "rendered names" match — and a counter in the classic
+                // format writes only `<name>_total`, so it does NOT collide
+                // with a gauge of the bare name, though it would in
+                // OpenMetrics, where its metadata drops the suffix.
+                // Hash lookups, not array_intersect(array_keys(...)): that
+                // rebuilt and scanned the whole accumulated name list once per
+                // family, which is quadratic in the number of families. On
+                // 10 000 distinct gauges it turned a 7 ms render into 4.4 s —
+                // long enough to blow a scrape timeout on a big app.
+                $taken = false;
+
+                foreach ($names as $name) {
+                    if (isset($ownerOf[$name])) {
+                        $taken = true;
+
+                        break;
+                    }
+                }
+
+                if ($taken) {
+                    // Emitting both would declare one name twice, which is
+                    // invalid in both grammars. First one wins, as on a type
+                    // conflict.
+                    continue;
+                }
+
+                // Deduplicate WITHIN the family too. Two labelsets that differ
+                // only in spelling or key order — `host.name` and `host_name`,
+                // or the same keys written in another order by a different
+                // process — render as one series, and a family that never got
+                // merged with another was previously never checked at all.
+                $byKey[$key] = new MetricFamily(
+                    $family->definition,
+                    $this->mergeSamples([], $family->samples),
+                    $family->startUnixNano,
+                );
+
+                foreach ($names as $name) {
+                    $ownerOf[$name] = $key;
+                }
 
                 continue;
             }
 
-            if ($existing->type() === $family->type()) {
-                $byName[$family->name()] = new MetricFamily(
+            // Same type is not enough: `latency` in seconds and
+            // `latency_seconds` in microseconds render to one name, and
+            // merging them would report microseconds under a seconds suffix.
+            // Compared on the CANONICAL unit, because raw string equality made
+            // `By` and `bytes` — which this renderer deliberately treats as one
+            // unit, both suffixing `_bytes` — look incompatible, and the second
+            // family was then dropped entirely rather than merged.
+            if ($existing->type() === $family->type()
+                && $this->canonicalUnit($existing->definition->unit) === $this->canonicalUnit($family->definition->unit)) {
+                $byKey[$key] = new MetricFamily(
                     $existing->definition,
-                    [...$existing->samples, ...$family->samples],
+                    $this->mergeSamples($existing->samples, $family->samples),
                     $existing->startUnixNano ?? $family->startUnixNano,
                 );
             }
         }
 
-        return array_values($byName);
+        return array_values($byKey);
+    }
+
+    /**
+     * Every name this family will write, metadata and samples alike — plus,
+     * in OpenMetrics, the suffixes the format RESERVES for it even when this
+     * renderer does not emit them.
+     *
+     * `_created` is the reserved one: OpenMetrics lets a counter or histogram
+     * carry an optional `<name>_created` sample, so a gauge literally named
+     * `<name>.created` is a forbidden clash whether or not the optional sample
+     * is present. Classic text reserves nothing, so there the name is free.
+     *
+     * @return list<string>
+     */
+    private function occupiedNames(MetricFamily $family, bool $openMetrics): array
+    {
+        $base = $this->familyName($family);
+
+        return match ($family->type()) {
+            // Classic: metadata and samples both under `<name>_total`.
+            // OpenMetrics: metadata under `<name>`, samples under `<name>_total`.
+            MetricType::Counter => $openMetrics
+                ? [$base, $base.'_total', $base.'_created']
+                : [$base.'_total'],
+            MetricType::Histogram => $openMetrics
+                ? [$base, $base.'_bucket', $base.'_sum', $base.'_count', $base.'_created']
+                : [$base, $base.'_bucket', $base.'_sum', $base.'_count'],
+            default => [$base],
+        };
+    }
+
+    /**
+     * The unit reduced to what it actually MEANS on the wire.
+     *
+     * Two families only ever compete for a name when their name suffixes
+     * match, so comparing the suffix compares exactly the claim the output
+     * makes: `By` and `bytes` both say `_bytes` and are the same unit, while
+     * `s` (`_seconds`) and `us` (no suffix) are not. Units this renderer has
+     * no suffix for fall back to their raw spelling, so `us` and `ns` — which
+     * would render under one bare name — still count as different.
+     */
+    private function canonicalUnit(string $unit): string
+    {
+        $suffix = $this->unitSuffix($unit);
+
+        return $suffix !== '' ? $suffix : $unit;
+    }
+
+    /**
+     * Merge two families' samples, keeping ONE per labelset.
+     *
+     * Concatenating them meant a stored push gauge and a cross-process
+     * observable sharing a name AND a labelset produced two identical series
+     * lines. Prometheus rejects the duplicate sample and carries on rather
+     * than failing the scrape, so this one costs a silently dropped value, not
+     * the target — unlike the duplicate FAMILY and LABEL cases above, which do
+     * take everything down.
+     *
+     * @param  list<Sample|HistogramSample>  $existing
+     * @param  list<Sample|HistogramSample>  $incoming
+     * @return list<Sample|HistogramSample>
+     */
+    private function mergeSamples(array $existing, array $incoming): array
+    {
+        $byLabels = [];
+
+        foreach ([...$existing, ...$incoming] as $sample) {
+            // Compare what will be WRITTEN, not what was stored: two samples
+            // whose keys differ only in spelling or order render as one series.
+            $byLabels[json_encode($this->canonicalLabels($sample->labels)) ?: ''] ??= $sample;
+        }
+
+        return array_values($byLabels);
+    }
+
+    /**
+     * The family name for metadata lines. Identical to the sample name except
+     * for an OpenMetrics counter, whose family name drops `_total`.
+     */
+    private function familyName(MetricFamily $family): string
+    {
+        return $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+    }
+
+    /**
+     * The name this family will actually be written as.
+     */
+    private function renderedName(MetricFamily $family): string
+    {
+        $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+
+        return $family->type() === MetricType::Counter ? $name.'_total' : $name;
     }
 
     /**
@@ -204,20 +362,64 @@ final class PrometheusRenderer
      */
     private function renderLabels(array $labels, array $extra = []): string
     {
-        $all = [...$this->resourceLabels, ...$labels, ...$extra];
+        $all = $this->canonicalLabels($labels, $extra);
 
         if ($all === []) {
             return '';
         }
 
-        $parts = [];
+        $rendered = [];
 
-        foreach ($all as $key => $value) {
-            // Array keys may be ints (json_decode of numeric label names).
-            $parts[] = $this->sanitizeLabelName((string) $key).'="'.$this->escapeLabelValue($value).'"';
+        foreach ($all as $name => $value) {
+            $rendered[] = $name.'="'.$this->escapeLabelValue($value).'"';
         }
 
-        return '{'.implode(',', $parts).'}';
+        return '{'.implode(',', $rendered).'}';
+    }
+
+    /**
+     * The labels as Prometheus will see them: sanitized, then merged, then
+     * ordered — so two spellings of one name cannot both survive, and
+     * precedence does not depend on which of them happened to appear first.
+     *
+     * Sanitizing AFTER the merge meant a user label `host.name` — the dotted
+     * style the docs recommend — alongside the pre-sanitized `host_name`
+     * resource label were two distinct array keys that rendered as
+     * `{host_name="web-1",host_name="db-3"}`. The Go text parser rejects
+     * duplicate label names, and a parse error fails the WHOLE scrape: the
+     * target goes up=0 and every metric from the app disappears.
+     *
+     * Sorting matters too: the same labelset arriving in a different key order
+     * — a stored gauge versus a cross-process observable — would otherwise
+     * render as two different series lines for one series. So does dropping
+     * empty values, which Prometheus treats as absent labels.
+     *
+     * @param  array<string, string>  $labels
+     * @param  array<string, string>  $extra
+     * @return array<string, string>
+     */
+    private function canonicalLabels(array $labels, array $extra = []): array
+    {
+        $merged = [];
+
+        // Later sources win, and each is normalized before it is applied so
+        // precedence never depends on the presence of an earlier spelling.
+        foreach ([$this->resourceLabels, $labels, $extra] as $source) {
+            foreach ($source as $key => $value) {
+                // Array keys may be ints (json_decode of numeric label names).
+                $merged[$this->sanitizeLabelName((string) $key)] = $value;
+            }
+        }
+
+        // An empty label value is not a label: Prometheus defines
+        // `foo{route=""}` and `foo` as the SAME series. Keeping the empty key
+        // made them two array keys, so a family carrying both emitted two
+        // lines for one series and the ingester silently dropped one value.
+        $merged = array_filter($merged, static fn ($value): bool => $value !== '' && $value !== null);
+
+        ksort($merged);
+
+        return $merged;
     }
 
     private function sanitizeLabelName(string $name): string

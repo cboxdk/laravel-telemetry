@@ -159,15 +159,81 @@ final class ScheduleInstrumentation
         $this->telemetry()->resetContext();
     }
 
+    /**
+     * A BOUNDED name for the task — this is a metric label.
+     *
+     * getSummaryForDisplay() returns the description if one is set, and
+     * otherwise the whole built command line: every argument, plus the output
+     * redirection, plus a wrapping subshell for a background task. The old code
+     * stripped the leading quoted binary and kept the rest, so the label
+     * carried the arguments — and the arguments are exactly what varies.
+     *
+     * `$schedule->command('reports:send --date='.now()->toDateString())` minted
+     * a new label value EVERY DAY; the per-tenant pattern
+     * `foreach ($tenants as $t) { $schedule->command("tenant:sync {$t->id}") }`
+     * minted one per tenant. Each is 15 histogram series plus three counters,
+     * kept forever — a scheduler over 10 000 tenants produced 180 000 series
+     * from one file, with label values hundreds of bytes long.
+     *
+     * An explicit description wins, because the app chose it and it is
+     * therefore the app's own cardinality. Otherwise the label is the artisan
+     * command NAME with its arguments dropped, which is bounded by the number
+     * of commands that exist.
+     *
+     * The description escape hatch is a real one: `Schedule::job()` sets the
+     * description from the job's `displayName()` without the app asking, so a
+     * job that names itself per tenant is unbounded here too. Nothing this
+     * class can do distinguishes that from a description deliberately chosen
+     * to be fine-grained — override `displayName()` or call `->name('…')` with
+     * a bounded label if a scheduled job varies its own name.
+     */
     private function taskName(object $task): string
     {
-        if (method_exists($task, 'getSummaryForDisplay')) {
-            $summary = (string) $task->getSummaryForDisplay();
+        $description = $task->description ?? null;
 
-            // Strip the binary path noise from "artisan ..." commands.
-            return (string) preg_replace("/^('[^']+' )+/", '', $summary);
+        if (is_string($description) && $description !== '') {
+            return $description;
         }
 
-        return 'closure';
+        if (! method_exists($task, 'getSummaryForDisplay')) {
+            return 'closure';
+        }
+
+        $summary = (string) $task->getSummaryForDisplay();
+
+        // Strip EXACTLY the two tokens Schedule::command() puts in front — the
+        // quoted php binary and the quoted artisan path — and nothing else.
+        // A greedy run of quoted tokens ate the command name too whenever the
+        // app quoted it itself (`command("'tenant:sync' 48213")`), promoting
+        // the ARGUMENT to the label: the unbounded case this exists to close.
+        $stripped = 0;
+        $summary = (string) preg_replace("/^('[^']*'\s+)?'artisan'\s+/", '', $summary, 1, $stripped);
+
+        // Whether those tokens were there is what separates Schedule::command()
+        // from Schedule::exec(), whose summary is an arbitrary shell line.
+        $isArtisan = $stripped === 1;
+
+        // Then the shell redirection: whitespace + an optional fd + '>', NOT
+        // any '2' — a `[>2]` class turned `reports:v2:send` into `reports:v`,
+        // silently merging two different commands into one series.
+        $summary = (string) preg_replace('/\s+\d?>.*$/', '', $summary);
+        $summary = trim($summary);
+
+        // Any whitespace separates the name from its arguments, not just a
+        // space: a tab-separated command line kept its arguments in the label.
+        $name = preg_split('/\s+/', $summary, 2)[0] ?? '';
+        $name = trim($name, "'\"");
+
+        // Only an ARTISAN command name is safe to use. Without that check,
+        // stripping a leading quoted token promotes the ARGUMENT:
+        // `'/usr/bin/printf' alice` would have labelled the series `alice`,
+        // and a varying argument is exactly the unbounded case being closed.
+        // exec() tasks collapse to one bucket; give one a description if you
+        // want it apart.
+        if (! $isArtisan || $name === '') {
+            return $summary === '' ? 'closure' : 'exec';
+        }
+
+        return $name;
     }
 }

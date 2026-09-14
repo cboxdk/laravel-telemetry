@@ -134,7 +134,7 @@ is also propagated to the browser (via the `@telemetryBrowser` directive's
 ## Client geo — `resolveClientGeoUsing()`
 
 Only active when `telemetry.analytics.enabled` is on. Supplies
-`client.geo.*` (and may override `client.address`) for the request span and
+`geo.*` (and may override `client.address`) for the request span and
 the browser ingest endpoint. This hook always **wins** over the built-in
 resolution.
 
@@ -145,11 +145,26 @@ resolution.
 > extra fields (region/city), or your own logic:
 
 ```php
-Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-    'client.geo.country' => $request->header('CF-IPCountry'),
-    'client.geo.region'  => $request->header('CF-Region'),
-    'client.geo.city'    => $request->header('CF-IPCity'),
-]));
+Telemetry::resolveClientGeoUsing(function ($request) {
+    $country = $request->header('CF-IPCountry');
+
+    // XX (unknown) and T1 (Tor) are sentinels, not countries. Returning an
+    // EMPTY array falls through to the built-in resolvers, including MaxMind;
+    // returning a half-built one suppresses them.
+    if (! is_string($country) || in_array($country, ['', 'XX', 'T1'], true)) {
+        return [];
+    }
+
+    $region = $request->header('CF-Region-Code');
+
+    return array_filter([
+        'geo.country.iso_code' => strtoupper($country),
+        // ISO 3166-2, so country + region CODE — CF-Region is the region NAME,
+        // and a missing code must not mint "US-".
+        'geo.region.iso_code'  => $region ? strtoupper($country.'-'.$region) : null,
+        'geo.locality.name'    => $request->header('CF-IPCity'),
+    ]);
+});
 ```
 
 ## The full hook surface

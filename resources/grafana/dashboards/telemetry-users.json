@@ -172,7 +172,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\"} | select(span.enduser.type, span.enduser.guard)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.user.id=~\"$user\" && span.user.type=~\"$usertype\"} | select(span.user.type, span.user.guard)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -212,7 +212,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && span.enduser.id=~\"$user\" && span.enduser.type=~\"$usertype\" && status=error}",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && span.user.id=~\"$user\" && span.user.type=~\"$usertype\" && status=error}",
           "limit": 20,
           "spss": 3,
           "tableType": "traces"
@@ -252,7 +252,7 @@
             "uid": "tempo"
           },
           "queryType": "traceql",
-          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.session.hash=~\"$sessionhash\"} | select(span.enduser.id, span.session.hash)",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && kind=server && span.session.hash=~\"$sessionhash\"} | select(span.user.id, span.session.hash)",
           "limit": 20,
           "spss": 3,
           "tableType": "spans"
@@ -269,7 +269,7 @@
       "options": {
         "cellHeight": "sm"
       },
-      "description": "session.hash from any request span follows the visitor across requests \u2014 the anonymous-user story enduser.id can't tell."
+      "description": "session.hash from any request span follows the visitor across requests \u2014 the anonymous-user story user.id can't tell."
     },
     {
       "id": 222,
@@ -323,7 +323,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Request spans carry `enduser.id`, `enduser.type` (the model: user/admin/reseller) and `enduser.guard` \u2014 multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` \u2014 explicit PII opt-in."
+        "content": "Request spans carry `user.id`, `user.type` (the model: user/admin/reseller) and `user.guard` \u2014 multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` \u2014 explicit PII opt-in."
       },
       "fieldConfig": {
         "defaults": {},

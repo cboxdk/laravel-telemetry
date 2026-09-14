@@ -353,9 +353,9 @@ D["jobs"] = dashboard("cbox-tel-jobs", "Telemetry / Jobs", [
     row("Resources & leaks", 13),
     timeseries("p95 duration by job", [target(f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{{{QF}}}[$__rate_interval])))', '{{job_name}}')], 0, 14, unit="ms"),
     timeseries("Worker memory — a climbing line IS the leak", [
-        target(f'worker_memory_rss_bytes{{{SVC}}}', 'rss pid {{pid}}'),
-        target(f'worker_memory_php_bytes{{{SVC}}}', 'php pid {{pid}}'),
-    ], 12, 14, unit="bytes", description="Workers self-report after every job. One line per worker process."),
+        target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{{{SVC}}}[$__rate_interval])))', 'rss p95 {{queue}}'),
+        target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_php_bytes_bucket{{{SVC}}}[$__rate_interval])))', 'php p95 {{queue}}'),
+    ], 12, 14, unit="bytes", description="Workers self-report after every job, as a distribution by queue."),
     row("Traces", 22),
     traces("Job runs — origin request in messaging.origin.name, queue lag in wait_time_ms",
            f'{{{TSVC} && kind=consumer}} | select(span.messaging.origin.name, span.messaging.wait_time_ms)', 0, 23, table_type="spans"),
@@ -409,7 +409,7 @@ D["exceptions"] = dashboard("cbox-tel-exceptions", "Telemetry / Exceptions", [
 # ── 7 · Queries ──────────────────────────────────────────────────────
 D["queries"] = dashboard("cbox-tel-queries", "Telemetry / Queries", [
     traces("Slowest queries (> $minms ms) — SQL text on the span",
-           f'{{{TSVC} && name="db.query" && duration>${{minms}}ms}} | select(span.db.query.text, span.db.namespace)', 0, 0, table_type="spans"),
+           f'{{{TSVC} && name="db.query" && duration>${{minms}}ms}} | select(span.db.query.text, span.laravel.db.connection)', 0, 0, table_type="spans"),
     traces("N+1 suspects — requests running ≥ $minqueries queries",
            f'{{{TSVC} && kind=server && span.db.query.count >= $minqueries}} | select(span.db.query.count, span.db.query.time_ms)', 0, 9,
            description="db.query.count/time_ms tallies live on every root span."),
@@ -465,7 +465,8 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
     timeseries("Monitored process groups", [target('process_memory_rss_bytes', '{{process}}')], 12, 13, unit="bytes",
                 description="telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."),
     row("Workers", 21),
-    timeseries("Worker leak curves — one line per worker process", [target(f'worker_memory_rss_bytes{{{SVC}}}', 'pid {{pid}}')], 0, 22, w=24, unit="bytes"),
+    timeseries("Worker leak curves — p95 RSS after each job, by queue", [target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{{{SVC}}}[$__rate_interval])))', '{{queue}}')], 0, 22, w=24, unit="bytes",
+               description="A distribution that drifts upward over time IS the leak. Per-pid lines were dropped in 2.0: the pid label was unbounded and its series outlived every worker the OOM killer took."),
     row("Telemetry health (self-observability)", 30),
     timeseries("Export outcomes / min", [target(f'sum by (outcome) (rate(telemetry_export_count_total{{{SVC}}}[$__rate_interval])) * 60', '{{outcome}}')],
                0, 31, w=8, unit="opm", regex_colors={"ok": "green", "partial": "orange", "retryable": "orange", "failed": "red", "error": "red"},
@@ -479,13 +480,13 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
 
 # ── 12 · Users ───────────────────────────────────────────────────────
 D["users"] = dashboard("cbox-tel-users", "Telemetry / Users", [
-    traces("Requests for user $user ($usertype)", f'{{{TSVC} && kind=server && span.enduser.id=~"$user" && span.enduser.type=~"$usertype"}} | select(span.enduser.type, span.enduser.guard)', 0, 0, table_type="spans"),
-    traces("Errors hit by user $user ($usertype)", f'{{{TSVC} && span.enduser.id=~"$user" && span.enduser.type=~"$usertype" && status=error}}', 0, 9),
+    traces("Requests for user $user ($usertype)", f'{{{TSVC} && kind=server && span.user.id=~"$user" && span.user.type=~"$usertype"}} | select(span.user.type, span.user.guard)', 0, 0, table_type="spans"),
+    traces("Errors hit by user $user ($usertype)", f'{{{TSVC} && span.user.id=~"$user" && span.user.type=~"$usertype" && status=error}}', 0, 9),
     traces("Session journey — every request in visit $sessionhash",
-           f'{{{TSVC} && kind=server && span.session.hash=~"$sessionhash"}} | select(span.enduser.id, span.session.hash)', 0, 18, table_type="spans",
-           description="session.hash from any request span follows the visitor across requests — the anonymous-user story enduser.id can't tell."),
+           f'{{{TSVC} && kind=server && span.session.hash=~"$sessionhash"}} | select(span.user.id, span.session.hash)', 0, 18, table_type="spans",
+           description="session.hash from any request span follows the visitor across requests — the anonymous-user story user.id can't tell."),
     traces("Memory hogs (> $minmb MB)", f'{{{TSVC} && kind=server && span.php.memory.peak_bytes > $minmb000000}}', 0, 27),
-    text("Tip", "Request spans carry `enduser.id`, `enduser.type` (the model: user/admin/reseller) and `enduser.guard` — multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` — explicit PII opt-in.", 0, 36),
+    text("Tip", "Request spans carry `user.id`, `user.type` (the model: user/admin/reseller) and `user.guard` — multi-guard apps never mix up admin #7 and user #7. Opt-out: `TELEMETRY_INSTRUMENT_USER=false`. Enrich via `Telemetry::resolveUserUsing(fn ($user, $guard) => [...])` — explicit PII opt-in.", 0, 36),
 ], variables=[textvar("user", ".+", "user id"), textvar("usertype", ".+", "user type"), textvar("sessionhash", ".+", "session hash"), textvar("minmb", "64", "min memory (MB)")])
 
 # ── 13 · Logs ────────────────────────────────────────────────────────

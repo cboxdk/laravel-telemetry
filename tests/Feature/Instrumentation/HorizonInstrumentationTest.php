@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Support\Collection;
 use Laravel\Horizon\Events\JobsMigrated;
@@ -132,4 +133,27 @@ it('counts migrated jobs by the number of payloads', function () {
 
     expect($sample->value)->toBe(3.0)
         ->and($sample->labels)->toBe(['connection' => 'redis', 'queue' => 'emails']);
+});
+
+/**
+ * MasterSupervisor::name() is `basename()-<4 random chars>`, minted fresh every
+ * time the master process starts, and each supervisor is "{master}:{name}".
+ * Those are GAUGES with no TTL, so every deploy added a permanent series frozen
+ * at its last value: sum(horizon_supervisor_processes) grew forever, and
+ * horizon.master.paused stayed 0 ("working") for every dead master, so a
+ * min() == 1 alert could never fire again once one master had ever run.
+ */
+it('strips the per-process token from horizon labels without eating the hostname', function () {
+    MasterSupervisor::$nameResolver = fn () => 'queue-prod';
+
+    $strip = (new ReflectionMethod(HorizonInstrumentation::class, 'withoutToken'))
+        ->getClosure(new HorizonInstrumentation(app()));
+
+    expect($strip('queue-prod-a3f9'))->toBe('queue-prod')
+        ->and($strip('queue-prod-a3f9:supervisor-1'))->toBe('queue-prod:supervisor-1')
+        // The last segment of this host is four characters; stripping by shape
+        // would have cut it off.
+        ->and($strip('queue-prod'))->toBe('queue-prod');
+
+    MasterSupervisor::$nameResolver = null;
 });

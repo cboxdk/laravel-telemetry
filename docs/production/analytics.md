@@ -54,7 +54,7 @@ even when the full trace is tail-sampled away. It still carries the
 
 Each event is a flat, one-row-per-view shape: `session.id`, `url.path`,
 `http.route`, `http.response.status_code`, `user_agent.original`, the
-referrer, `enduser.id`, `client.geo.*`, optional `analytics.utm.*` /
+referrer, `user.id`, `geo.*`, optional `analytics.utm.*` /
 `analytics.click_id` (see [Campaign attribution](#campaign-attribution)),
 plus a `telemetry.stream="analytics"` marker so an OTel Collector can route it
 to ClickHouse without any app change. Disable with
@@ -68,7 +68,7 @@ afterwards, with a fixed precedence: a **hook** wins, then **Cloudflare's
 
 ### Cloudflare (built-in, no database)
 
-If you serve through Cloudflare, `client.geo.country` comes free on every
+If you serve through Cloudflare, `geo.country.iso_code` comes free on every
 plan from the `CF-IPCountry` edge header — no MaxMind database to ship or
 update, and no per-request lookup. Just enable geo:
 
@@ -104,14 +104,30 @@ one place.
 
 ### A custom edge or provider (hook)
 
-Source `client.geo.*` from any header or logic — the hook always wins
+Source `geo.*` from any header or logic — the hook always wins
 ([details](../extension-points/hooks.md#client-geo--resolveclientgeousing)):
 
 ```php
-Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-    'client.geo.country' => $request->header('CF-IPCountry'),
-    'client.geo.region'  => $request->header('CF-Region'),
-]));
+Telemetry::resolveClientGeoUsing(function ($request) {
+    $country = $request->header('CF-IPCountry');
+
+    // XX (unknown) and T1 (Tor) are sentinels, not countries. Returning an
+    // EMPTY array falls through to the built-in resolvers, including MaxMind;
+    // returning a half-built one suppresses them.
+    if (! is_string($country) || in_array($country, ['', 'XX', 'T1'], true)) {
+        return [];
+    }
+
+    $region = $request->header('CF-Region-Code');
+
+    return array_filter([
+        'geo.country.iso_code' => strtoupper($country),
+        // ISO 3166-2, so country + region CODE — CF-Region is the region NAME,
+        // and a missing code must not mint "US-".
+        'geo.region.iso_code'  => $region ? strtoupper($country.'-'.$region) : null,
+        'geo.locality.name'    => $request->header('CF-IPCity'),
+    ]);
+});
 ```
 
 ### MaxMind (built-in, no edge)
@@ -128,7 +144,7 @@ TELEMETRY_ANALYTICS_GEO=true
 TELEMETRY_ANALYTICS_GEO_DB=/var/lib/GeoLite2-Country.mmdb
 ```
 
-It resolves `client.geo.country` (+ continent) at collection time; the reader
+It resolves `geo.country.iso_code` (+ continent) at collection time; the reader
 is built lazily and cached (no boot-time I/O). Without the package or the
 database it is a silent no-op.
 

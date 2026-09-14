@@ -943,7 +943,7 @@ class TelemetryServiceProvider extends ServiceProvider
                         });
 
                         if (is_string($userId) && $userId !== '') {
-                            $attributes['enduser.id'] = $userId;
+                            $attributes['user.id'] = $userId;
                         }
 
                         // Trace waterfall: annotate the active span WITHOUT

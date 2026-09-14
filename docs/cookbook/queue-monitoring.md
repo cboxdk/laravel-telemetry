@@ -61,10 +61,10 @@ Workers self-report their memory after every job:
 
 ```promql
 # a climbing line per worker process IS the leak
-worker_memory_rss_bytes{queue="default"}
+histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket[$__rate_interval])))
 
 # alert: any worker above 512 MB
-max by (pid) (worker_memory_rss_bytes) > 536870912
+histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket[15m]))) > 536870912
 ```
 
 For processes that never run app code between units of work (Reverb,

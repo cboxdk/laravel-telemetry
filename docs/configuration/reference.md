@@ -218,7 +218,7 @@ can be analysed. Off by default; changes nothing when disabled. See
 | `analytics.enabled` | `TELEMETRY_ANALYTICS` | `false` |
 | `analytics.page_views` | `TELEMETRY_ANALYTICS_PAGE_VIEWS` | `true` — unsampled `analytics.page_view` event per top-level document load |
 | `analytics.session.salt` | `TELEMETRY_ANALYTICS_SALT` | — the daily-rotating, salted hash that keeps the built-in `session.id` cookieless; override entirely via `Telemetry::resolveSessionUsing()` |
-| `analytics.geo.enabled` | `TELEMETRY_ANALYTICS_GEO` | `false` — resolve `client.geo.country` at collection time. Precedence: `Telemetry::resolveClientGeoUsing()` hook → Cloudflare `CF-IPCountry` → MaxMind database. Applies to server page views and the browser ingest endpoint |
+| `analytics.geo.enabled` | `TELEMETRY_ANALYTICS_GEO` | `false` — resolve `geo.country.iso_code` at collection time. Precedence: `Telemetry::resolveClientGeoUsing()` hook → Cloudflare `CF-IPCountry` → MaxMind database. Applies to server page views and the browser ingest endpoint |
 | `analytics.geo.cloudflare` | `TELEMETRY_ANALYTICS_GEO_CF` | `true` — prefer Cloudflare's `CF-IPCountry` header (free, no database). Only trusted when the request is from a trusted proxy — set Laravel `TrustProxies` to the immediate hop (CF ranges if CF connects directly, or your load balancer in a `CF→LB→app` chain); spoofable and ignored otherwise |
 | `analytics.geo.database` | `TELEMETRY_ANALYTICS_GEO_DB` | — path to the MaxMind `.mmdb` file (`composer require geoip2/geoip2`) |
 | `analytics.user_agent` | `TELEMETRY_ANALYTICS_UA` | `false` — parse `user_agent.original` into low-cardinality `user_agent.name`/`os.name`/`device.type` (families only, never versions) |
@@ -283,7 +283,7 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.batches` | `TELEMETRY_INSTRUMENT_BATCHES` | `true` — `bus.batches{event,name}` job-batch lifecycle |
 | `instrument.redis` | `TELEMETRY_INSTRUMENT_REDIS` | `false` — Redis command spans (key only, never values) + `redis.commands` counter; telemetry's own connections auto-ignored |
 | `instrument.redis_ignore_connections` | — | `null` → auto (metric-store + spool connections); set a list to override |
-| `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `enduser.id` + `enduser.type` (model) + `enduser.guard` (multi-guard safe; never PII) |
+| `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `user.id` + `user.type` (model) + `user.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via ext-excimer (PECL, not bundled); a silent no-op without the extension. See [Profiling](#profiling-ext-excimer) below |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
@@ -321,7 +321,7 @@ Only valid v3 source maps within the size limit are stored. See
 
 `telemetry:monitor --once` from the scheduler (cron mode) or without
 `--once` under supervisor (daemon mode). Queue workers additionally
-self-report `worker.memory.{php,rss}{queue,pid} (By)` after every job —
+self-report `queue.worker.memory.{php,rss}{queue} (By)` as a histogram after every job —
 no monitor required for worker leak tracking.
 
 ## Profiling (ext-excimer)

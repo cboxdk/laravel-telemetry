@@ -204,7 +204,7 @@ it('records command metrics alongside command spans', function () {
 it('enriches user attribution through the opt-in resolver', function () {
     Route::get('/me', fn () => 'ok');
 
-    Telemetry::resolveUserUsing(fn ($user) => ['enduser.name' => $user->name ?? 'unknown']);
+    Telemetry::resolveUserUsing(fn ($user) => ['user.name' => $user->name ?? 'unknown']);
 
     $this->actingAs(new GenericUser(['id' => 9, 'name' => 'Jared']));
 
@@ -212,8 +212,8 @@ it('enriches user attribution through the opt-in resolver', function () {
 
     $span = allSpans($this->collector)->firstWhere('name', 'GET /me');
 
-    expect($span->attributes()['enduser.id'])->toBe('9')
-        ->and($span->attributes()['enduser.name'])->toBe('Jared');
+    expect($span->attributes()['user.id'])->toBe('9')
+        ->and($span->attributes()['user.name'])->toBe('Jared');
 });
 
 it('self-reports worker memory after each job for leak tracking', function () {
@@ -229,13 +229,16 @@ it('self-reports worker memory after each job for leak tracking', function () {
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKey('worker.memory.php');
+    expect($families)->toHaveKey('queue.worker.memory.php');
 
-    $sample = $families['worker.memory.php']->samples[0];
+    $sample = $families['queue.worker.memory.php']->samples[0];
 
-    expect($sample->value)->toBeGreaterThan(1_000_000)
-        ->and($sample->labels['queue'])->toBe('default')
-        ->and($sample->labels['pid'])->toBe((string) getmypid());
+    // A distribution by queue, not a gauge per pid: the pid was unbounded and
+    // its series were retired only on a graceful stop, which a worker killed by
+    // the OOM killer never reaches.
+    expect($sample->sum)->toBeGreaterThan(1_000_000)
+        ->and($sample->count)->toBe(1)
+        ->and($sample->labels)->toBe(['queue' => 'default']);
 });
 
 it('samples host and process metrics via telemetry:monitor --once', function () {

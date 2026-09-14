@@ -93,7 +93,7 @@ final class QueryInstrumentation
                 $event->time,
                 [
                     'db.system.name' => $event->connection->getDriverName(),
-                    'db.namespace' => $event->connectionName,
+                    'laravel.db.connection' => $event->connectionName,
                     'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
                 ],
                 SpanKind::Client,
@@ -139,7 +139,7 @@ final class QueryInstrumentation
 
             $telemetry->event('db.query.duplicate_detected', [
                 'db.system.name' => $event->connection->getDriverName(),
-                'db.namespace' => $event->connectionName,
+                'laravel.db.connection' => $event->connectionName,
                 'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
                 'db.query.repeat_count' => $count,
             ]);

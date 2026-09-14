@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Metrics\HistogramSample;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -67,7 +69,11 @@ it('counts processed jobs', function () {
         ->and($families['queue.jobs.processed']->samples[0]->value)->toBe(1.0);
 });
 
-it('retires pid-labeled worker gauges when the worker stops', function () {
+it('reports worker memory as a bounded distribution, not a series per pid', function () {
+    // The pid was an unbounded label whose series were retired only on
+    // WorkerStopping — which a worker killed by the OOM killer never
+    // dispatches. So the gauge designed to catch a leaking worker leaked a
+    // permanent series precisely when the worker died of the leak.
     app('queue');
 
     $job = Mockery::mock(Job::class);
@@ -82,16 +88,31 @@ it('retires pid-labeled worker gauges when the worker stops', function () {
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKey('worker.memory.php')
-        ->and($families['worker.memory.php']->samples[0]->labels['pid'])->toBe((string) getmypid());
+    $sample = $families['queue.worker.memory.php']->samples[0];
 
-    // The worker recycles — its pid series must not outlive the process.
-    $events->dispatch(new WorkerStopping);
+    expect($families)->toHaveKey('queue.worker.memory.php')
+        ->and($families['queue.worker.memory.php']->type())->toBe(MetricType::Histogram)
+        ->and($sample)->toBeInstanceOf(HistogramSample::class)
+        ->and($sample->labels)->toBe(['queue' => 'default'])
+        ->and($sample->count)->toBe(1)
+        ->and($sample->sum)->toBeGreaterThan(1_000_000);
+
+    // A second job accumulates into the same series rather than minting a new
+    // one. It needs its own Job instance — the worker builds one per attempt,
+    // and completion is latched per attempt so reusing this one counts once.
+    $second = Mockery::mock(Job::class);
+    $second->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $second->shouldReceive('getQueue')->andReturn('default');
+    $second->shouldReceive('attempts')->andReturn(1);
+    $second->shouldReceive('payload')->andReturn([]);
+
+    $events->dispatch(new JobProcessing('redis', $second));
+    $events->dispatch(new JobProcessed('redis', $second));
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->not->toHaveKey('worker.memory.php')
-        ->and($families)->not->toHaveKey('worker.memory.rss');
+    expect($families['queue.worker.memory.php']->samples)->toHaveCount(1)
+        ->and($families['queue.worker.memory.php']->samples[0]->count)->toBe(2);
 });
 
 /**

@@ -198,7 +198,7 @@ final class TraceRequest
             // Attribute the request to the authenticated user (resolved by
             // now) — enables per-user trace filtering. Id only, never PII.
             // Multi-guard apps (users/admins/resellers) are disambiguated:
-            // enduser.type carries the model, enduser.guard the guard that
+            // user.type carries the model, user.guard the guard that
             // authenticated (Auth::shouldUse() from the route's auth
             // middleware is reflected here), so admin #7 and user #7 are
             // never the same identity.
@@ -207,9 +207,9 @@ final class TraceRequest
                     $guard = $this->authGuardName();
 
                     $span->setAttributes(array_filter([
-                        'enduser.id' => Cast::string($user->getAuthIdentifier()),
-                        'enduser.type' => Str::snake(class_basename($user)),
-                        'enduser.guard' => $guard,
+                        'user.id' => Cast::string($user->getAuthIdentifier()),
+                        'user.type' => Str::snake(class_basename($user)),
+                        'user.guard' => $guard,
                     ]));
                     $span->setAttributes($this->telemetry->resolveUserAttributes($user, $guard));
                 } elseif (($remembered = $this->telemetry->rememberedAuthenticatedUser()) !== null) {
@@ -217,9 +217,9 @@ final class TraceRequest
                     // logout requests (guard empty by terminate) — the
                     // Login/Logout events remembered who it was.
                     $span->setAttributes(array_filter([
-                        'enduser.id' => $remembered['id'],
-                        'enduser.type' => $remembered['type'],
-                        'enduser.guard' => $remembered['guard'],
+                        'user.id' => $remembered['id'],
+                        'user.type' => $remembered['type'],
+                        'user.guard' => $remembered['guard'],
                     ]));
                 }
             }
@@ -252,7 +252,7 @@ final class TraceRequest
 
             // Analytics keystone (opt-in, default off): a shared, cross-request
             // session.id so a whole visit — not just one trace — can be
-            // analysed, plus optional client.geo.*. Both are hook-overridable
+            // analysed, plus optional geo.*. Both are hook-overridable
             // (Cloudflare headers, a cookie, your own logic); the built-in
             // session.id is a cookieless, daily-rotating salted hash. Strictly
             // additive — nothing here runs, or is stamped, when analytics is
@@ -571,7 +571,7 @@ final class TraceRequest
         ], static fn ($v) => $v !== null);
 
         if (($user = $request->user()) !== null) {
-            $attributes['enduser.id'] = Cast::string($user->getAuthIdentifier());
+            $attributes['user.id'] = Cast::string($user->getAuthIdentifier());
         }
 
         /** @var array<string, scalar|null> $attributes */
@@ -606,7 +606,7 @@ final class TraceRequest
     }
 
     /**
-     * `client.geo.*` for the request: a registered hook wins, then the
+     * `geo.*` for the request: a registered hook wins, then the
      * built-in Cloudflare CF-IPCountry header (trusted-proxy gated), then the
      * optional MaxMind resolver — all when `analytics.geo` is enabled. See
      * {@see ClientGeo} for the shared precedence.

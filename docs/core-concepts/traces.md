@@ -83,11 +83,11 @@ credential). The hash is stable across a visit, so one TraceQL query
 follows a whole visitor journey: `{ span.session.hash = "3f2a…" }`.
 Disable with `instrument.session`.
 
-Request spans carry `enduser.id`, `enduser.type` (the model:
-`user`/`admin`/`reseller`) and `enduser.guard` (the guard that
+Request spans carry `user.id`, `user.type` (the model:
+`user`/`admin`/`reseller`) and `user.guard` (the guard that
 authenticated) — never name or email. Multi-guard apps stay
 disambiguated: admin #7 and user #7 are different identities.
-Filter in TraceQL: `{ span.enduser.id = "42" && span.enduser.type = "admin" }`.
+Filter in TraceQL: `{ span.user.id = "42" && span.user.type = "admin" }`.
 The login POST itself and logout requests are attributed too (the
 Login/Logout events are remembered within the request). Disable with
 `instrument.user`; enrich (explicit PII opt-in) with

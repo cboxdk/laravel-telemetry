@@ -8,7 +8,7 @@ use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Http\Request;
 
 /**
- * Resolves `client.geo.*` for a request with one fixed precedence, so the
+ * Resolves `geo.*` for a request with one fixed precedence, so the
  * request middleware and the browser ingest endpoint agree on a single
  * source of truth:
  *

@@ -17,6 +17,7 @@ use Laravel\Horizon\Events\SupervisorLooped;
 use Laravel\Horizon\Events\SupervisorOutOfMemory;
 use Laravel\Horizon\Events\SupervisorProcessRestarting;
 use Laravel\Horizon\Events\WorkerProcessRestarting;
+use Laravel\Horizon\MasterSupervisor;
 
 /**
  * Horizon operational visibility — everything a generic queue-event
@@ -33,7 +34,7 @@ use Laravel\Horizon\Events\WorkerProcessRestarting;
  * Supervisor/master state (process count, paused) is read from the
  * `Looped` events — Horizon's own heartbeat, roughly once a second — and
  * PUSHED into the shared store (`.set()`), the same "worker self-reports
- * its own live state" pattern as `worker.memory.php` in
+ * its own live state" pattern as `queue.worker.memory.php` in
  * `QueueInstrumentation`. These are pull-shaped values by nature but
  * pushed on purpose: the master/supervisor process is long-running and
  * standalone, so nothing else could evaluate a callback for it later —
@@ -61,12 +62,51 @@ final class HorizonInstrumentation
         $events->listen(JobsMigrated::class, $this->jobsMigrated(...));
     }
 
+    /**
+     * Strip the per-process random token Horizon puts in these names.
+     *
+     * MasterSupervisor::name() is `basename()-<4 random chars>`, minted fresh
+     * every time the master process STARTS, and ProvisioningPlan composes each
+     * supervisor as "{master}:{supervisor}". Both therefore carried a value
+     * that changes on every deploy — and these are gauges, frozen at their last
+     * value with no TTL, so `sum(horizon_supervisor_processes)` grew
+     * monotonically forever and the "how many workers do I have" panel became
+     * fiction. Worse, `horizon.master.paused` stayed at 0 ("working") for every
+     * dead master, so a `min(...) == 1` alert could never fire again once one
+     * master had ever run.
+     *
+     * The token is removed by asking Horizon for the basename and cutting
+     * exactly that prefix — NOT by matching four characters, which would eat
+     * the last segment of a host legitimately named `queue-prod` or `web-node`.
+     *
+     * The trade this makes: two masters running CONCURRENTLY on one host now
+     * share a labelset and overwrite each other's gauges. That is the normal
+     * Horizon deployment's non-case — one master per host — and it is much the
+     * lesser evil against a permanent new series on every deploy, forever, each
+     * frozen at the value it held when its process died.
+     */
+    private function withoutToken(string $name): string
+    {
+        $basename = FailSafe::guard(static fn (): string => MasterSupervisor::basename());
+
+        if (! is_string($basename) || $basename === '' || ! str_starts_with($name, $basename.'-')) {
+            return $name;
+        }
+
+        $rest = substr($name, strlen($basename) + 1);
+
+        // What follows the token is either nothing, or ":supervisor".
+        $colon = strpos($rest, ':');
+
+        return $colon === false ? $basename : $basename.substr($rest, $colon);
+    }
+
     private function supervisorLooped(SupervisorLooped $event): void
     {
         FailSafe::guard(function () use ($event) {
             $supervisor = $event->supervisor;
             $labels = [
-                'supervisor' => Cast::string($supervisor->name),
+                'supervisor' => $this->withoutToken(Cast::string($supervisor->name)),
                 'connection' => Cast::string($supervisor->options->connection),
                 'queue' => Cast::string($supervisor->options->queue),
             ];
@@ -85,7 +125,7 @@ final class HorizonInstrumentation
     {
         FailSafe::guard(function () use ($event) {
             $master = $event->master;
-            $labels = ['master' => Cast::string($master->name)];
+            $labels = ['master' => $this->withoutToken(Cast::string($master->name))];
 
             $this->telemetry()
                 ->gauge('horizon.master.paused', description: 'Whether this master supervisor is currently paused (1) or working (0)')

@@ -530,12 +530,12 @@ class TelemetryManager
 
     /**
      * Opt in to richer user attribution on request spans (PII is off by
-     * default — only enduser.id/type/guard ship out of the box). The
+     * default — only user.id/type/guard ship out of the box). The
      * resolver receives the user AND the guard that authenticated, so
      * multi-guard apps can attribute per model:
      *
      *     Telemetry::resolveUserUsing(fn ($user, ?string $guard) => [
-     *         'enduser.plan' => $user->plan,
+     *         'user.plan' => $user->plan,
      *     ]);
      *
      * @param  (Closure(mixed, ?string): array<string, scalar|null>)|null  $resolver
@@ -610,14 +610,17 @@ class TelemetryManager
     }
 
     /**
-     * Provide `client.geo.*` for the request span and analytics events —
+     * Provide `geo.*` for the request span and analytics events —
      * e.g. from Cloudflare's edge headers, so no geo database is needed:
      *
-     *     Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-     *         'client.geo.country'      => $request->header('CF-IPCountry'),
-     *         'client.geo.region'       => $request->header('CF-Region'),
-     *         'client.address'          => $request->header('CF-Connecting-IP'),
-     *     ]));
+     *     Telemetry::resolveClientGeoUsing(
+     *         fn ($request) => CloudflareHeaders::geo($request)
+     *     );
+     *
+     * Rolling your own: an ISO 3166-2 region is country + region CODE, not
+     * CF-Region (a NAME), and a missing code must not mint "US-". Return an
+     * EMPTY array when the edge gave you nothing — a non-empty result wins
+     * outright and suppresses the built-in resolvers, MaxMind included.
      *
      * @param  (Closure(Request): array<string, scalar|null>)|null  $resolver
      */

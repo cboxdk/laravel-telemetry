@@ -45,7 +45,7 @@ final class FailSafe
     {
         // Re-entrancy latch: the default handler is report(), and telemetry
         // itself subscribes to report(). A guarded path that fails *while*
-        // a telemetry failure is already being reported (e.g. the enduser
+        // a telemetry failure is already being reported (e.g. the user
         // lookup with the database down) would otherwise recurse without
         // bound: guard → report → subscriber → guard → report → …
         if (self::$handling) {

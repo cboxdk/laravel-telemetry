@@ -7,7 +7,7 @@ namespace Cbox\Telemetry\Support;
 use Illuminate\Http\Request;
 
 /**
- * `client.geo.*` from Cloudflare's edge headers — free country-level geo on
+ * `geo.*` from Cloudflare's edge headers — free country-level geo on
  * every plan (CF-IPCountry) with no MaxMind database to ship or update.
  *
  * These headers only exist on the server request, never in the browser, so
@@ -51,10 +51,19 @@ final class CloudflareHeaders
 
         // Region/city arrive only on Enterprise + a Managed Transform; on
         // every other plan they are simply absent and filtered out here.
+        // geo.region.iso_code is ISO 3166-2 ("US-CA"). CF-Region is the region
+        // NAME ("California"); the code lives in CF-Region-Code ("CA"), and the
+        // ISO form is country + "-" + that. Emitting the name under an
+        // iso_code attribute makes every region filter and geo join miss.
+        $regionCode = $request->headers->get('CF-Region-Code');
+        $region = is_string($regionCode) && $regionCode !== ''
+            ? strtoupper($country).'-'.strtoupper($regionCode)
+            : null;
+
         return array_filter([
-            'client.geo.country' => strtoupper($country),
-            'client.geo.region' => $request->headers->get('CF-Region'),
-            'client.geo.city' => $request->headers->get('CF-IPCity'),
+            'geo.country.iso_code' => strtoupper($country),
+            'geo.region.iso_code' => $region,
+            'geo.locality.name' => $request->headers->get('CF-IPCity'),
         ], static fn ($v): bool => $v !== null && $v !== '');
     }
 }

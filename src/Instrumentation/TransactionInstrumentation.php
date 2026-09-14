@@ -44,7 +44,7 @@ final class TransactionInstrumentation implements ManagesRequestState
             // stays aligned with the database's own transaction level.
             $span = $telemetry->currentSpan()?->sampled === true
                 ? $telemetry->tracer()->startSpan('db.transaction', attributes: [
-                    'db.connection' => $connection,
+                    'laravel.db.connection' => $connection,
                     'db.transaction.depth' => count($this->stacks[$connection] ?? []),
                 ])
                 : null;

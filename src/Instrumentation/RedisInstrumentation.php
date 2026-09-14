@@ -104,7 +104,7 @@ final class RedisInstrumentation
                 array_filter([
                     'db.system.name' => 'redis',
                     'db.operation.name' => strtoupper($event->command),
-                    'db.connection' => $event->connectionName,
+                    'laravel.db.connection' => $event->connectionName,
                     'db.redis.key' => is_string($key) ? $key : null,
                 ], static fn ($value) => $value !== null),
                 SpanKind::Client,

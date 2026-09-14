@@ -52,14 +52,14 @@ it('stamps the authenticated user on the exception record', function () {
     report(new RuntimeException('who hit it'));
     Telemetry::flush();
 
-    expect(exceptionEvents($this->collector)->first()->attributes['enduser.id'])->toBe('42');
+    expect(exceptionEvents($this->collector)->first()->attributes['user.id'])->toBe('42');
 });
 
-it('omits enduser.id for guests', function () {
+it('omits user.id for guests', function () {
     report(new RuntimeException('anonymous'));
     Telemetry::flush();
 
-    expect(exceptionEvents($this->collector)->first()->attributes)->not->toHaveKey('enduser.id');
+    expect(exceptionEvents($this->collector)->first()->attributes)->not->toHaveKey('user.id');
 });
 
 it('carries ambient context onto the exception record', function () {

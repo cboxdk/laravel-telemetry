@@ -642,7 +642,7 @@
     {
       "id": 209,
       "type": "timeseries",
-      "title": "Worker leak curves \u2014 one line per worker process",
+      "title": "Worker leak curves \u2014 p95 RSS after each job, by queue",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -656,8 +656,8 @@
       "targets": [
         {
           "refId": "Q208",
-          "expr": "worker_memory_rss_bytes{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}",
-          "legendFormat": "pid {{pid}}",
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
+          "legendFormat": "{{queue}}",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -693,7 +693,8 @@
           "mode": "multi",
           "sort": "desc"
         }
-      }
+      },
+      "description": "A distribution that drifts upward over time IS the leak. Per-pid lines were dropped in 2.0: the pid label was unbounded and its series outlived every worker the OOM killer took."
     },
     {
       "id": 210,

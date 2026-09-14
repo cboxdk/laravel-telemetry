@@ -9,6 +9,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Two metric labels that anyone could grow without limit are bounded.**
+
+  `schedule.task.duration`, `schedule.tasks.*` — the `task` label was
+  `getSummaryForDisplay()`, which without an explicit description is the whole
+  built command line: every argument, plus the output redirection. The
+  arguments are exactly what varies, so
+  `$schedule->command('reports:send --date='.now()->toDateString())` minted a
+  new label value EVERY DAY, and the per-tenant pattern
+  `foreach ($tenants as $t) { $schedule->command("tenant:sync {$t->id}") }`
+  minted one per tenant — 15 histogram series plus three counters each, kept
+  forever, with label values hundreds of bytes long. The label is now an
+  explicit description if the app set one, otherwise the artisan command NAME
+  with its arguments dropped.
+
+  `worker.memory.php` / `worker.memory.rss` were GAUGES labelled by `pid`,
+  retired only on `WorkerStopping` — which a worker killed by the OOM killer,
+  SIGKILL or a container eviction never dispatches. So the metric designed to
+  catch a leaking worker leaked a permanent series precisely when the worker
+  died of the leak, each frozen at its last value with no TTL: a worker
+  recycling every 90s across 20 queues left roughly 1,900 dead series a day.
+  They are now HISTOGRAMS named `queue.worker.memory.{php,rss}` and labelled by
+  queue. A distribution drifting upward over time is the leak signal; it is a
+  weaker one than a per-pid line, and honestly so — one leaking worker among
+  many can grow without moving p95, and the doubling buckets hide growth within
+  a boundary. The trade is a signal that still works against one that stopped
+  being trustworthy the moment a worker died badly. The bundled leak-curve panel
+  is rewritten as a p95 by queue.
+
+  They are RENAMED rather than changed in place: `collect()` returns gauges
+  before histograms, so a stale v1 `worker.memory.*` gauge family — which
+  `--wipe` does not remove, since it deliberately preserves meta and indexes —
+  would have won the renderer's type conflict and hidden the new histogram
+  indefinitely. The v1 series linger until the store is reset; nothing writes
+  them any more.
+
+
+### Fixed
+
+- **Three ways the Prometheus renderer emitted invalid exposition.** What it
+  costs differs per case, and they are called out individually below rather
+  than under one blanket claim: a parse error is not scoped to the offending
+  metric — the target goes `up=0` and every metric from the app disappears —
+  while repeated metadata or a repeated series costs values, not the target.
+
+  - *Duplicate label names.* Labels were merged on their RAW keys and sanitized
+    afterwards, so a user label `host.name` — the dotted style the docs
+    recommend — alongside the pre-sanitized `host_name` resource label rendered
+    as `{host_name="web-1",host_name="db-3"}`. Merging now happens on the
+    sanitized name.
+  - *Duplicate family names.* Dedupe keyed on the OTel name, but the names
+    WRITTEN are the Prometheus ones — and a family writes several: a histogram
+    occupies `<name>`, `<name>_bucket`, `<name>_sum` and `<name>_count`, so a
+    gauge called `payload.count` collides with a histogram called `payload`.
+    A counter occupies `<name>_total` in the classic format and both `<name>`
+    and `<name>_total` in OpenMetrics, so whether it collides with a
+    same-named gauge depends on the format being rendered. `orders.created` and
+    `orders_created` are two legal, distinct families that both render as
+    `orders_created_total`, and both were emitted with their own
+    `# HELP`/`# TYPE`. Dedupe now keys on the rendered name, which is also the
+    one the render loop uses, so they cannot drift. (Repeated metadata for one
+    name is invalid under both grammars and is rejected outright by a strict
+    OpenMetrics parser; Prometheus' own text parser is more forgiving and
+    updates its metadata cache instead, so on that path the cost is the wrong
+    `# HELP`/`# TYPE` plus whatever duplicate series follow.)
+  - *Duplicate samples.* Merging two same-name families concatenated their
+    samples without deduplicating labelsets, so a stored push gauge and a
+    cross-process observable sharing a name and a labelset produced two
+    identical lines. One sample per labelset now wins. (Prometheus drops the
+    duplicate and continues rather than failing the scrape, so this one cost a
+    silently lost value — the family and label cases above take the target
+    down.) This now runs for every family, not only when two are merged: a
+    single family carrying both spellings of one labelset was never checked.
+
+- **Prometheus rendering, four smaller correctness fixes.**
+
+  - *Collision checking was quadratic.* Each family was intersected against
+    the whole accumulated name list, so the cost grew with the square of the
+    family count: 10 000 gauges measured 3.6 s against 19 ms after the fix —
+    long enough to blow a scrape timeout on an app with many series.
+  - *`By` and `bytes` were treated as different units.* Both suffix `_bytes`,
+    so two such families render under one name, but the merge compared the raw
+    unit strings, called them incompatible, and dropped the second family's
+    samples entirely.
+  - *Empty label values are absent labels.* Prometheus defines `foo{route=""}`
+    and `foo` as the same series; emitting both lost one of the two values at
+    ingestion. Empty values are now dropped before rendering.
+  - *OpenMetrics reserves `_created`.* A counter or histogram may carry an
+    optional `<name>_created` sample, so a gauge named `<name>.created` is a
+    forbidden clash whether or not that sample is emitted. It now counts as a
+    collision in OpenMetrics, and stays legal in classic text, which reserves
+    nothing.
+
+- **OpenMetrics counter family names no longer carry `_total`.** The spec puts
+  that suffix on the SAMPLE, not the family, so `# TYPE foo_total counter`
+  registered the metadata under a name no metric has — Prometheus' UI and
+  metadata API showed none for `foo`, and strict consumers reject it. The
+  `# UNIT` line is emitted too where the name carries a unit suffix, which makes
+  the unit machine-readable rather than only implied by the name.
+
+
+### Changed
+
+- **Span attributes now use the OpenTelemetry names, not lookalikes.** The docs
+  promise "exactly one canonical vocabulary"; three namespaces were not it.
+
+  | Was | Now | Why |
+  |---|---|---|
+  | `enduser.id` / `.type` / `.guard` | `user.id` / `.type` / `.guard` | `enduser.*` was deprecated in semconv 1.27; collector processors and Tempo's user attribution key on `user.id` |
+  | `client.geo.country` / `.region` / `.city` / `.continent.code` | `geo.country.iso_code` / `geo.region.iso_code` / `geo.locality.name` / `geo.continent.code` | `client.geo.*` is Elastic ECS naming; OTel's registry is the flat `geo.*` namespace, so nothing downstream recognised the old keys |
+  | `db.namespace` = the Laravel connection | `laravel.db.connection` | semconv's `db.namespace` is the database/schema name; putting the connection there read as wrong data in Tempo's DB views. The Redis and transaction instrumentations used `db.connection` for the same concept — all three now agree |
+
+  `geo.region.iso_code` is ISO 3166-2 (`US-CA`), built from the country and
+  Cloudflare's `CF-Region-Code`. It previously carried `CF-Region`, which is the
+  region NAME (`California`) — an iso_code attribute holding a name makes every
+  region filter and geo join miss.
+
+  **Upgrade note.** TraceQL queries, dashboards and collector processors keying
+  on the old attribute names must be updated. The bundled Grafana suite is
+  regenerated. Attributes an app supplies itself through `resolveUserUsing()`
+  are untouched — only the names this package emits changed.
+
+
+### Changed
+
 - **`http.server.request.duration` and `http.client.request.duration` are now
   recorded in SECONDS**, on a ladder FINER than semconv's advisory one
   (`0.0005 … 10`, sixteen buckets). Both are stable semconv metrics whose unit the spec fixes to
