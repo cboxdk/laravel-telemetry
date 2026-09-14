@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Metrics\HistogramSample;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -86,9 +88,31 @@ it('reports worker memory as a bounded distribution, not a series per pid', func
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKey('worker.memory.php')
-        ->and($families['worker.memory.php']->samples[0]->labels)->toBe(['queue' => 'default'])
-        ->and($families['worker.memory.php']->samples[0]->labels)->not->toHaveKey('pid');
+    $sample = $families['queue.worker.memory.php']->samples[0];
+
+    expect($families)->toHaveKey('queue.worker.memory.php')
+        ->and($families['queue.worker.memory.php']->type())->toBe(MetricType::Histogram)
+        ->and($sample)->toBeInstanceOf(HistogramSample::class)
+        ->and($sample->labels)->toBe(['queue' => 'default'])
+        ->and($sample->count)->toBe(1)
+        ->and($sample->sum)->toBeGreaterThan(1_000_000);
+
+    // A second job accumulates into the same series rather than minting a new
+    // one. It needs its own Job instance — the worker builds one per attempt,
+    // and completion is latched per attempt so reusing this one counts once.
+    $second = Mockery::mock(Job::class);
+    $second->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $second->shouldReceive('getQueue')->andReturn('default');
+    $second->shouldReceive('attempts')->andReturn(1);
+    $second->shouldReceive('payload')->andReturn([]);
+
+    $events->dispatch(new JobProcessing('redis', $second));
+    $events->dispatch(new JobProcessed('redis', $second));
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families['queue.worker.memory.php']->samples)->toHaveCount(1)
+        ->and($families['queue.worker.memory.php']->samples[0]->count)->toBe(2);
 });
 
 /**

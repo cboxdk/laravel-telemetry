@@ -147,7 +147,8 @@ resolution.
 ```php
 Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
     'geo.country.iso_code' => $request->header('CF-IPCountry'),
-    'geo.region.iso_code'  => $request->header('CF-Region'),
+    // ISO 3166-2, so country + region CODE — CF-Region is the region NAME.
+    'geo.region.iso_code'  => $request->header('CF-IPCountry').'-'.$request->header('CF-Region-Code'),
     'geo.locality.name'    => $request->header('CF-IPCity'),
 ]));
 ```

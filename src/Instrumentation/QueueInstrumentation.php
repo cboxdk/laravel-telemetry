@@ -170,7 +170,7 @@ final class QueueInstrumentation implements ManagesRequestState
 
             // The pid label is unique to this process — retire its series
             // when the worker stops, or every restart leaves a dead
-            // worker.memory.* series in the shared store forever.
+            // queue.worker.memory.* series in the shared store forever.
             $events->listen(WorkerStopping::class, function () {
                 // Last chance to ship anything. On the timeout path Laravel
                 // follows this with posix_kill(SIGKILL), which runs no
@@ -432,12 +432,12 @@ final class QueueInstrumentation implements ManagesRequestState
                 $labels = ['queue' => $queue ?? 'default'];
 
                 $this->telemetry()
-                    ->histogram('worker.memory.php', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker PHP allocator usage after each job', unit: 'By')
+                    ->histogram('queue.worker.memory.php', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker PHP allocator usage after each job', unit: 'By')
                     ->record((float) memory_get_usage(true), $labels);
 
                 if (($rss = ResourceUsage::currentRssBytes()) !== null) {
                     $this->telemetry()
-                        ->histogram('worker.memory.rss', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker resident set size after each job', unit: 'By')
+                        ->histogram('queue.worker.memory.rss', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker resident set size after each job', unit: 'By')
                         ->record((float) $rss, $labels);
                 }
             });

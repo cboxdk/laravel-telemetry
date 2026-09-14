@@ -34,7 +34,7 @@ use Laravel\Horizon\MasterSupervisor;
  * Supervisor/master state (process count, paused) is read from the
  * `Looped` events — Horizon's own heartbeat, roughly once a second — and
  * PUSHED into the shared store (`.set()`), the same "worker self-reports
- * its own live state" pattern as `worker.memory.php` in
+ * its own live state" pattern as `queue.worker.memory.php` in
  * `QueueInstrumentation`. These are pull-shaped values by nature but
  * pushed on purpose: the master/supervisor process is long-running and
  * standalone, so nothing else could evaluate a callback for it later —

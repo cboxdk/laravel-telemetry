@@ -656,7 +656,7 @@
       "targets": [
         {
           "refId": "Q208",
-          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(worker_memory_rss_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{queue}}",
           "datasource": {
             "type": "prometheus",

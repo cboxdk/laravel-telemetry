@@ -615,7 +615,8 @@ class TelemetryManager
      *
      *     Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
      *         'geo.country.iso_code'      => $request->header('CF-IPCountry'),
-     *         'geo.region.iso_code'       => $request->header('CF-Region'),
+     *         // ISO 3166-2: country + region CODE, not CF-Region (a NAME).
+     *         'geo.region.iso_code'       => $request->header('CF-IPCountry').'-'.$request->header('CF-Region-Code'),
      *         'client.address'          => $request->header('CF-Connecting-IP'),
      *     ]));
      *

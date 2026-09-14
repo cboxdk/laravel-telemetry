@@ -194,18 +194,33 @@ final class ScheduleInstrumentation
 
         $summary = (string) $task->getSummaryForDisplay();
 
-        // Drop the quoted binary/artisan path, then the redirection, then
-        // everything after the command name.
+        // Schedule::command() always quotes the artisan path; exec() does not.
+        $isArtisan = preg_match("/^'[^']*' 'artisan' /", $summary) === 1
+            || str_starts_with($summary, "'artisan' ");
+
+        // Drop the quoted binary/artisan path, then the shell redirection.
+        // The redirection is whitespace + an optional fd + '>', NOT any '2':
+        // a `[>2]` class turned `reports:v2:send` into `reports:v`, silently
+        // merging two different commands into one series.
         $summary = (string) preg_replace("/^('[^']*' )+/", '', $summary);
-        $summary = (string) preg_replace('/\s*[>2].*$/', '', $summary);
+        $summary = (string) preg_replace('/\s+\d?>.*$/', '', $summary);
         $summary = trim($summary);
 
-        if ($summary === '') {
-            return 'closure';
+        $name = $summary === '' ? false : strtok($summary, ' ');
+
+        // Only an ARTISAN command name is safe to use. Schedule::command()
+        // always builds its summary as "'<php>' 'artisan' <name> <args>", so
+        // the quoted artisan token is what distinguishes it from
+        // Schedule::exec(), whose summary is an arbitrary shell line. Without
+        // that check, stripping the quoted binary promotes the ARGUMENT:
+        // `'/usr/bin/printf' alice` would have labelled the series `alice`,
+        // and a varying argument is exactly the unbounded case being closed.
+        // exec() tasks collapse to one bucket; give one a description if you
+        // want it apart.
+        if (! $isArtisan || ! is_string($name)) {
+            return $summary === '' ? 'closure' : 'exec';
         }
 
-        $name = strtok($summary, ' ');
-
-        return $name === false ? 'closure' : $name;
+        return $name;
     }
 }

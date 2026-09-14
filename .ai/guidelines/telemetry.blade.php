@@ -55,7 +55,7 @@ Or inline: `Telemetry::contributes('my-domain', fn (\Cbox\Telemetry\Metrics\Regi
 
 ### Operations
 
-- Worker memory leaks: watch `worker_memory_rss_bytes{pid}` (self-reported after every job). For Reverb/Horizon add pgrep patterns to `telemetry.monitor.processes` and schedule `telemetry:monitor --once` every minute.
+- Worker memory leaks: watch the `queue_worker_memory_rss_bytes` histogram by queue (self-reported after every job) — a distribution drifting upward is the leak. It is NOT per-pid: that label was unbounded and outlived every worker the OOM killer took. For Reverb/Horizon add pgrep patterns to `telemetry.monitor.processes` and schedule `telemetry:monitor --once` every minute.
 - Verify any setup change with `php artisan telemetry:doctor` (store round trip, exporter reachability, config warnings).
 - CPU profiling: `instrument.profiling` (default on) auto-activates with `ext-excimer` installed — a `profile.captured` event (top functions by sample count) for requests/jobs slower than `profiling.min_duration_ms`. No dependency, no config needed beyond installing the extension.
 - Prometheus scrape endpoint: `GET /telemetry/metrics` (config `telemetry.prometheus`). Histogram observations made inside a sampled trace carry that trace's id as an exemplar — no config toggle, follows `traces.sample_rate` — but it only renders when the scraper sends `Accept: application/openmetrics-text` (classic Prometheus text format has no exemplar grammar).

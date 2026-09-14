@@ -29,9 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catch a leaking worker leaked a permanent series precisely when the worker
   died of the leak, each frozen at its last value with no TTL: a worker
   recycling every 90s across 20 queues left roughly 1,900 dead series a day.
-  They are now HISTOGRAMS labelled by queue. A distribution that drifts upward
-  over time is the same leak signal without needing to know which process
-  asked. The bundled leak-curve panel is rewritten as a p95 by queue.
+  They are now HISTOGRAMS named `queue.worker.memory.{php,rss}` and labelled by
+  queue. A distribution drifting upward over time is the leak signal; it is a
+  weaker one than a per-pid line, and honestly so — one leaking worker among
+  many can grow without moving p95, and the doubling buckets hide growth within
+  a boundary. The trade is a signal that still works against one that stopped
+  being trustworthy the moment a worker died badly. The bundled leak-curve panel
+  is rewritten as a p95 by queue.
+
+  They are RENAMED rather than changed in place: `collect()` returns gauges
+  before histograms, so a stale v1 `worker.memory.*` gauge family — which
+  `--wipe` does not remove, since it deliberately preserves meta and indexes —
+  would have won the renderer's type conflict and hidden the new histogram
+  indefinitely. The v1 series linger until the store is reset; nothing writes
+  them any more.
 
 
 ### Fixed
@@ -54,13 +65,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *Duplicate samples.* Merging two same-name families concatenated their
     samples without deduplicating labelsets, so a stored push gauge and a
     cross-process observable sharing a name and a labelset produced two
-    identical lines. One sample per labelset now wins.
+    identical lines. One sample per labelset now wins. (Prometheus drops the
+    duplicate and continues rather than failing the scrape, so this one cost a
+    silently lost value — the family and label cases above take the target
+    down.)
 
 - **OpenMetrics counter family names no longer carry `_total`.** The spec puts
   that suffix on the SAMPLE, not the family, so `# TYPE foo_total counter`
   registered the metadata under a name no metric has — Prometheus' UI and
   metadata API showed none for `foo`, and strict consumers reject it. The
-  required `# UNIT` line is emitted too, where the name carries a unit suffix.
+  `# UNIT` line is emitted too where the name carries a unit suffix, which makes
+  the unit machine-readable rather than only implied by the name.
 
 
 ### Changed

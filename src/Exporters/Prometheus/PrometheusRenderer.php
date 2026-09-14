@@ -65,8 +65,9 @@ final class PrometheusRenderer
             $output[] = '# TYPE '.$familyName.' '.$family->type()->value;
 
             if ($openMetrics && $family->definition->unit !== '' && $this->unitSuffix($family->definition->unit) !== '') {
-                // OpenMetrics requires the UNIT metadata line when the name
-                // carries a unit suffix, and it must agree with that suffix.
+                // OpenMetrics allows the UNIT metadata line and requires it to
+                // agree with the name's suffix when present. Emitting it makes
+                // the unit machine-readable instead of only living in the name.
                 $output[] = '# UNIT '.$familyName.' '.ltrim($this->unitSuffix($family->definition->unit), '_');
             }
 
@@ -172,8 +173,10 @@ final class PrometheusRenderer
      *
      * Concatenating them meant a stored push gauge and a cross-process
      * observable sharing a name AND a labelset produced two identical series
-     * lines — `duplicate sample`, and again the whole scrape fails rather than
-     * the one metric.
+     * lines. Prometheus rejects the duplicate sample and carries on rather
+     * than failing the scrape, so this one costs a silently dropped value, not
+     * the target — unlike the duplicate FAMILY and LABEL cases above, which do
+     * take everything down.
      *
      * @param  list<Sample|HistogramSample>  $existing
      * @param  list<Sample|HistogramSample>  $incoming

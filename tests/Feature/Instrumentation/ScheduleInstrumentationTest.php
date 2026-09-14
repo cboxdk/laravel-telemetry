@@ -117,6 +117,19 @@ it('labels a scheduled task by its command name, not its arguments', function ()
     $task->summary = "'/usr/bin/php' 'artisan' tenant:sync 48213 > '/dev/null' 2>&1";
     expect($name($task))->toBe('tenant:sync');
 
+    // A `2` inside the command name is not a redirection. Treating it as one
+    // silently merged two different commands into one series.
+    $task->summary = "'/usr/bin/php' 'artisan' reports:v2:send --date=2026-09-14 > '/dev/null' 2>&1";
+    expect($name($task))->toBe('reports:v2:send');
+
+    // exec() summaries are arbitrary shell lines: stripping the quoted binary
+    // promotes the ARGUMENT, and a varying argument is the unbounded case.
+    $task->summary = "'/usr/bin/printf' alice";
+    expect($name($task))->toBe('exec');
+
+    $task->summary = '/srv/tenants/acme/run.sh --tenant=acme';
+    expect($name($task))->toBe('exec');
+
     // A description the app set is the app's own cardinality, so it wins.
     $task->description = 'nightly reconciliation';
     expect($name($task))->toBe('nightly reconciliation');

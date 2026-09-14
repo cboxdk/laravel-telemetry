@@ -321,7 +321,7 @@ Only valid v3 source maps within the size limit are stored. See
 
 `telemetry:monitor --once` from the scheduler (cron mode) or without
 `--once` under supervisor (daemon mode). Queue workers additionally
-self-report `worker.memory.{php,rss}{queue,pid} (By)` after every job —
+self-report `queue.worker.memory.{php,rss}{queue} (By)` as a histogram after every job —
 no monitor required for worker leak tracking.
 
 ## Profiling (ext-excimer)

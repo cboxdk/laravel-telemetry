@@ -36,7 +36,7 @@ use Laravel\Reverb\Protocols\Pusher\MetricsHandler;
  * private/presence) and the operator-configured Reverb app id are used.
  *
  * Message volume can be far higher than HTTP request volume (typing
- * indicators, cursor positions) — same as `worker.memory.php`, the write
+ * indicators, cursor positions) — same as `queue.worker.memory.php`, the write
  * is a single aggregated store increment, not a per-message record, so
  * this stays cheap regardless of rate.
  *

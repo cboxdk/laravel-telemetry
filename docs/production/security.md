@@ -100,7 +100,8 @@ unbounded values. The bundled instrumentation keeps labels bounded
 (route patterns, class basenames, ability names, outcomes). Two labels
 are bounded-but-churning and worth knowing about on large fleets:
 
-- `worker.memory.*{pid}` mints a new series per worker process; workers
+- `queue.worker.memory.*` is a histogram by queue, so a recycling worker adds no
+  series. It was a gauge per pid until 2.0; workers
   recycled often (Horizon `--max-jobs`, deploys) leave stale gauges in
   the store until swept. Aggregate per queue if that matters.
 - `queue.jobs.dispatched{job.name}` uses the queued job's display name.

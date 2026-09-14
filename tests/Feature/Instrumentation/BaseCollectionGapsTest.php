@@ -229,9 +229,9 @@ it('self-reports worker memory after each job for leak tracking', function () {
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKey('worker.memory.php');
+    expect($families)->toHaveKey('queue.worker.memory.php');
 
-    $sample = $families['worker.memory.php']->samples[0];
+    $sample = $families['queue.worker.memory.php']->samples[0];
 
     // A distribution by queue, not a gauge per pid: the pid was unbounded and
     // its series were retired only on a graceful stop, which a worker killed by
