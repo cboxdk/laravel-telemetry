@@ -768,8 +768,8 @@
       "targets": [
         {
           "refId": "Q102",
-          "expr": "worker_memory_rss_bytes{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}",
-          "legendFormat": "rss pid {{pid}}",
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(worker_memory_rss_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
+          "legendFormat": "rss p95 {{queue}}",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"
@@ -777,8 +777,8 @@
         },
         {
           "refId": "Q103",
-          "expr": "worker_memory_php_bytes{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}",
-          "legendFormat": "php pid {{pid}}",
+          "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(worker_memory_php_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
+          "legendFormat": "php p95 {{queue}}",
           "datasource": {
             "type": "prometheus",
             "uid": "prometheus"

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Two metric labels that anyone could grow without limit are bounded.**
+
+  `schedule.task.duration`, `schedule.tasks.*` — the `task` label was
+  `getSummaryForDisplay()`, which without an explicit description is the whole
+  built command line: every argument, plus the output redirection. The
+  arguments are exactly what varies, so
+  `$schedule->command('reports:send --date='.now()->toDateString())` minted a
+  new label value EVERY DAY, and the per-tenant pattern
+  `foreach ($tenants as $t) { $schedule->command("tenant:sync {$t->id}") }`
+  minted one per tenant — 15 histogram series plus three counters each, kept
+  forever, with label values hundreds of bytes long. The label is now an
+  explicit description if the app set one, otherwise the artisan command NAME
+  with its arguments dropped.
+
+  `worker.memory.php` / `worker.memory.rss` were GAUGES labelled by `pid`,
+  retired only on `WorkerStopping` — which a worker killed by the OOM killer,
+  SIGKILL or a container eviction never dispatches. So the metric designed to
+  catch a leaking worker leaked a permanent series precisely when the worker
+  died of the leak, each frozen at its last value with no TTL: a worker
+  recycling every 90s across 20 queues left roughly 1,900 dead series a day.
+  They are now HISTOGRAMS labelled by queue. A distribution that drifts upward
+  over time is the same leak signal without needing to know which process
+  asked. The bundled leak-curve panel is rewritten as a p95 by queue.
+
+
 ### Fixed
 
 - **Three ways the Prometheus renderer could fail the entire scrape.** A parse

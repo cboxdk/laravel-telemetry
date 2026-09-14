@@ -233,9 +233,12 @@ it('self-reports worker memory after each job for leak tracking', function () {
 
     $sample = $families['worker.memory.php']->samples[0];
 
-    expect($sample->value)->toBeGreaterThan(1_000_000)
-        ->and($sample->labels['queue'])->toBe('default')
-        ->and($sample->labels['pid'])->toBe((string) getmypid());
+    // A distribution by queue, not a gauge per pid: the pid was unbounded and
+    // its series were retired only on a graceful stop, which a worker killed by
+    // the OOM killer never reaches.
+    expect($sample->sum)->toBeGreaterThan(1_000_000)
+        ->and($sample->count)->toBe(1)
+        ->and($sample->labels)->toBe(['queue' => 'default']);
 });
 
 it('samples host and process metrics via telemetry:monitor --once', function () {

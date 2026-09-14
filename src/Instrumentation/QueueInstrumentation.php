@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
-use Cbox\Telemetry\Metrics\MetricDefinition;
-use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
@@ -52,9 +50,6 @@ final class QueueInstrumentation implements ManagesRequestState
 
     /** @var array<int, CpuProfiler> keyed by span object id */
     private array $jobProfiles = [];
-
-    /** @var array<string, array<string, string>> worker gauge labelsets written by THIS process, keyed by encoded labels */
-    private array $workerGaugeLabels = [];
 
     public function __construct(private readonly Container $container)
     {
@@ -177,8 +172,6 @@ final class QueueInstrumentation implements ManagesRequestState
             // when the worker stops, or every restart leaves a dead
             // worker.memory.* series in the shared store forever.
             $events->listen(WorkerStopping::class, function () {
-                FailSafe::guard(fn () => $this->forgetWorkerGauges());
-
                 // Last chance to ship anything. On the timeout path Laravel
                 // follows this with posix_kill(SIGKILL), which runs no
                 // shutdown function and no terminating callback — so without
@@ -422,21 +415,30 @@ final class QueueInstrumentation implements ManagesRequestState
         });
 
         if (! $sync) {
-            // Worker self-report: the process' CURRENT memory after each
-            // job. A line that climbs job after job IS the memory leak —
+            // Worker self-report: the process' CURRENT memory after each job.
+            // A distribution that drifts upward over time IS the memory leak —
             // no daemon required, the worker measures itself.
+            //
+            // A HISTOGRAM by queue, not a gauge by pid. The pid was an
+            // unbounded label whose series were retired only on WorkerStopping,
+            // which a worker killed by the OOM killer or SIGKILL never
+            // dispatches — so the gauge designed to catch a leaking worker
+            // leaked a permanent series precisely when the worker died of the
+            // leak, each frozen at its last value with no TTL. A worker
+            // recycling every 90s across 20 queues left ~1,900 dead series a
+            // day. The distribution answers the same question without needing
+            // to know which process asked it.
             FailSafe::guard(function () use ($queue) {
-                $labels = ['queue' => $queue ?? 'default', 'pid' => (string) getmypid()];
-                $this->workerGaugeLabels[implode('|', $labels)] = $labels;
+                $labels = ['queue' => $queue ?? 'default'];
 
                 $this->telemetry()
-                    ->gauge('worker.memory.php', description: 'Worker PHP allocator usage after each job', unit: 'By')
-                    ->set((float) memory_get_usage(true), $labels);
+                    ->histogram('worker.memory.php', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker PHP allocator usage after each job', unit: 'By')
+                    ->record((float) memory_get_usage(true), $labels);
 
                 if (($rss = ResourceUsage::currentRssBytes()) !== null) {
                     $this->telemetry()
-                        ->gauge('worker.memory.rss', description: 'Worker resident set size after each job', unit: 'By')
-                        ->set((float) $rss, $labels);
+                        ->histogram('worker.memory.rss', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker resident set size after each job', unit: 'By')
+                        ->record((float) $rss, $labels);
                 }
             });
 
@@ -450,27 +452,6 @@ final class QueueInstrumentation implements ManagesRequestState
     private function currentJobSpan(): ?Span
     {
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
-    }
-
-    /**
-     * Retire every pid-labeled worker gauge series this process wrote.
-     * The pid is unique to this process, so no other live worker can be
-     * writing the same labelsets.
-     */
-    private function forgetWorkerGauges(): void
-    {
-        if ($this->workerGaugeLabels === []) {
-            return;
-        }
-
-        $store = $this->telemetry()->registry()->store();
-
-        foreach ($this->workerGaugeLabels as $labels) {
-            $store->forgetSeries(new MetricDefinition('worker.memory.php', MetricType::Gauge, unit: 'By'), $labels);
-            $store->forgetSeries(new MetricDefinition('worker.memory.rss', MetricType::Gauge, unit: 'By'), $labels);
-        }
-
-        $this->workerGaugeLabels = [];
     }
 
     private function reportProfile(CpuProfiler $profile, float $durationMs, string $job, string $queue): void

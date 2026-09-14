@@ -159,15 +159,53 @@ final class ScheduleInstrumentation
         $this->telemetry()->resetContext();
     }
 
+    /**
+     * A BOUNDED name for the task — this is a metric label.
+     *
+     * getSummaryForDisplay() returns the description if one is set, and
+     * otherwise the whole built command line: every argument, plus the output
+     * redirection, plus a wrapping subshell for a background task. The old code
+     * stripped the leading quoted binary and kept the rest, so the label
+     * carried the arguments — and the arguments are exactly what varies.
+     *
+     * `$schedule->command('reports:send --date='.now()->toDateString())` minted
+     * a new label value EVERY DAY; the per-tenant pattern
+     * `foreach ($tenants as $t) { $schedule->command("tenant:sync {$t->id}") }`
+     * minted one per tenant. Each is 15 histogram series plus three counters,
+     * kept forever — a scheduler over 10 000 tenants produced 180 000 series
+     * from one file, with label values hundreds of bytes long.
+     *
+     * An explicit description wins, because the app chose it and it is
+     * therefore the app's own cardinality. Otherwise the label is the artisan
+     * command NAME with its arguments dropped, which is bounded by the number
+     * of commands that exist.
+     */
     private function taskName(object $task): string
     {
-        if (method_exists($task, 'getSummaryForDisplay')) {
-            $summary = (string) $task->getSummaryForDisplay();
+        $description = $task->description ?? null;
 
-            // Strip the binary path noise from "artisan ..." commands.
-            return (string) preg_replace("/^('[^']+' )+/", '', $summary);
+        if (is_string($description) && $description !== '') {
+            return $description;
         }
 
-        return 'closure';
+        if (! method_exists($task, 'getSummaryForDisplay')) {
+            return 'closure';
+        }
+
+        $summary = (string) $task->getSummaryForDisplay();
+
+        // Drop the quoted binary/artisan path, then the redirection, then
+        // everything after the command name.
+        $summary = (string) preg_replace("/^('[^']*' )+/", '', $summary);
+        $summary = (string) preg_replace('/\s*[>2].*$/', '', $summary);
+        $summary = trim($summary);
+
+        if ($summary === '') {
+            return 'closure';
+        }
+
+        $name = strtok($summary, ' ');
+
+        return $name === false ? 'closure' : $name;
     }
 }

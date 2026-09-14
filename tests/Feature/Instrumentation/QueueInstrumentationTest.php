@@ -67,7 +67,11 @@ it('counts processed jobs', function () {
         ->and($families['queue.jobs.processed']->samples[0]->value)->toBe(1.0);
 });
 
-it('retires pid-labeled worker gauges when the worker stops', function () {
+it('reports worker memory as a bounded distribution, not a series per pid', function () {
+    // The pid was an unbounded label whose series were retired only on
+    // WorkerStopping — which a worker killed by the OOM killer never
+    // dispatches. So the gauge designed to catch a leaking worker leaked a
+    // permanent series precisely when the worker died of the leak.
     app('queue');
 
     $job = Mockery::mock(Job::class);
@@ -83,15 +87,8 @@ it('retires pid-labeled worker gauges when the worker stops', function () {
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
     expect($families)->toHaveKey('worker.memory.php')
-        ->and($families['worker.memory.php']->samples[0]->labels['pid'])->toBe((string) getmypid());
-
-    // The worker recycles — its pid series must not outlive the process.
-    $events->dispatch(new WorkerStopping);
-
-    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
-
-    expect($families)->not->toHaveKey('worker.memory.php')
-        ->and($families)->not->toHaveKey('worker.memory.rss');
+        ->and($families['worker.memory.php']->samples[0]->labels)->toBe(['queue' => 'default'])
+        ->and($families['worker.memory.php']->samples[0]->labels)->not->toHaveKey('pid');
 });
 
 /**
