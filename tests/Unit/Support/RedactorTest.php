@@ -119,3 +119,16 @@ it('redacts sensitive keys regardless of value type', function () {
         ->and($out['order.total'])->toBe(999)
         ->and($out['http.status'])->toBe(200);
 });
+
+it('keeps tracking the package lists when an app appends its own', function () {
+    // Spreading rather than replacing is what the config comment tells users
+    // to do; this pins that it works, so an app with a custom pattern still
+    // receives ours.
+    $redactor = Redactor::fromConfig([
+        'enabled' => true,
+        'patterns' => [...Redactor::defaultPatterns(), '/\bCPR-\d+/' => '[REDACTED:cpr]'],
+    ]);
+
+    expect($redactor->value('note', 'CPR-123456 and ?token=SECRET'))
+        ->toBe('[REDACTED:cpr] and ?token=[REDACTED]');
+});

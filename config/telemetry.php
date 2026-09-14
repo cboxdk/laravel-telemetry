@@ -313,11 +313,6 @@ return [
     'redaction' => [
         'enabled' => env('TELEMETRY_REDACTION', true),
 
-        // The lists below mirror the built-in defaults exactly
-        // (Redactor::defaultKeys() / defaultPatterns() / defaultSafeKeys())
-        // — append your own entries, or remove the whole key to keep
-        // tracking the package's built-ins across upgrades.
-
         // The built-in lists, BY REFERENCE rather than by copy.
         //
         // Publishing this file used to freeze them: fromConfig() prefers what

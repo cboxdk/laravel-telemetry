@@ -15,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\InteractsWithQueue;
@@ -185,7 +186,7 @@ it('hands a failed job\'s dimensions to whoever reports THAT exception', functio
     // baggage header in this worker process.
     expect(Telemetry::contextAttributes())->toBe([]);
 
-    expect(Telemetry::takeFailureContext($failure))->toBe(['tenant' => 'acme']);
+    expect(Telemetry::failureContextFor($failure))->toBe(['tenant' => 'acme']);
 });
 
 it('does not give one failure\'s dimensions to a different exception', function () {
@@ -211,8 +212,32 @@ it('does not give one failure\'s dimensions to a different exception', function 
 
     $unrelated = new RuntimeException('a notification blew up');
 
-    expect(Telemetry::takeFailureContext($unrelated))->toBe([])
-        ->and(Telemetry::takeFailureContext($failure))->toBe(['tenant' => 'acme']);
+    expect(Telemetry::failureContextFor($unrelated))->toBe([])
+        ->and(Telemetry::failureContextFor($failure))->toBe(['tenant' => 'acme']);
+});
+
+it('does the same for an attempt released for retry', function () {
+    // Released attempts are reported exactly like terminal ones, so with the
+    // default tries > 1 every attempt but the last was unattributable. The
+    // event does carry the throwable — an earlier comment claiming otherwise
+    // was wrong, and cost this path its fix for a commit.
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\RetryingJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    $events = app('events');
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    Telemetry::context(['tenant' => 'acme']);
+
+    $released = new RuntimeException('boom, will retry');
+    $events->dispatch(new JobReleasedAfterException('redis', $job, 0, $released));
+
+    expect(Telemetry::failureContextFor($released))->toBe(['tenant' => 'acme']);
 });
 
 it('needs nothing to clean the snapshot up', function () {

@@ -54,7 +54,15 @@ final class TraceRequest
         'x-api-key', 'x-csrf-token', 'x-xsrf-token', 'php-auth-user', 'php-auth-pw', 'php-auth-digest',
     ];
 
-    /** Query parameters whose values are redacted in url.query. */
+    /**
+     * Query parameters blanked in url.query at CAPTURE time.
+     *
+     * A first pass, not the thorough one: Redactor's default patterns catch
+     * prefixes, array syntax, encoded names and the same credential wherever
+     * else it appears — referer, exception messages, log records — because
+     * every attribute value passes through it on the way out. This list keeps
+     * the obvious cases out of the span while it is still in memory.
+     */
     private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
 
     public function __construct(private readonly TelemetryManager $telemetry) {}

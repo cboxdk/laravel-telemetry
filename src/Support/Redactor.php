@@ -101,12 +101,15 @@ final class Redactor
             // this way — `code`, `state` and `key` are ordinary parameters as
             // often as they are secrets, and redacting `postal_code` protects
             // nothing while destroying real telemetry.
-            '/((?:^|[?&;])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[^=&;\s]{0,48}=)[^&;\s]+/i' => '$1REDACTED',
-            // The ambiguous words, matched EXACTLY and never with a prefix.
-            // `?code=` on an OAuth callback is an authorization code and the
-            // reason this list exists; `postal_code=` is an address. The
-            // boundary is what tells them apart.
-            '/((?:^|[?&;])(?:code|state|key|auth)=)[^&;\s]+/i' => '$1REDACTED',
+            '/((?:^|[?&;])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
+            // The ambiguous words, matched EXACTLY, never with a prefix, and
+            // only inside something that is actually a query — after `?`, `&`
+            // or `;`, never at the start of a value. `?code=` on an OAuth
+            // callback is an authorization code and the reason this list
+            // exists; `postal_code=` is an address, and a `cache.key`
+            // attribute whose whole value is `key=abc` is not a credential at
+            // all.
+            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
         ];
     }
 

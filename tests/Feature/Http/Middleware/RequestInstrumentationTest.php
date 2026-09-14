@@ -330,7 +330,11 @@ it('captures domain, client, protocol and query on the request span', function (
         ->and($attributes['user_agent.original'])->toBe('DemoAgent/1.0')
         ->and($attributes['network.protocol.name'])->toBe('http')
         ->and($attributes['network.protocol.version'])->toBe('1.1')
-        ->and($attributes['url.query'])->toBe('page=2&token=REDACTED&per_page=50');
+        // Two passes reach this: the middleware blanks known parameter names
+        // at capture, and Redactor's patterns do the thorough job at export —
+        // encoded names, prefixes, array syntax, and the same credential
+        // wherever else it turns up. The exported spelling is the Redactor's.
+        ->and($attributes['url.query'])->toBe('page=2&token=[REDACTED]&per_page=50');
 });
 
 it('captures allowlisted headers but never credentials or session material', function () {

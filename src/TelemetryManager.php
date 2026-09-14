@@ -346,12 +346,12 @@ class TelemetryManager
 
     /**
      * The snapshot for this throwable, if one was taken. Nothing has to clear
-     * it: the WeakMap holds no reference of its own, so an entry dies with the
-     * exception it describes.
+     * it — the WeakMap holds no reference of its own, so an entry dies with
+     * the exception it describes, which is why this reads rather than takes.
      *
      * @return array<string, scalar|null>
      */
-    public function takeFailureContext(Throwable $e): array
+    public function failureContextFor(Throwable $e): array
     {
         $context = $this->failureContext[$e] ?? [];
 

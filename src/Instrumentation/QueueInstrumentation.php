@@ -334,13 +334,12 @@ final class QueueInstrumentation implements ManagesRequestState
 
         // A released attempt is reported exactly like a terminal one — the
         // worker rethrows and the handler runs after this teardown — so with
-        // tries > 1 every attempt but the last produced an unattributable
-        // error record.
-        //
-        // The event carries no throwable, so there is nothing to key a
-        // snapshot to. Laravel does not hand the exception to this event; the
-        // job's own span already carries it, and the released attempt is
-        // covered by the JobFailed path when it eventually gives up.
+        // the default tries > 1 every attempt but the last produced an
+        // unattributable error record. The event carries the throwable that
+        // caused the release, which is the one being reported.
+        if ($event->exception instanceof Throwable) {
+            $this->rememberFailureContext($event->exception);
+        }
 
         $this->completeJob(
             job: $event->job->resolveName(),
