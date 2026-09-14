@@ -39,7 +39,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, service_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, service_name)",
           "refId": "service"
         },
         "includeAll": true,
@@ -59,7 +59,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, deployment_environment_name)",
           "refId": "environment"
         },
         "includeAll": true,
@@ -79,7 +79,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, host_name)",
           "refId": "host"
         },
         "includeAll": true,
@@ -123,7 +123,7 @@
       "targets": [
         {
           "refId": "Q169",
-          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
+          "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -176,7 +176,7 @@
       "targets": [
         {
           "refId": "Q171",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -186,7 +186,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
@@ -197,7 +197,7 @@
               },
               {
                 "color": "orange",
-                "value": 2000
+                "value": 2.0
               }
             ]
           }
@@ -233,7 +233,7 @@
       "targets": [
         {
           "refId": "Q173",
-          "expr": "sum(rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"[45]..\"}[5m])) * 60",
+          "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"[45]..\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -347,7 +347,7 @@
       "targets": [
         {
           "refId": "Q176",
-          "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{server_address}}",
           "datasource": {
             "type": "prometheus",
@@ -357,7 +357,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "min": 0,
           "custom": {
             "drawStyle": "line",
@@ -403,7 +403,7 @@
       "targets": [
         {
           "refId": "Q178",
-          "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
+          "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{server_address}} {{http_response_status_code}}",
           "datasource": {
             "type": "prometheus",

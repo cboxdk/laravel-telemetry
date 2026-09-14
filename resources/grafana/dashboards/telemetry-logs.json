@@ -39,7 +39,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, service_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, service_name)",
           "refId": "service"
         },
         "includeAll": true,
@@ -59,7 +59,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, deployment_environment_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, deployment_environment_name)",
           "refId": "environment"
         },
         "includeAll": true,
@@ -79,7 +79,7 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(http_server_request_duration_milliseconds_count, host_name)",
+          "query": "label_values(http_server_request_duration_seconds_count, host_name)",
           "refId": "host"
         },
         "includeAll": true,

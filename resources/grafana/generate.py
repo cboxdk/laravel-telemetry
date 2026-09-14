@@ -21,7 +21,7 @@ PROM = {"type": "prometheus", "uid": "prometheus"}
 TEMPO = {"type": "tempo", "uid": "tempo"}
 LOKI = {"type": "loki", "uid": "loki"}
 
-REQ = "http_server_request_duration_milliseconds"
+REQ = "http_server_request_duration_seconds"
 MEM = "http_server_memory_peak_bytes"
 CPU = "http_server_cpu_time_milliseconds"
 SVC = 'service_name=~"$service",deployment_environment_name=~"$environment",host_name=~"$host"'
@@ -257,7 +257,7 @@ D = {}
 D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
     row("Activity", 0),
     stat("Requests / min", f'sum(rate({REQ}_count{{{SVC}}}[5m])) * 60', 0, 1, w=3, unit="reqpm", decimals=0),
-    stat("p95 latency", f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{SVC}}}[5m])))', 3, 1, w=3, unit="ms", thresholds=ok_at([{"color": "orange", "value": 500}, {"color": "red", "value": 2000}])),
+    stat("p95 latency", f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{SVC}}}[5m])))', 3, 1, w=3, unit="s", thresholds=ok_at([{"color": "orange", "value": 0.5}, {"color": "red", "value": 2.0}])),
     stat("Error rate", f'100 * sum(rate({REQ}_count{{{SVC},http_response_status_code=~"5.."}}[5m])) / sum(rate({REQ}_count{{{SVC}}}[5m]))', 6, 1, w=3, unit="percent", bg=True, thresholds=ok_at([{"color": "orange", "value": 1}, {"color": "red", "value": 5}])),
     stat("Exceptions / h", f'sum(increase(exceptions_reported_total{{{SVC}}}[1h]))', 9, 1, w=3, decimals=0, thresholds=warn_at(10, "orange"), zero=True),
     stat("Jobs ok / min", f'sum(rate(queue_jobs_processed_total{{{SVC}}}[5m])) * 60', 12, 1, w=3, decimals=0),
@@ -283,7 +283,7 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
         target(f'sum(increase(schedule_tasks_skipped_total{{{SVC}}}[1h]))', 'skipped'),
     ], 16, 14, w=8, colors=OUTCOME_COLORS),
     row("Drill-down", 22),
-    table("Routes by p95 — click a route to drill down", f'histogram_quantile(0.95, sum by (le, http_route) (rate({REQ}_bucket{{{SVC}}}[10m]))) > 0', 0, 23, unit="ms",
+    table("Routes by p95 — click a route to drill down", f'histogram_quantile(0.95, sum by (le, http_route) (rate({REQ}_bucket{{{SVC}}}[10m]))) > 0', 0, 23, unit="s",
           field_link=("http_route", LINK_REQ, "Open in Requests"), gauge_max=2000),
     table("Jobs by p95 — click a job to drill down", f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{{{SVC}}}[10m]))) > 0', 12, 23, unit="ms",
           field_link=("job_name", LINK_JOB, "Open in Jobs"), gauge_max=5000),
@@ -299,9 +299,9 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
 RF = f'{SVC},http_route=~"$route",http_request_method=~"$method",http_response_status_code=~"$status",server_address=~"$domain"'
 D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     stat("Requests / min", f'sum(rate({REQ}_count{{{RF}}}[5m])) * 60', 0, 0, unit="reqpm", decimals=0),
-    stat("p50", f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 4, 0, unit="ms"),
-    stat("p95", f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 8, 0, unit="ms", thresholds=ok_at([{"color": "orange", "value": 500}, {"color": "red", "value": 2000}])),
-    stat("p99", f'histogram_quantile(0.99, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 12, 0, unit="ms"),
+    stat("p50", f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 4, 0, unit="s"),
+    stat("p95", f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 8, 0, unit="s", thresholds=ok_at([{"color": "orange", "value": 0.5}, {"color": "red", "value": 2.0}])),
+    stat("p99", f'histogram_quantile(0.99, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 12, 0, unit="s"),
     stat("p95 memory", f'histogram_quantile(0.95, sum by (le) (rate({MEM}_bucket{{{RF}}}[10m])))', 16, 0, unit="bytes"),
     stat("p95 CPU", f'histogram_quantile(0.95, sum by (le) (rate({CPU}_bucket{{{RF}}}[10m])))', 20, 0, unit="ms"),
     row("Traffic & latency", 4),
@@ -434,12 +434,12 @@ D["cache"] = dashboard("cbox-tel-cache", "Telemetry / Cache", [
 
 # ── 9 · Outgoing Requests ───────────────────────────────────────────
 D["outgoing"] = dashboard("cbox-tel-outgoing", "Telemetry / Outgoing Requests", [
-    stat("Requests / min", f'sum(rate(http_client_request_duration_milliseconds_count{{{SVC}}}[5m])) * 60', 0, 0, w=6, unit="reqpm", decimals=0),
-    stat("p95 latency", f'histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_milliseconds_bucket{{{SVC}}}[5m])))', 6, 0, w=6, unit="ms", thresholds=warn_at(2000, "orange")),
-    stat("4xx+5xx / min", f'sum(rate(http_client_request_duration_milliseconds_count{{{SVC},http_response_status_code=~"[45].."}}[5m])) * 60', 12, 0, w=6, thresholds=warn_at(1, "orange")),
+    stat("Requests / min", f'sum(rate(http_client_request_duration_seconds_count{{{SVC}}}[5m])) * 60', 0, 0, w=6, unit="reqpm", decimals=0),
+    stat("p95 latency", f'histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_seconds_bucket{{{SVC}}}[5m])))', 6, 0, w=6, unit="s", thresholds=warn_at(2.0, "orange")),
+    stat("4xx+5xx / min", f'sum(rate(http_client_request_duration_seconds_count{{{SVC},http_response_status_code=~"[45].."}}[5m])) * 60', 12, 0, w=6, thresholds=warn_at(1, "orange")),
     stat("Connection failures / h", f'sum(increase(http_client_connection_failures_total{{{SVC}}}[1h]))', 18, 0, w=6, bg=True, decimals=0, thresholds=warn_at(1), zero=True),
-    timeseries("p95 by host", [target(f'histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_milliseconds_bucket{{{SVC}}}[$__rate_interval])))', '{{server_address}}')], 0, 4, unit="ms"),
-    timeseries("Rate by host & status", [target(f'sum by (server_address, http_response_status_code) (rate(http_client_request_duration_milliseconds_count{{{SVC}}}[$__rate_interval])) * 60', '{{server_address}} {{http_response_status_code}}')], 12, 4, unit="reqpm"),
+    timeseries("p95 by host", [target(f'histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket{{{SVC}}}[$__rate_interval])))', '{{server_address}}')], 0, 4, unit="s"),
+    timeseries("Rate by host & status", [target(f'sum by (server_address, http_response_status_code) (rate(http_client_request_duration_seconds_count{{{SVC}}}[$__rate_interval])) * 60', '{{server_address}} {{http_response_status_code}}')], 12, 4, unit="reqpm"),
     traces("Outgoing call spans", f'{{{TSVC} && kind=client && span.server.address != ""}} | select(span.server.address, span.url.path, span.http.response.status_code)', 0, 12, table_type="spans"),
 ])
 

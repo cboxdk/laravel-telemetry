@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`http.server.request.duration` and `http.client.request.duration` are now
+  recorded in SECONDS**, on a ladder FINER than semconv's advisory one
+  (`0.0005 … 10`, sixteen buckets). Both are stable semconv metrics whose unit the spec fixes to
+  seconds; emitting them in milliseconds meant every stock dashboard and alert
+  looking for `http_server_request_duration_seconds_bucket` found nothing,
+  because this package produced `…_milliseconds_bucket` — and a collector fed
+  these alongside any other OTel SDK saw one metric name arrive with two
+  different units, which the Prometheus/Mimir OTLP receiver treats as a
+  conflict. Reusing a semconv name with a non-semconv unit is the worst of both
+  worlds.
+
+  The unit is fixed by the spec; the buckets are only advisory. Semconv's
+  advisory ladder starts at 5ms, which is COARSER at the low end than the
+  millisecond ladder it replaces — so the buckets go finer instead, down to
+  0.5ms. Conformance costs no resolution.
+
+  **Upgrade note — this renames two Prometheus series.** Panels and alerts on
+  `http_server_request_duration_milliseconds_*` or
+  `http_client_request_duration_milliseconds_*` must move to
+  `…_seconds_*`, and any threshold expressed in milliseconds must be divided by
+  1000. Historical data keeps the old series name; the two do not join.
+
+  Metrics whose names the spec does NOT define — `queue.job.duration`,
+  `command.duration`, `schedule.task.duration`, `queue.job.wait_time`,
+  `telemetry.export.duration`, the `screen.*` pair — are unchanged and stay in
+  milliseconds. The unit travels in the Prometheus name either way, and there is
+  no shared vocabulary to conform to.
+
+
 ### Fixed
 
 - **Client spans are no longer left open when the framework hands back a
