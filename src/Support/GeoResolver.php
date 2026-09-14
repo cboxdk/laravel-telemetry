@@ -41,7 +41,7 @@ final class GeoResolver
             $record = $reader->country($ip); // @phpstan-ignore-line optional dep
 
             return array_filter([
-                'geo.country_iso_code' => $record->country->isoCode,
+                'geo.country.iso_code' => $record->country->isoCode,
                 'geo.continent.code' => $record->continent->code,
             ], static fn ($v): bool => $v !== null && $v !== '');
         } catch (\Throwable) {

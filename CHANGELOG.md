@@ -44,8 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | Was | Now | Why |
   |---|---|---|
   | `enduser.id` / `.type` / `.guard` | `user.id` / `.type` / `.guard` | `enduser.*` was deprecated in semconv 1.27; collector processors and Tempo's user attribution key on `user.id` |
-  | `client.geo.country` / `.region` / `.city` / `.continent.code` | `geo.country_iso_code` / `geo.region_iso_code` / `geo.locality.name` / `geo.continent.code` | `client.geo.*` is Elastic ECS naming; OTel's registry is the flat `geo.*` namespace, so nothing downstream recognised the old keys |
+  | `client.geo.country` / `.region` / `.city` / `.continent.code` | `geo.country.iso_code` / `geo.region.iso_code` / `geo.locality.name` / `geo.continent.code` | `client.geo.*` is Elastic ECS naming; OTel's registry is the flat `geo.*` namespace, so nothing downstream recognised the old keys |
   | `db.namespace` = the Laravel connection | `laravel.db.connection` | semconv's `db.namespace` is the database/schema name; putting the connection there read as wrong data in Tempo's DB views. The Redis and transaction instrumentations used `db.connection` for the same concept — all three now agree |
+
+  `geo.region.iso_code` is ISO 3166-2 (`US-CA`), built from the country and
+  Cloudflare's `CF-Region-Code`. It previously carried `CF-Region`, which is the
+  region NAME (`California`) — an iso_code attribute holding a name makes every
+  region filter and geo join miss.
 
   **Upgrade note.** TraceQL queries, dashboards and collector processors keying
   on the old attribute names must be updated. The bundled Grafana suite is

@@ -51,9 +51,18 @@ final class CloudflareHeaders
 
         // Region/city arrive only on Enterprise + a Managed Transform; on
         // every other plan they are simply absent and filtered out here.
+        // geo.region.iso_code is ISO 3166-2 ("US-CA"). CF-Region is the region
+        // NAME ("California"); the code lives in CF-Region-Code ("CA"), and the
+        // ISO form is country + "-" + that. Emitting the name under an
+        // iso_code attribute makes every region filter and geo join miss.
+        $regionCode = $request->headers->get('CF-Region-Code');
+        $region = is_string($regionCode) && $regionCode !== ''
+            ? strtoupper($country).'-'.strtoupper($regionCode)
+            : null;
+
         return array_filter([
-            'geo.country_iso_code' => strtoupper($country),
-            'geo.region_iso_code' => $request->headers->get('CF-Region'),
+            'geo.country.iso_code' => strtoupper($country),
+            'geo.region.iso_code' => $region,
             'geo.locality.name' => $request->headers->get('CF-IPCity'),
         ], static fn ($v): bool => $v !== null && $v !== '');
     }

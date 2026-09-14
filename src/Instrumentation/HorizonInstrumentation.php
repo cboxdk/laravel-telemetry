@@ -78,6 +78,12 @@ final class HorizonInstrumentation
      * The token is removed by asking Horizon for the basename and cutting
      * exactly that prefix — NOT by matching four characters, which would eat
      * the last segment of a host legitimately named `queue-prod` or `web-node`.
+     *
+     * The trade this makes: two masters running CONCURRENTLY on one host now
+     * share a labelset and overwrite each other's gauges. That is the normal
+     * Horizon deployment's non-case — one master per host — and it is much the
+     * lesser evil against a permanent new series on every deploy, forever, each
+     * frozen at the value it held when its process died.
      */
     private function withoutToken(string $name): string
     {

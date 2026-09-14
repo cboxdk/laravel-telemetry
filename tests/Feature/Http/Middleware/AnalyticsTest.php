@@ -71,15 +71,15 @@ it('falls back to the cookieless default when the hook returns null', function (
 it('stamps geo.* from a geo hook (e.g. CF-IPCountry)', function () {
     config()->set('telemetry.analytics.enabled', true);
     Telemetry::resolveClientGeoUsing(fn (Request $r) => array_filter([
-        'geo.country_iso_code' => $r->header('CF-IPCountry'),
+        'geo.country.iso_code' => $r->header('CF-IPCountry'),
     ]));
 
     $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
 
-    expect(analyticsServerSpan($this->collector)->attributes()['geo.country_iso_code'])->toBe('DK');
+    expect(analyticsServerSpan($this->collector)->attributes()['geo.country.iso_code'])->toBe('DK');
 });
 
-it('stamps geo.country_iso_code from the built-in Cloudflare header when trusted', function () {
+it('stamps geo.country.iso_code from the built-in Cloudflare header when trusted', function () {
     config()->set('telemetry.analytics.enabled', true);
     config()->set('telemetry.analytics.geo.enabled', true);
     $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1']);
@@ -87,7 +87,7 @@ it('stamps geo.country_iso_code from the built-in Cloudflare header when trusted
 
     $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
 
-    expect(analyticsServerSpan($this->collector)->attributes()['geo.country_iso_code'])->toBe('DK');
+    expect(analyticsServerSpan($this->collector)->attributes()['geo.country.iso_code'])->toBe('DK');
 });
 
 it('does not trust the Cloudflare header from an untrusted origin', function () {
@@ -96,7 +96,7 @@ it('does not trust the Cloudflare header from an untrusted origin', function () 
 
     $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
 
-    expect(analyticsServerSpan($this->collector)->attributes())->not->toHaveKey('geo.country_iso_code');
+    expect(analyticsServerSpan($this->collector)->attributes())->not->toHaveKey('geo.country.iso_code');
 });
 
 it('lets a geo hook win over the built-in Cloudflare header', function () {
@@ -104,11 +104,11 @@ it('lets a geo hook win over the built-in Cloudflare header', function () {
     config()->set('telemetry.analytics.geo.enabled', true);
     $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1']);
     TrustProxies::at('127.0.0.1');
-    Telemetry::resolveClientGeoUsing(fn () => ['geo.country_iso_code' => 'ZZ']);
+    Telemetry::resolveClientGeoUsing(fn () => ['geo.country.iso_code' => 'ZZ']);
 
     $this->get('/p', ['CF-IPCountry' => 'DK'])->assertOk();
 
-    expect(analyticsServerSpan($this->collector)->attributes()['geo.country_iso_code'])->toBe('ZZ');
+    expect(analyticsServerSpan($this->collector)->attributes()['geo.country.iso_code'])->toBe('ZZ');
 });
 
 it('computes a cookieless session id that is stable per day and rotates', function () {

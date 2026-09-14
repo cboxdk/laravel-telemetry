@@ -614,8 +614,8 @@ class TelemetryManager
      * e.g. from Cloudflare's edge headers, so no geo database is needed:
      *
      *     Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-     *         'geo.country_iso_code'      => $request->header('CF-IPCountry'),
-     *         'geo.region_iso_code'       => $request->header('CF-Region'),
+     *         'geo.country.iso_code'      => $request->header('CF-IPCountry'),
+     *         'geo.region.iso_code'       => $request->header('CF-Region'),
      *         'client.address'          => $request->header('CF-Connecting-IP'),
      *     ]));
      *

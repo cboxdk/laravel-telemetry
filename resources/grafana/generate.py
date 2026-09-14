@@ -409,7 +409,7 @@ D["exceptions"] = dashboard("cbox-tel-exceptions", "Telemetry / Exceptions", [
 # ── 7 · Queries ──────────────────────────────────────────────────────
 D["queries"] = dashboard("cbox-tel-queries", "Telemetry / Queries", [
     traces("Slowest queries (> $minms ms) — SQL text on the span",
-           f'{{{TSVC} && name="db.query" && duration>${{minms}}ms}} | select(span.db.query.text, span.db.namespace)', 0, 0, table_type="spans"),
+           f'{{{TSVC} && name="db.query" && duration>${{minms}}ms}} | select(span.db.query.text, span.laravel.db.connection)', 0, 0, table_type="spans"),
     traces("N+1 suspects — requests running ≥ $minqueries queries",
            f'{{{TSVC} && kind=server && span.db.query.count >= $minqueries}} | select(span.db.query.count, span.db.query.time_ms)', 0, 9,
            description="db.query.count/time_ms tallies live on every root span."),

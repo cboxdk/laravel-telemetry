@@ -72,9 +72,9 @@ it('accumulates histogram buckets into cumulative le form', function () {
 
     expect($output)
         // Unit 'ms' becomes the '_milliseconds' name suffix (before _bucket/_sum/_count).
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="10"} 2')
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="100"} 3')
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4')
+        ->toContain('req_duration_milliseconds_bucket{le="10",route="/"} 2')
+        ->toContain('req_duration_milliseconds_bucket{le="100",route="/"} 3')
+        ->toContain('req_duration_milliseconds_bucket{le="+Inf",route="/"} 4')
         ->toContain('req_duration_milliseconds_sum{route="/"} 5065')
         ->toContain('req_duration_milliseconds_count{route="/"} 4');
 });
@@ -115,9 +115,9 @@ it('renders an exemplar on the bucket the observation landed in, in OpenMetrics 
     ], openMetrics: true);
 
     expect($output)
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="10"} 2'."\n")
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="100"} 3 # {trace_id="abc123"} 42 1700000000')
-        ->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4'."\n")
+        ->toContain('req_duration_milliseconds_bucket{le="10",route="/"} 2'."\n")
+        ->toContain('req_duration_milliseconds_bucket{le="100",route="/"} 3 # {trace_id="abc123"} 42 1700000000')
+        ->toContain('req_duration_milliseconds_bucket{le="+Inf",route="/"} 4'."\n")
         ->toEndWith("# EOF\n");
 });
 
@@ -129,7 +129,7 @@ it('renders an exemplar on the +Inf bucket when the value exceeds every bound', 
         ),
     ], openMetrics: true);
 
-    expect($output)->toContain('req_duration_milliseconds_bucket{route="/",le="+Inf"} 4 # {trace_id="overflow-trace"} 999 1700000000');
+    expect($output)->toContain('req_duration_milliseconds_bucket{le="+Inf",route="/"} 4 # {trace_id="overflow-trace"} 999 1700000000');
 });
 
 it('emits # EOF for an empty family list in OpenMetrics format', function () {
@@ -227,4 +227,41 @@ it('drops _total from the family name in OpenMetrics, where the sample keeps it'
     expect($output)->toContain('# TYPE orders_created counter')
         ->and($output)->toContain('orders_created_total 1')
         ->and($output)->not->toContain('# TYPE orders_created_total');
+});
+
+it('never declares one family name with two types', function () {
+    // A counter writes its samples as `jobs_total` but its OpenMetrics metadata
+    // as `jobs`, so keying dedupe on the sample name alone let a counter `jobs`
+    // and a gauge `jobs` through — and both declared `# TYPE jobs`.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('jobs', MetricType::Counter, 'Counter'), [new Sample([], 1.0)]),
+        new MetricFamily(new MetricDefinition('jobs', MetricType::Gauge, 'Gauge'), [new Sample([], 2.0)]),
+    ], [], openMetrics: true);
+
+    expect(substr_count($output, '# TYPE jobs '))->toBe(1);
+});
+
+it('refuses to merge two families whose units disagree', function () {
+    // `latency` in seconds and `latency_seconds` in microseconds render to one
+    // name; merging them would report microseconds under a seconds suffix.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('latency', MetricType::Gauge, 'Seconds', 's'), [new Sample(['a' => '1'], 1.0)]),
+        new MetricFamily(new MetricDefinition('latency_seconds', MetricType::Gauge, 'Micros', 'us'), [new Sample(['a' => '2'], 999.0)]),
+    ]);
+
+    expect(substr_count($output, '# TYPE latency_seconds'))->toBe(1)
+        ->and($output)->not->toContain('999');
+});
+
+it('renders one labelset once however its keys were ordered', function () {
+    // A stored gauge and a cross-process observable can carry the same labels
+    // in a different order; both rendered as the same series line.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(new MetricDefinition('queue.depth', MetricType::Gauge, 'Depth'),
+            [new Sample(['queue' => 'default', 'host' => 'web'], 1.0)]),
+        new MetricFamily(new MetricDefinition('queue.depth', MetricType::Gauge, 'Depth'),
+            [new Sample(['host' => 'web', 'queue' => 'default'], 2.0)]),
+    ]);
+
+    expect(substr_count($output, 'queue_depth{'))->toBe(1);
 });

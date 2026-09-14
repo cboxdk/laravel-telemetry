@@ -68,7 +68,7 @@ afterwards, with a fixed precedence: a **hook** wins, then **Cloudflare's
 
 ### Cloudflare (built-in, no database)
 
-If you serve through Cloudflare, `geo.country_iso_code` comes free on every
+If you serve through Cloudflare, `geo.country.iso_code` comes free on every
 plan from the `CF-IPCountry` edge header — no MaxMind database to ship or
 update, and no per-request lookup. Just enable geo:
 
@@ -109,8 +109,8 @@ Source `geo.*` from any header or logic — the hook always wins
 
 ```php
 Telemetry::resolveClientGeoUsing(fn ($request) => array_filter([
-    'geo.country_iso_code' => $request->header('CF-IPCountry'),
-    'geo.region_iso_code'  => $request->header('CF-Region'),
+    'geo.country.iso_code' => $request->header('CF-IPCountry'),
+    'geo.region.iso_code'  => $request->header('CF-Region'),
 ]));
 ```
 
@@ -128,7 +128,7 @@ TELEMETRY_ANALYTICS_GEO=true
 TELEMETRY_ANALYTICS_GEO_DB=/var/lib/GeoLite2-Country.mmdb
 ```
 
-It resolves `geo.country_iso_code` (+ continent) at collection time; the reader
+It resolves `geo.country.iso_code` (+ continent) at collection time; the reader
 is built lazily and cached (no boot-time I/O). Without the package or the
 database it is a silent no-op.
 

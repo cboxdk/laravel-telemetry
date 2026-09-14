@@ -110,16 +110,34 @@ final class PrometheusRenderer
             // then emitted two `# HELP`/`# TYPE` blocks for one name. A
             // Prometheus parse error fails the WHOLE scrape, so one such
             // collision takes every metric from the app down with it.
-            $key = $this->renderedName($family);
+            // Key on BOTH names a family occupies. A counter writes samples as
+            // `jobs_total` but its OpenMetrics metadata as `jobs`, so keying on
+            // the sample name alone let a counter `jobs` and a gauge `jobs`
+            // through — and they then emitted `# TYPE jobs counter` AND
+            // `# TYPE jobs gauge`, one family name declared twice.
+            $key = $this->renderedName($family)."\0".$this->familyName($family);
             $existing = $byName[$key] ?? null;
 
             if ($existing === null) {
+                $collision = $this->collidingKey($byName, $family);
+
+                if ($collision !== null) {
+                    // Two families that cannot be merged but would occupy the
+                    // same name. Emitting both fails the scrape for everything;
+                    // the first one wins, as it does on a type conflict.
+                    continue;
+                }
+
                 $byName[$key] = $family;
 
                 continue;
             }
 
-            if ($existing->type() === $family->type()) {
+            // Same type is not enough: `latency` in seconds and
+            // `latency_seconds` in microseconds render to one name, and
+            // merging them would report microseconds under a seconds suffix.
+            if ($existing->type() === $family->type()
+                && $existing->definition->unit === $family->definition->unit) {
                 $byName[$key] = new MetricFamily(
                     $existing->definition,
                     $this->mergeSamples($existing->samples, $family->samples),
@@ -129,6 +147,24 @@ final class PrometheusRenderer
         }
 
         return array_values($byName);
+    }
+
+    /**
+     * Whether some already-kept family would render under one of this one's
+     * two names — the sample name or the metadata name.
+     *
+     * @param  array<string, MetricFamily>  $byName
+     */
+    private function collidingKey(array $byName, MetricFamily $family): ?string
+    {
+        foreach ($byName as $key => $kept) {
+            if ($this->renderedName($kept) === $this->renderedName($family)
+                || $this->familyName($kept) === $this->familyName($family)) {
+                return $key;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -148,7 +184,9 @@ final class PrometheusRenderer
         $byLabels = [];
 
         foreach ([...$existing, ...$incoming] as $sample) {
-            $byLabels[json_encode($sample->labels) ?: ''] ??= $sample;
+            // Compare what will be WRITTEN, not what was stored: two samples
+            // whose keys differ only in spelling or order render as one series.
+            $byLabels[json_encode($this->canonicalLabels($sample->labels)) ?: ''] ??= $sample;
         }
 
         return array_values($byLabels);
@@ -263,35 +301,57 @@ final class PrometheusRenderer
      */
     private function renderLabels(array $labels, array $extra = []): string
     {
-        $all = [...$this->resourceLabels, ...$labels, ...$extra];
+        $all = $this->canonicalLabels($labels, $extra);
 
         if ($all === []) {
             return '';
         }
 
-        // Merge on the SANITIZED name, not the raw key. Sanitizing after the
-        // merge meant two keys that differ only in the characters Prometheus
-        // forbids — a user label `host.name` alongside the `host_name`
-        // resource label, which the docs actively encourage by writing label
-        // keys dotted — both survived and rendered as
-        // `{host_name="web-1",host_name="db-3"}`. The Go text parser rejects
-        // duplicate label names, and a parse error fails the WHOLE scrape: the
-        // target goes up=0 and every metric from the app disappears, not just
-        // the offending one.
-        $parts = [];
-
-        foreach ($all as $key => $value) {
-            // Array keys may be ints (json_decode of numeric label names).
-            $parts[$this->sanitizeLabelName((string) $key)] = $this->escapeLabelValue($value);
-        }
-
         $rendered = [];
 
-        foreach ($parts as $name => $value) {
-            $rendered[] = $name.'="'.$value.'"';
+        foreach ($all as $name => $value) {
+            $rendered[] = $name.'="'.$this->escapeLabelValue($value).'"';
         }
 
         return '{'.implode(',', $rendered).'}';
+    }
+
+    /**
+     * The labels as Prometheus will see them: sanitized, then merged, then
+     * ordered — so two spellings of one name cannot both survive, and
+     * precedence does not depend on which of them happened to appear first.
+     *
+     * Sanitizing AFTER the merge meant a user label `host.name` — the dotted
+     * style the docs recommend — alongside the pre-sanitized `host_name`
+     * resource label were two distinct array keys that rendered as
+     * `{host_name="web-1",host_name="db-3"}`. The Go text parser rejects
+     * duplicate label names, and a parse error fails the WHOLE scrape: the
+     * target goes up=0 and every metric from the app disappears.
+     *
+     * Sorting matters too: the same labelset arriving in a different key order
+     * — a stored gauge versus a cross-process observable — would otherwise
+     * render as two different series lines for one series.
+     *
+     * @param  array<string, string>  $labels
+     * @param  array<string, string>  $extra
+     * @return array<string, string>
+     */
+    private function canonicalLabels(array $labels, array $extra = []): array
+    {
+        $merged = [];
+
+        // Later sources win, and each is normalized before it is applied so
+        // precedence never depends on the presence of an earlier spelling.
+        foreach ([$this->resourceLabels, $labels, $extra] as $source) {
+            foreach ($source as $key => $value) {
+                // Array keys may be ints (json_decode of numeric label names).
+                $merged[$this->sanitizeLabelName((string) $key)] = $value;
+            }
+        }
+
+        ksort($merged);
+
+        return $merged;
     }
 
     private function sanitizeLabelName(string $name): string
