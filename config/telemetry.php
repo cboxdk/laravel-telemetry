@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use Cbox\Telemetry\Http\Middleware\AllowIps;
+use Cbox\Telemetry\Support\HttpMethod;
 
 // Honor the OpenTelemetry-standard OTEL_EXPORTER_OTLP_HEADERS
 // ("key1=val1,key2=val2") for interop. TELEMETRY_* values win over these.
@@ -490,6 +491,18 @@ return [
         // and a label must never be caller-controlled. Configure
         // TrustHosts to tell your domains apart.
         'host_label' => env('TELEMETRY_INSTRUMENT_HOST_LABEL', true),
+
+        // Methods reported as themselves on http.request.method; anything
+        // else becomes "_OTHER", with the real one kept on the span as
+        // http.request.method_original.
+        //
+        // The method is whatever the caller put on the request line, and a
+        // server span is started for unmatched requests too — so without a
+        // bound it is a metric dimension anyone can grow from outside your
+        // app. The default is the list semconv names. Add to it if you serve
+        // methods it does not cover (WebDAV's PROPFIND, MKCOL, REPORT) and
+        // want them broken out rather than bucketed.
+        'known_http_methods' => HttpMethod::SEMCONV,
 
         // Request headers captured on the span as http.request.header.*
         // (allowlist, lowercase). Credentials and session headers

@@ -11,6 +11,7 @@ use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
@@ -56,13 +57,6 @@ final class TraceRequest
     /** Query parameters whose values are redacted in url.query. */
     private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
 
-    /**
-     * The methods semconv names. Anything else becomes _OTHER.
-     *
-     * @see https://opentelemetry.io/docs/specs/semconv/http/http-spans/
-     */
-    private const KNOWN_METHODS = ['CONNECT', 'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'];
-
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -95,10 +89,10 @@ final class TraceRequest
                 $request->method().' '.$request->path(),
                 SpanKind::Server,
                 array_filter([
-                    'http.request.method' => $this->method($request),
-                    // Present only when the method is not one semconv names,
+                    'http.request.method' => HttpMethod::normalize($request->method()),
+                    // Present only when the normalized value hid something,
                     // which is exactly when the reader needs it.
-                    'http.request.method_original' => $this->originalMethod($request),
+                    'http.request.method_original' => HttpMethod::original($request->method()),
                     'url.path' => '/'.ltrim($request->path(), '/'),
                     'url.scheme' => $request->getScheme(),
                     'url.query' => $this->redactedQuery($request),
@@ -322,7 +316,7 @@ final class TraceRequest
                 // App-defined bounded dimensions (plan, team, …) via
                 // Telemetry::labelRequestsUsing(); core labels win.
                 ...$this->telemetry->resolveRequestLabels($request),
-                'http.request.method' => $this->method($request),
+                'http.request.method' => HttpMethod::normalize($request->method()),
                 'http.route' => $route,
                 'http.response.status_code' => (string) $response->getStatusCode(),
             ];
@@ -459,31 +453,6 @@ final class TraceRequest
      * The query string with common secret parameters redacted — tokens,
      * signatures and OAuth material never leave the app.
      */
-    /**
-     * The request method as a BOUNDED value.
-     *
-     * `$request->method()` is whatever the caller put on the request line,
-     * uppercased — nothing restricts it to a real verb. Straight into a metric
-     * label that is an unbounded dimension anyone can grow from outside the
-     * app, without authenticating and without matching a route, because
-     * unmatched requests are measured too. semconv anticipates exactly this:
-     * unknown methods report `_OTHER`, and the original travels on the span as
-     * `http.request.method_original`.
-     */
-    private function method(Request $request): string
-    {
-        $method = $request->method();
-
-        return in_array($method, self::KNOWN_METHODS, true) ? $method : '_OTHER';
-    }
-
-    private function originalMethod(Request $request): ?string
-    {
-        $method = $request->method();
-
-        return in_array($method, self::KNOWN_METHODS, true) ? null : $method;
-    }
-
     private function redactedQuery(Request $request): ?string
     {
         $query = $request->server->get('QUERY_STRING');
@@ -604,7 +573,8 @@ final class TraceRequest
             'session.id' => $sessionId,
             'url.path' => $this->requestPath($request),
             'http.route' => $this->routePattern($request),
-            'http.request.method' => $request->getMethod(),
+            'http.request.method' => HttpMethod::normalize($request->getMethod()),
+            'http.request.method_original' => HttpMethod::original($request->getMethod()),
             'http.response.status_code' => $response->getStatusCode(),
             'user_agent.original' => $request->userAgent(),
             'http.request.header.referer' => $request->headers->get('referer'),

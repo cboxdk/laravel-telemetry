@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -274,6 +275,20 @@ it('reports an unknown request method as _OTHER and keeps the original on the sp
 
     expect($attributes['http.request.method'])->toBe('_OTHER')
         ->and($attributes['http.request.method_original'])->toBe('REVIEWVERB');
+});
+
+it('breaks out an extra method the app declares it serves', function () {
+    // The nine semconv names are not every real method — WebDAV alone adds
+    // three. An app that serves them says so and gets its breakdown back
+    // instead of one _OTHER bucket.
+    config()->set('telemetry.instrument.known_http_methods', [...HttpMethod::SEMCONV, 'PROPFIND']);
+
+    $this->call('PROPFIND', '/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['http.request.method'])->toBe('PROPFIND')
+        ->and($attributes)->not->toHaveKey('http.request.method_original');
 });
 
 it('leaves a known method alone and adds no original', function () {

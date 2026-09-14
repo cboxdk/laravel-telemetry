@@ -19,8 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   semconv anticipates exactly this case: unknown methods report `_OTHER`, and
   the original travels on the span as `http.request.method_original`. Both are
-  now done, so the metric is bounded by the nine named methods plus one bucket
-  and the span still says what was actually sent.
+  now done — on the server span, the server metric, the analytics page-view
+  event, and the outgoing client span and metric, so the attribute means the
+  same thing everywhere it appears.
+
+  The nine semconv names are not every real method (WebDAV alone adds
+  PROPFIND, MKCOL and REPORT), so the list is configurable:
+  `instrument.known_http_methods`. An app that serves them adds them and gets
+  its breakdown back instead of one bucket.
+
+  **Upgrade note.** A caller sending a method outside the list now lands in
+  `_OTHER` rather than its own series. If you deliberately serve a
+  non-semconv method, add it to `instrument.known_http_methods` before
+  upgrading or its history will split.
 
 - **Credential query parameters were only redacted under their bare names.**
   `SENSITIVE_QUERY_PARAMS` matched `token`, `key`, `secret` and friends
