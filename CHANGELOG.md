@@ -5,6 +5,43 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`http.request.method` was an unbounded metric label.** It carried
+  `$request->method()` — whatever the caller put on the request line,
+  uppercased, with nothing restricting it to a real verb. Unmatched requests
+  are measured too, so anyone could mint a permanent series from outside the
+  app without authenticating or hitting a route: three requests with invented
+  methods produced three `http.server.request.duration` series. An app cannot
+  fix this for itself, because core labels win over `labelRequestsUsing()`.
+
+  semconv anticipates exactly this case: unknown methods report `_OTHER`, and
+  the original travels on the span as `http.request.method_original`. Both are
+  now done, so the metric is bounded by the nine named methods plus one bucket
+  and the span still says what was actually sent.
+
+- **Credential query parameters were only redacted under their bare names.**
+  `SENSITIVE_QUERY_PARAMS` matched `token`, `key`, `secret` and friends
+  exactly, so `api_token`, `access_token`, `client_secret` and `x-api-key` —
+  the spellings apps actually use — passed straight through into `url.query`
+  on an exported span. Prefix segments are now allowed before the name. Each
+  must end in a separator and the parameter must start the pair, which is what
+  keeps `monkey`, `zipcode` and `estate` out of it.
+
+- **A failed job's error record could not say whose it was.** `completeJob()`
+  reset the ambient context at the end of every non-sync job, failures
+  included. Laravel dispatches `JobFailed` from inside
+  `Worker::handleJobException()`, which then rethrows — the exception only
+  reaches the handler, and through it this package's reportable listener, in
+  `Worker::runNextJob()`'s catch. So the error event was always built after
+  the reset, with no ambient dimensions at all: the one record where "whose is
+  this" matters most was the one that could not answer. Context now survives a
+  failure. Nothing inherits it — `JobProcessing` resets and restores from the
+  payload at the start of every non-sync job, and `WorkerStopping` clears it on
+  the way out.
+
 ## [2.0.0] - 2026-09-14
 
 ### Changed

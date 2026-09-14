@@ -262,6 +262,40 @@ it('does not touch Laravel Context when sharing is disabled', function () {
     expect(Context::get('trace_id'))->toBeNull();
 });
 
+it('reports an unknown request method as _OTHER and keeps the original on the span', function () {
+    // http.request.method is a METRIC LABEL and $request->method() is whatever
+    // the caller put on the request line. Unmatched requests are measured too,
+    // so without this anyone could mint series from outside the app without
+    // authenticating or hitting a route. semconv's answer is _OTHER plus
+    // http.request.method_original.
+    $this->call('REVIEWVERB', '/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['http.request.method'])->toBe('_OTHER')
+        ->and($attributes['http.request.method_original'])->toBe('REVIEWVERB');
+});
+
+it('leaves a known method alone and adds no original', function () {
+    $this->get('/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['http.request.method'])->toBe('GET')
+        ->and($attributes)->not->toHaveKey('http.request.method_original');
+});
+
+it('redacts credential query parameters however they are prefixed', function () {
+    // The list matched whole parameter names, so `api_token` — which is how a
+    // great many apps authenticate — matched none of them and rode out intact.
+    $this->get('/users/7?api_token=secret1&x-api-key=secret2&client_secret=secret3&monkey=fine&zipcode=2100&estate=ok');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    // …and words that merely CONTAIN one of the names are left alone.
+    expect($query)->toBe('api_token=REDACTED&x-api-key=REDACTED&client_secret=REDACTED&monkey=fine&zipcode=2100&estate=ok');
+});
+
 it('captures domain, client, protocol and query on the request span', function () {
     $this->get('http://api.acme.test/users/7?page=2&token=supersecret&per_page=50', [
         'User-Agent' => 'DemoAgent/1.0',

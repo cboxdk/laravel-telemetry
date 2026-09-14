@@ -159,6 +159,52 @@ it('closes out and ships a job killed by its timeout', function () {
  * Counting both made every success-rate panel overstate success in proportion
  * to the failure rate — the worse the day, the better it looked.
  */
+it('keeps the ambient context alive past a failure, so the worker can still report who it was for', function () {
+    // Laravel dispatches JobFailed from inside Worker::handleJobException(),
+    // which then RETHROWS — the exception only reaches the handler, and through
+    // it this package's reportable listener, in Worker::runNextJob()'s catch.
+    // Resetting context on the failure path meant that listener built the error
+    // event with no ambient dimensions: the failed job, the one record where
+    // "whose is this" matters most, was the one that could not say.
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfFailingJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    $events = app('events');
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    Telemetry::context(['tenant' => 'acme']);
+
+    $events->dispatch(new JobFailed('redis', $job, new RuntimeException('nope')));
+
+    expect(Telemetry::contextAttributes())->toHaveKey('tenant');
+});
+
+it('does drop the context after a job that succeeded', function () {
+    // The next job restores its own from the payload either way, but there is
+    // no reporter waiting on a success and nothing should outlive it.
+    app('queue');
+
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\FineJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    $events = app('events');
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    Telemetry::context(['tenant' => 'acme']);
+
+    $events->dispatch(new JobProcessed('redis', $job));
+
+    expect(Telemetry::contextAttributes())->not->toHaveKey('tenant');
+});
+
 it('counts one attempt once, even when Laravel reports it failed and processed', function () {
     app('queue');
 

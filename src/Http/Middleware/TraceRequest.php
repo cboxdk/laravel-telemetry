@@ -56,6 +56,13 @@ final class TraceRequest
     /** Query parameters whose values are redacted in url.query. */
     private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
 
+    /**
+     * The methods semconv names. Anything else becomes _OTHER.
+     *
+     * @see https://opentelemetry.io/docs/specs/semconv/http/http-spans/
+     */
+    private const KNOWN_METHODS = ['CONNECT', 'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE'];
+
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -88,7 +95,10 @@ final class TraceRequest
                 $request->method().' '.$request->path(),
                 SpanKind::Server,
                 array_filter([
-                    'http.request.method' => $request->method(),
+                    'http.request.method' => $this->method($request),
+                    // Present only when the method is not one semconv names,
+                    // which is exactly when the reader needs it.
+                    'http.request.method_original' => $this->originalMethod($request),
                     'url.path' => '/'.ltrim($request->path(), '/'),
                     'url.scheme' => $request->getScheme(),
                     'url.query' => $this->redactedQuery($request),
@@ -312,7 +322,7 @@ final class TraceRequest
                 // App-defined bounded dimensions (plan, team, …) via
                 // Telemetry::labelRequestsUsing(); core labels win.
                 ...$this->telemetry->resolveRequestLabels($request),
-                'http.request.method' => $request->method(),
+                'http.request.method' => $this->method($request),
                 'http.route' => $route,
                 'http.response.status_code' => (string) $response->getStatusCode(),
             ];
@@ -449,6 +459,31 @@ final class TraceRequest
      * The query string with common secret parameters redacted — tokens,
      * signatures and OAuth material never leave the app.
      */
+    /**
+     * The request method as a BOUNDED value.
+     *
+     * `$request->method()` is whatever the caller put on the request line,
+     * uppercased — nothing restricts it to a real verb. Straight into a metric
+     * label that is an unbounded dimension anyone can grow from outside the
+     * app, without authenticating and without matching a route, because
+     * unmatched requests are measured too. semconv anticipates exactly this:
+     * unknown methods report `_OTHER`, and the original travels on the span as
+     * `http.request.method_original`.
+     */
+    private function method(Request $request): string
+    {
+        $method = $request->method();
+
+        return in_array($method, self::KNOWN_METHODS, true) ? $method : '_OTHER';
+    }
+
+    private function originalMethod(Request $request): ?string
+    {
+        $method = $request->method();
+
+        return in_array($method, self::KNOWN_METHODS, true) ? null : $method;
+    }
+
     private function redactedQuery(Request $request): ?string
     {
         $query = $request->server->get('QUERY_STRING');
@@ -457,7 +492,12 @@ final class TraceRequest
             return null;
         }
 
-        $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
+        // Optional prefix SEGMENTS, so `api_token`, `access-token`,
+        // `client_secret` and `x-api-key` are caught as well as the bare
+        // names. Each segment must end in a separator, and the parameter must
+        // start right after `&` — which together keep `monkey`, `zipcode` and
+        // `estate` out of it.
+        $pattern = '/(^|&)((?:[a-z0-9]+[-_])*(?:'.implode('|', self::SENSITIVE_QUERY_PARAMS).'))=[^&]*/i';
 
         return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
     }

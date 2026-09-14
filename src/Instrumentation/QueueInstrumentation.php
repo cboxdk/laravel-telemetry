@@ -442,9 +442,25 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
             });
 
-            FailSafe::guard(function () {
+            FailSafe::guard(function () use ($outcome) {
                 $this->telemetry()->flush();
-                $this->telemetry()->resetContext();
+
+                // Context is NOT dropped after a failure. Laravel dispatches
+                // JobFailed from inside Worker::handleJobException(), which
+                // then rethrows — and only in Worker::runNextJob()'s catch
+                // does the exception reach the handler and, through it, the
+                // package's own reportable listener. Clearing here meant that
+                // listener built the error event with no ambient dimensions at
+                // all: the failed job, the one record where "whose is this"
+                // matters most, was the one record that could not say.
+                //
+                // Leaving it costs nothing. JobProcessing resets and restores
+                // from the payload at the start of every non-sync job, so the
+                // next job never inherits it, and WorkerStopping clears it on
+                // the way out.
+                if ($outcome !== 'failed' && $outcome !== 'timed_out') {
+                    $this->telemetry()->resetContext();
+                }
             });
         }
     }
