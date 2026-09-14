@@ -26,6 +26,7 @@ use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\QueueBusy;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\QueueManager;
+use Throwable;
 
 /**
  * Queue instrumentation.
@@ -199,15 +200,6 @@ final class QueueInstrumentation implements ManagesRequestState
             // Sync jobs run inline inside the dispatcher's context — the
             // consumer span nests naturally and the caller's trace must
             // survive the job. Only real workers reset + continue.
-            // Drop any snapshot the previous attempt left behind. Nothing
-            // else is guaranteed to: the reporter clears it as it reads it,
-            // but report() does not always run — Worker::$reportJobExceptions
-            // is a public static an app can turn off, and shouldReport() and
-            // $dontReport skip it too. Unclaimed, it would be picked up by
-            // whatever exception happened to be reported next, which is the
-            // leak the snapshot exists to avoid.
-            $this->telemetry()->takeFailureContext();
-
             if ($event->connectionName !== 'sync') {
                 $this->telemetry()->resetContext();
 
@@ -344,7 +336,11 @@ final class QueueInstrumentation implements ManagesRequestState
         // worker rethrows and the handler runs after this teardown — so with
         // tries > 1 every attempt but the last produced an unattributable
         // error record.
-        $this->rememberFailureContext();
+        //
+        // The event carries no throwable, so there is nothing to key a
+        // snapshot to. Laravel does not hand the exception to this event; the
+        // job's own span already carries it, and the released attempt is
+        // covered by the JobFailed path when it eventually gives up.
 
         $this->completeJob(
             job: $event->job->resolveName(),
@@ -358,7 +354,7 @@ final class QueueInstrumentation implements ManagesRequestState
     {
         FailSafe::guard(fn () => $this->currentJobSpan()?->recordException($event->exception));
 
-        $this->rememberFailureContext();
+        $this->rememberFailureContext($event->exception);
 
         $this->completeJob(
             job: $event->job->resolveName(),
@@ -467,22 +463,22 @@ final class QueueInstrumentation implements ManagesRequestState
     }
 
     /**
-     * Hand the job's dimensions to whoever reports the exception next.
+     * Hand this job's dimensions to whoever reports THIS exception.
      *
-     * Laravel dispatches JobFailed and JobReleasedAfterException from inside
+     * Laravel dispatches JobFailed from inside
      * Worker::handleJobException(), which then rethrows; only in
      * Worker::runJob()'s catch does the exception reach the handler and,
      * through it, this package's own reportable listener. Everything below
      * runs before that, teardown included — so the snapshot is taken here and
      * the context is still reset as it always was.
      */
-    private function rememberFailureContext(): void
+    private function rememberFailureContext(Throwable $e): void
     {
-        FailSafe::guard(function (): void {
+        FailSafe::guard(function () use ($e): void {
             $context = $this->telemetry()->contextAttributes();
 
             if ($context !== []) {
-                $this->telemetry()->rememberFailureContext($context);
+                $this->telemetry()->rememberFailureContext($e, $context);
             }
         });
     }

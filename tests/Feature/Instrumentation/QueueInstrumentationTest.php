@@ -15,7 +15,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
-use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\InteractsWithQueue;
@@ -160,16 +159,15 @@ it('closes out and ships a job killed by its timeout', function () {
  * Counting both made every success-rate panel overstate success in proportion
  * to the failure rate — the worse the day, the better it looked.
  */
-it('hands a failed job\'s dimensions to whoever reports the exception', function () {
+it('hands a failed job\'s dimensions to whoever reports THAT exception', function () {
     // Laravel dispatches JobFailed from inside Worker::handleJobException(),
     // which then rethrows — the exception only reaches the handler, and
     // through it this package's reportable listener, in Worker::runJob()'s
-    // catch. Everything the job set is torn down before that, so the error
-    // record could not say whose failure it was.
+    // catch. Everything the job set is torn down before that.
     app('queue');
 
     $job = Mockery::mock(Job::class);
-    $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfFailingJob');
+    $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\SelfFailingJob');
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -179,24 +177,26 @@ it('hands a failed job\'s dimensions to whoever reports the exception', function
 
     Telemetry::context(['tenant' => 'acme']);
 
-    $events->dispatch(new JobFailed('redis', $job, new RuntimeException('nope')));
+    $failure = new RuntimeException('nope');
+    $events->dispatch(new JobFailed('redis', $job, $failure));
 
     // The live context is cleared, as it always was — leaving it alive would
     // stamp the dead job's tenant on every later span, log and outgoing
     // baggage header in this worker process.
     expect(Telemetry::contextAttributes())->toBe([]);
 
-    // …but the snapshot is there for the reporter.
-    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme']);
+    expect(Telemetry::takeFailureContext($failure))->toBe(['tenant' => 'acme']);
 });
 
-it('does the same for an attempt released for retry', function () {
-    // Released attempts are reported exactly like terminal ones, so with the
-    // default tries > 1 every attempt but the last was unattributable.
+it('does not give one failure\'s dimensions to a different exception', function () {
+    // "The next exception to be reported" is not the same thing as "this
+    // exception". A listener on the same failure — a notification that itself
+    // fails — reports FIRST, and would otherwise collect a tenant that was
+    // never its own while the failure it belongs to got none.
     app('queue');
 
     $job = Mockery::mock(Job::class);
-    $job->shouldReceive('resolveName')->andReturn('App\Jobs\RetryingJob');
+    $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\SelfFailingJob');
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -206,36 +206,30 @@ it('does the same for an attempt released for retry', function () {
 
     Telemetry::context(['tenant' => 'acme']);
 
-    $events->dispatch(new JobReleasedAfterException('redis', $job));
+    $failure = new RuntimeException('the job failed');
+    $events->dispatch(new JobFailed('redis', $job, $failure));
 
-    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme']);
+    $unrelated = new RuntimeException('a notification blew up');
+
+    expect(Telemetry::takeFailureContext($unrelated))->toBe([])
+        ->and(Telemetry::takeFailureContext($failure))->toBe(['tenant' => 'acme']);
 });
 
-it('drops an unclaimed snapshot when the next job starts', function () {
+it('needs nothing to clean the snapshot up', function () {
     // report() does not always run — Worker::$reportJobExceptions is a public
     // static an app can turn off, and shouldReport()/$dontReport skip it too.
-    // An unclaimed snapshot would otherwise be picked up by whatever exception
-    // was reported next, which is the leak it exists to avoid.
-    app('queue');
+    // Keyed by the throwable in a WeakMap, an unclaimed entry simply dies with
+    // the exception rather than waiting to be mistaken for someone else's.
+    $map = new ReflectionProperty(Telemetry::getFacadeRoot(), 'failureContext');
 
-    $job = Mockery::mock(Job::class);
-    $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\AnyJob');
-    $job->shouldReceive('getQueue')->andReturn('default');
-    $job->shouldReceive('attempts')->andReturn(1);
-    $job->shouldReceive('payload')->andReturn([]);
+    $orphan = new RuntimeException('never reported');
+    Telemetry::rememberFailureContext($orphan, ['tenant' => 'acme']);
 
-    Telemetry::rememberFailureContext(['tenant' => 'acme']);
+    expect($map->getValue(Telemetry::getFacadeRoot())->count())->toBe(1);
 
-    app('events')->dispatch(new JobProcessing('redis', $job));
+    unset($orphan);
 
-    expect(Telemetry::takeFailureContext())->toBe([]);
-});
-
-it('gives the snapshot to one report and no more', function () {
-    Telemetry::rememberFailureContext(['tenant' => 'acme']);
-
-    expect(Telemetry::takeFailureContext())->toBe(['tenant' => 'acme'])
-        ->and(Telemetry::takeFailureContext())->toBe([]);
+    expect($map->getValue(Telemetry::getFacadeRoot())->count())->toBe(0);
 });
 
 it('counts one attempt once, even when Laravel reports it failed and processed', function () {

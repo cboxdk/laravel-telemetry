@@ -3,6 +3,7 @@
 declare(strict_types=1);
 use Cbox\Telemetry\Http\Middleware\AllowIps;
 use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\Redactor;
 
 // Honor the OpenTelemetry-standard OTEL_EXPORTER_OTLP_HEADERS
 // ("key1=val1,key2=val2") for interop. TELEMETRY_* values win over these.
@@ -317,27 +318,23 @@ return [
         // — append your own entries, or remove the whole key to keep
         // tracking the package's built-ins across upgrades.
 
-        // Attribute-key segments whose whole value is replaced.
-        'keys' => [
-            'password', 'passwd', 'secret', 'token', 'api_key', 'apikey',
-            'auth', 'authorization', 'signature', 'credential', 'credentials',
-            'private_key', 'credit_card', 'card_number', 'cvv', 'ssn', 'session',
-        ],
+        // The built-in lists, BY REFERENCE rather than by copy.
+        //
+        // Publishing this file used to freeze them: fromConfig() prefers what
+        // is here over the defaults, so a copied list meant a package that
+        // learned a new credential pattern could never tell you. Referencing
+        // the accessors keeps upstream additions flowing.
+        //
+        // Append your own by spreading:
+        //
+        //   'keys'     => [...Redactor::defaultKeys(), 'cpr'],
+        //   'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
+        //   'safe_keys'=> [...Redactor::defaultSafeKeys(), 'my.known_safe.bucket'],
+        'keys' => Redactor::defaultKeys(),
 
-        // Regexes scrubbing secrets embedded in any string value
-        // (regex => replacement).
-        'patterns' => [
-            // JWTs — three base64url segments.
-            '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
-            // HTTP credential schemes embedded in messages.
-            '/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{16,}/i' => '$1 [REDACTED]',
-            // Userinfo in URLs: scheme://user:pass@host.
-            '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
-        ],
+        'patterns' => Redactor::defaultPatterns(),
 
-        // Exact keys exempt from KEY-based redaction — known-safe by
-        // construction. Patterns and the redactUsing() hook still apply.
-        'safe_keys' => ['session.driver', 'session.hash', 'session.id'],
+        'safe_keys' => Redactor::defaultSafeKeys(),
 
         'replacement' => '[REDACTED]',
     ],

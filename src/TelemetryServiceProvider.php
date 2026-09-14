@@ -967,7 +967,7 @@ class TelemetryServiceProvider extends ServiceProvider
                         $telemetry->recordEvent(new TelemetryEvent(
                             name: 'exception',
                             timeUnixNano: (int) (microtime(true) * 1e9),
-                            attributes: $telemetry->contextAttributes() + $telemetry->takeFailureContext() + $attributes,
+                            attributes: $telemetry->contextAttributes() + $telemetry->takeFailureContext($e) + $attributes,
                             traceId: $span->traceId ?? $telemetry->traceId(),
                             spanId: $span?->spanId,
                             severityNumber: 17, // ERROR

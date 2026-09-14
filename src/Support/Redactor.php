@@ -101,12 +101,12 @@ final class Redactor
             // this way — `code`, `state` and `key` are ordinary parameters as
             // often as they are secrets, and redacting `postal_code` protects
             // nothing while destroying real telemetry.
-            '/((?:^|[?&;])[^=&;\s]*(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[^=&;\s]*=)[^&;\s"\']+/i' => '$1REDACTED',
+            '/((?:^|[?&;])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[^=&;\s]{0,48}=)[^&;\s]+/i' => '$1REDACTED',
             // The ambiguous words, matched EXACTLY and never with a prefix.
             // `?code=` on an OAuth callback is an authorization code and the
             // reason this list exists; `postal_code=` is an address. The
             // boundary is what tells them apart.
-            '/((?:^|[?&;])(?:code|state|key|auth)=)[^&;\s"\']+/i' => '$1REDACTED',
+            '/((?:^|[?&;])(?:code|state|key|auth)=)[^&;\s]+/i' => '$1REDACTED',
         ];
     }
 
@@ -244,6 +244,18 @@ final class Redactor
 
             if (is_string($scrubbed)) {
                 $value = $scrubbed;
+
+                continue;
+            }
+
+            // preg_replace() returned null. A pattern that cannot compile was
+            // already skipped above, so this is the engine giving up — a
+            // backtrack or recursion limit on a pathological value. Keeping
+            // the original would mean the one value long enough to defeat the
+            // matcher is the one value that escapes it, which is the wrong way
+            // round for a redactor.
+            if (preg_last_error() !== PREG_NO_ERROR) {
+                return $this->replacement;
             }
         }
 

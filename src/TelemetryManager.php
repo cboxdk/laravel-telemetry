@@ -29,6 +29,8 @@ use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
+use Throwable;
+use WeakMap;
 
 /**
  * The telemetry entry point, resolved behind the Telemetry facade.
@@ -307,15 +309,15 @@ class TelemetryManager
     }
 
     /**
-     * Context as it was when a unit of work failed, held for whoever reports
-     * the exception next.
+     * Context as it was when a unit of work failed, keyed by the throwable it
+     * belongs to.
      *
-     * @var array<string, scalar|null>
+     * @var WeakMap<Throwable, array<string, scalar|null>>|null
      */
-    private array $failureContext = [];
+    private ?WeakMap $failureContext = null;
 
     /**
-     * Keep the current dimensions for the reporter that has not run yet.
+     * Keep the current dimensions for whoever reports THIS throwable.
      *
      * A queue worker tears the job down before the exception reaches the
      * handler: Laravel dispatches JobFailed (or JobReleasedAfterException)
@@ -323,30 +325,37 @@ class TelemetryManager
      * so by the time report() runs the job's context is gone and the error
      * record cannot say whose failure it was.
      *
+     * Keyed by the throwable, because "the next exception to be reported" is
+     * not the same thing as "this exception". A listener on the same failure
+     * — a notification that itself fails, say — reports first and would
+     * otherwise collect a tenant that was never its own, while the failure it
+     * belongs to gets none.
+     *
      * A snapshot rather than leaving the live context alive, because "alive"
      * means every later span, log, event and outgoing baggage header in that
      * worker process inherits a dead job's tenant.
      *
      * @param  array<string, scalar|null>  $attributes
      */
-    public function rememberFailureContext(array $attributes): void
+    public function rememberFailureContext(Throwable $e, array $attributes): void
     {
-        $this->failureContext = $attributes;
+        $this->failureContext ??= new WeakMap;
+
+        $this->failureContext[$e] = $attributes;
     }
 
     /**
-     * Consume the snapshot. Reading it clears it, so one failure decorates one
-     * report and nothing later picks it up.
+     * The snapshot for this throwable, if one was taken. Nothing has to clear
+     * it: the WeakMap holds no reference of its own, so an entry dies with the
+     * exception it describes.
      *
      * @return array<string, scalar|null>
      */
-    public function takeFailureContext(): array
+    public function takeFailureContext(Throwable $e): array
     {
-        $taken = $this->failureContext;
+        $context = $this->failureContext[$e] ?? [];
 
-        $this->failureContext = [];
-
-        return $taken;
+        return is_array($context) ? $context : [];
     }
 
     /**
@@ -957,7 +966,7 @@ class TelemetryManager
     }
 
     /**
-     * @param  Closure(\Throwable): void|null  $handler
+     * @param  Closure(Throwable): void|null  $handler
      */
     public function handleExceptionsUsing(?Closure $handler): void
     {
