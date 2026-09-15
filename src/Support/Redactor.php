@@ -85,7 +85,16 @@ final class Redactor
             // JWTs — three base64url segments.
             '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
-            '/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{16,}/i' => '$1 [REDACTED]',
+            //
+            // Two ways to qualify, because a flat length threshold cannot tell
+            // a short credential from an ordinary word. Sixteen characters is
+            // enough on its own; from eight, one character that is not a
+            // lowercase letter is what separates `dXNlcjpwYXNz` (base64 for
+            // user:pass, and only twelve characters) from the sentence "Basic
+            // authentication is required". Only the scheme is matched
+            // case-insensitively — an `/i` over the whole pattern would make
+            // `[A-Z0-9]` match lowercase too and swallow the prose.
+            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/=-]{16,}|(?=[A-Za-z0-9._~+\/=-]{8,})[a-z]*[A-Z0-9._~+\/=-][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
             // A credential carried as a query parameter, wherever the string

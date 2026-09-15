@@ -51,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next `&` or to whitespace with any number of quotes stripped — over-redacting
   a `;`-separated query rather than leaking half a key.
 
+- **A short `Basic`/`Bearer` credential survived in messages.** The pattern
+  wanted sixteen characters, so `Basic dXNlcjpwYXNz` — base64 for `user:pass`,
+  twelve characters — went out verbatim. It now also matches from eight
+  characters when one of them is not a lowercase letter, which is what
+  separates a credential from the sentence "Basic authentication is required".
+  Predates 2.0.0.
+
 - **An exception mapper lost the failed job's dimensions.** `Handler::map()`
   replaces the throwable before the reportable callbacks run, so the snapshot
   keyed to the original was never found. The `previous` chain is now walked,

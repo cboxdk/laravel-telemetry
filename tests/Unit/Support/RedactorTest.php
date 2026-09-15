@@ -183,3 +183,20 @@ it('takes the whole credential when its value carries a delimiter or quotes', fu
         ->and($redactor->value('url.query', '?api_token=sk_live_1&page=2'))
         ->toBe('?api_token=[REDACTED]&page=2');
 });
+
+it('redacts a short credential scheme value without eating the words around it', function () {
+    // `dXNlcjpwYXNz` is base64 for user:pass and only twelve characters, so a
+    // flat sixteen-character threshold published it. The discriminator is that
+    // a credential carries something other than lowercase letters, which the
+    // sentence "Basic authentication is required" does not.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('exception.message', 'rejected: Basic dXNlcjpwYXNz'))
+        ->toBe('rejected: Basic [REDACTED]')
+        ->and($redactor->value('log.line', 'Bearer abc12345 expired'))
+        ->toBe('Bearer [REDACTED] expired')
+        ->and($redactor->value('log.line', 'Basic authentication is required'))
+        ->toBe('Basic authentication is required')
+        ->and($redactor->value('log.line', 'Basic authorization header missing'))
+        ->toBe('Basic authorization header missing');
+});
