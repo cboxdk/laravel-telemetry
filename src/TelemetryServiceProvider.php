@@ -1040,6 +1040,17 @@ class TelemetryServiceProvider extends ServiceProvider
             $telemetry->tracer()->endOpenSpans('process terminated without completing');
 
             $telemetry->flush();
+
+            // And once more, after everything else shutting down has had its
+            // turn. An application that awaits its own outstanding HTTP work
+            // in a shutdown callback of its own registers that callback later
+            // than this one, so it runs later — and a call that completed
+            // there ended up buffered with nothing left to flush it. A
+            // function registered DURING shutdown is appended to the queue, so
+            // this runs after those callbacks rather than before them.
+            register_shutdown_function(static function () use ($telemetry): void {
+                FailSafe::guard(static fn () => $telemetry->flush());
+            });
         });
     }
 

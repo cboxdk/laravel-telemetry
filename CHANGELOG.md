@@ -34,6 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a call begun under one tenant carried the next tenant's user. A snapshot
   is all of it or none.
 
+- **A call that completed during shutdown was buffered and never sent.** An
+  application that awaits its own outstanding HTTP work in a shutdown callback
+  registers that callback after the package's, so it runs later — and a call
+  that completed there had nothing left to flush it. A second flush is
+  registered from inside the first, which PHP appends to the queue and
+  therefore runs after those callbacks.
+
+- **A rewrite that changed only the verb was skipped.** The correction compared
+  the NORMALISED method, and two different verbs can normalise alike —
+  `PROPFIND` and `REPORT` are both `_OTHER`, `get` and `GET` are both `GET` —
+  so the previous verb was left standing in `http.request.method_original`.
+  The original now takes part in the comparison.
+
+- **A canonical method left an empty `http.request.method_original` behind.**
+  `HttpMethod::original()` returns null for a canonical verb, and a null
+  attribute is not an absence: it reaches the exporter as an empty string. It
+  is removed now, through the new `Span::forgetAttribute()`.
+
 - **The span name could disagree with its own method attribute.** When a
   `withRequestMiddleware()` callback rewrote the verb as well as the URI, the
   name was corrected from the sent request while `http.request.method` and the

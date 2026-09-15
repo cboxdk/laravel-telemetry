@@ -562,3 +562,45 @@ it('names the host the call actually went to, not the one first asked for', func
         ->and($span->attributes()['server.address'])->toBe('actual.example')
         ->and($span->attributes()['url.path'])->toBe('/new');
 });
+
+it('corrects a method-only rewrite, and two verbs that normalise alike', function () {
+    // The early return compared the NORMALISED method, and two different verbs
+    // can normalise to the same thing: PROPFIND and REPORT are both _OTHER,
+    // `get` and `GET` are both GET. So a rewrite that changed only the verb
+    // was skipped and left the previous one standing in method_original.
+    $send = function (string $from, string $to) {
+        Http::setHandler(function ($request, array $options) {
+            $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+            return Create::promiseFor(new PsrResponse(200));
+        })
+            ->withRequestMiddleware(fn ($request) => $request->withMethod($to))
+            ->send($from, 'https://same.example/path');
+    };
+
+    $send('PROPFIND', 'REPORT');
+
+    $attributes = allSpans($this->collector)->where('kind', SpanKind::Client)->last()->attributes();
+
+    expect($attributes['http.request.method'])->toBe('_OTHER')
+        ->and($attributes['http.request.method_original'])->toBe('REPORT');
+});
+
+it('leaves no empty method_original behind when the verb is canonical', function () {
+    // HttpMethod::original() returns null for a canonical verb, and a null
+    // attribute is not an absence — it reaches the exporter as an empty
+    // string. A correction that makes the method canonical has to clear the
+    // one that was there.
+    Http::setHandler(function ($request, array $options) {
+        $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+        return Create::promiseFor(new PsrResponse(200));
+    })
+        ->withRequestMiddleware(fn ($request) => $request->withMethod('POST'))
+        ->send('PROPFIND', 'https://same.example/path');
+
+    $attributes = allSpans($this->collector)->where('kind', SpanKind::Client)->last()->attributes();
+
+    expect($attributes['http.request.method'])->toBe('POST')
+        ->and($attributes)->not->toHaveKey('http.request.method_original');
+});

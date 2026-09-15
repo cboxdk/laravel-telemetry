@@ -142,6 +142,21 @@ final class Span
     }
 
     /**
+     * Remove an attribute, rather than setting it to null.
+     *
+     * A null value is not an absence: it survives to the exporter, which
+     * serialises it as an empty string. An attribute that no longer applies —
+     * `http.request.method_original` after a correction that made the method
+     * canonical — has to go, not be blanked.
+     */
+    public function forgetAttribute(string $key): self
+    {
+        unset($this->attributes[$key]);
+
+        return $this;
+    }
+
+    /**
      * Fill attributes without overwriting — span-specific values always
      * win over ambient context dimensions.
      *

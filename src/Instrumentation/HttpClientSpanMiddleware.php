@@ -192,10 +192,17 @@ final class HttpClientSpanMiddleware
         $path = $uri->getPath() !== '' ? $uri->getPath() : '/';
 
         $method = HttpMethod::normalize($sent->getMethod());
+        $original = HttpMethod::original($sent->getMethod());
 
+        // The ORIGINAL takes part in the comparison, not just the normalised
+        // method. Two different verbs normalise to the same thing — PROPFIND
+        // and REPORT are both `_OTHER`, `get` and `GET` are both `GET` — so
+        // comparing the normalised form alone skipped a correction and left
+        // the previous verb standing in method_original.
         if (($span->attributes()['server.address'] ?? null) === $host
             && ($span->attributes()['url.path'] ?? null) === $path
-            && ($span->attributes()['http.request.method'] ?? null) === $method) {
+            && ($span->attributes()['http.request.method'] ?? null) === $method
+            && ($span->attributes()['http.request.method_original'] ?? null) === $original) {
             return;
         }
 
@@ -208,8 +215,14 @@ final class HttpClientSpanMiddleware
             'server.address' => $host,
             'url.path' => $path,
             'http.request.method' => $method,
-            'http.request.method_original' => HttpMethod::original($sent->getMethod()),
         ]);
+
+        // Absent, not null: a null reaches the exporter and serialises as an
+        // empty string, and a correction that made the method canonical has to
+        // clear whatever original was there before.
+        $original === null
+            ? $span->forgetAttribute('http.request.method_original')
+            : $span->setAttribute('http.request.method_original', $original);
 
         $span->updateName(HttpMethod::forSpanName($sent->getMethod()).' '.$host);
     }
