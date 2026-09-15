@@ -25,17 +25,6 @@ final class Tracer
     /** @var list<Span> */
     private array $stack = [];
 
-    /**
-     * Spans started detached and not yet ended, keyed by object id.
-     *
-     * They are not on the context stack, so nothing else would ever notice
-     * them — including the shutdown path, which is what turns an abandoned or
-     * cancelled call into a recorded one rather than silence.
-     *
-     * @var array<int, Span>
-     */
-    private array $detached = [];
-
     private ?TraceParent $remoteParent = null;
 
     private ?string $traceId = null;
@@ -244,11 +233,7 @@ final class Tracer
         // whatever the tracer holds at the moment the span ends. Merged here
         // as missing attributes, so the span carries the context it was
         // started in and the later merge is a no-op for those keys.
-        if ($this->contextAttributes !== []) {
-            $span->mergeMissingAttributes($this->contextAttributes);
-        }
-
-        $this->detached[spl_object_id($span)] = $span;
+        $span->captureContext($this->contextAttributes);
 
         return $span;
     }
@@ -356,17 +341,17 @@ final class Tracer
             }
         }
 
-        // Detached spans are not on the stack, so the loop above cannot see
-        // them. A call whose promise was cancelled, or simply never awaited,
-        // settles nothing — and would otherwise leave no trace of having been
-        // made at all.
-        foreach ($this->detached as $span) {
-            $span->setStatus(SpanStatus::Error, $reason);
-            $span->end();
-            $closed++;
-        }
-
-        $this->detached = [];
+        // Detached spans are deliberately NOT closed here. Shutdown runs on
+        // every request, before the callbacks an application registers to await
+        // its own outstanding work — so closing them stamped a call that went
+        // on to return 200 as an error lasting a third of a millisecond, and
+        // its real completion could no longer update or export it. Holding
+        // them to close later was worse still: nothing else referenced a
+        // cancelled call's span, so tracking them kept 30,000 of them alive at
+        // 26MB where the garbage collector had been freeing them.
+        //
+        // A missing span is the lesser evil. A span with the wrong duration and
+        // status is a lie that reads as data.
 
         return $closed;
     }
@@ -428,7 +413,6 @@ final class Tracer
     public function resetContext(): void
     {
         $this->stack = [];
-        $this->detached = [];
         $this->remoteParent = null;
         $this->traceId = null;
         $this->sampled = null;
@@ -471,14 +455,10 @@ final class Tracer
         if ($index !== false) {
             array_splice($this->stack, (int) $index, 1);
         }
-
-        unset($this->detached[spl_object_id($span)]);
     }
 
     private function finish(Span $span): void
     {
-        unset($this->detached[spl_object_id($span)]);
-
         // Remove wherever it sits — out-of-order ends must not corrupt
         // the context stack.
         $index = array_search($span, $this->stack, true);
@@ -498,7 +478,10 @@ final class Tracer
             }
         }
 
-        if ($this->contextAttributes !== []) {
+        // A span that took its dimensions when it started keeps exactly those.
+        // Merging here too still ADDED whatever appeared in between, so a call
+        // begun under one tenant carried the next tenant's user.
+        if ($this->contextAttributes !== [] && ! $span->hasCapturedContext()) {
             $span->mergeMissingAttributes($this->contextAttributes);
         }
 

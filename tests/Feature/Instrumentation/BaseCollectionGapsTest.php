@@ -454,23 +454,79 @@ it('does not change what the caller catches', function () {
         ->toThrow(ConnectionException::class);
 });
 
-it('records a detached span that was abandoned rather than losing it entirely', function () {
-    // A detached span is not on the context stack, so the shutdown path could
-    // not see it: a call whose promise was cancelled or never settled left no
-    // trace of having been made. Asserted on the tracer, because Laravel's
-    // async() hands back a LazyPromise that sends nothing until it is awaited
-    // — there is no way to abandon a call from outside that has also started.
+it('leaves an unsettled call alone at shutdown rather than calling it a failure', function () {
+    // Shutdown runs on EVERY request, before the callbacks an application
+    // registers to await its own outstanding work. Closing detached spans
+    // there stamped a call that went on to return 200 as an error lasting a
+    // third of a millisecond, and its real completion could no longer update
+    // or export it. A missing span is the lesser evil.
     $span = Telemetry::tracer()->startDetachedSpan('GET slow.example', SpanKind::Client);
 
     expect(Telemetry::currentSpan())->toBeNull('a detached span is not ambient');
 
     Telemetry::tracer()->endOpenSpans('process terminated without completing');
 
-    $closed = allSpans($this->collector)->firstWhere('name', 'GET slow.example');
+    expect(allSpans($this->collector)->firstWhere('name', 'GET slow.example'))->toBeNull();
 
-    expect($closed)->not->toBeNull()
-        ->and($closed->status())->toBe(SpanStatus::Error)
-        ->and($closed->spanId)->toBe($span->spanId);
+    // ...and it is still usable afterwards, because nothing ended it.
+    $span->end();
+
+    expect(allSpans($this->collector)->firstWhere('name', 'GET slow.example'))->not->toBeNull();
+});
+
+it('does not retain a call that is never settled', function () {
+    // Tracking outstanding detached spans kept them alive: nothing else holds
+    // a cancelled call's span, so 30,000 cancellations retained 26MB where the
+    // garbage collector had been freeing them.
+    $tracer = Telemetry::tracer();
+
+    $before = memory_get_usage();
+
+    for ($i = 0; $i < 20_000; $i++) {
+        $tracer->startDetachedSpan('GET example.test', SpanKind::Client);
+    }
+
+    expect((memory_get_usage() - $before) / 1048576)->toBeLessThan(5.0);
+});
+
+it('gives a detached span the dimensions it started with, not the ones it ended with', function () {
+    // An outgoing call can be built under one tenant and settle under another.
+    // Merging at creation alone was not enough: the merge at completion still
+    // ADDED keys that appeared in between, so a span started under tenant A
+    // carried tenant B's user.
+    Telemetry::context(['tenant.id' => 'A']);
+
+    $span = Telemetry::tracer()->startDetachedSpan('GET example.test', SpanKind::Client);
+
+    Telemetry::context(['tenant.id' => 'B', 'user.id' => 'B-user']);
+
+    $span->end();
+
+    $attributes = allSpans($this->collector)->firstWhere('name', 'GET example.test')->attributes();
+
+    expect($attributes['tenant.id'])->toBe('A')
+        ->and($attributes)->not->toHaveKey('user.id');
+});
+
+it('corrects the method as well as the host when a callback rewrites the request', function () {
+    // correctDestination renamed the span from the sent method but left
+    // http.request.method as it was, so the name said POST beside an attribute
+    // and a metric label saying GET.
+    Http::setHandler(function ($request, array $options) {
+        $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+        return Create::promiseFor(new PsrResponse(200));
+    })
+        ->withRequestMiddleware(fn ($request) => $request
+            ->withMethod('POST')
+            ->withUri(new Uri('https://actual.example/new')))
+        ->get('https://configured.example/old');
+
+    $span = allSpans($this->collector)->where('kind', SpanKind::Client)->first();
+
+    expect($span->name)->toBe('POST actual.example')
+        ->and($span->attributes()['http.request.method'])->toBe('POST')
+        ->and($span->attributes()['server.address'])->toBe('actual.example');
 });
 
 it('marks a rejection as a failure whatever it was rejected with', function () {
@@ -505,4 +561,46 @@ it('names the host the call actually went to, not the one first asked for', func
     expect($span->name)->toBe('GET actual.example')
         ->and($span->attributes()['server.address'])->toBe('actual.example')
         ->and($span->attributes()['url.path'])->toBe('/new');
+});
+
+it('corrects a method-only rewrite, and two verbs that normalise alike', function () {
+    // The early return compared the NORMALISED method, and two different verbs
+    // can normalise to the same thing: PROPFIND and REPORT are both _OTHER,
+    // `get` and `GET` are both GET. So a rewrite that changed only the verb
+    // was skipped and left the previous one standing in method_original.
+    $send = function (string $from, string $to) {
+        Http::setHandler(function ($request, array $options) {
+            $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+            return Create::promiseFor(new PsrResponse(200));
+        })
+            ->withRequestMiddleware(fn ($request) => $request->withMethod($to))
+            ->send($from, 'https://same.example/path');
+    };
+
+    $send('PROPFIND', 'REPORT');
+
+    $attributes = allSpans($this->collector)->where('kind', SpanKind::Client)->last()->attributes();
+
+    expect($attributes['http.request.method'])->toBe('_OTHER')
+        ->and($attributes['http.request.method_original'])->toBe('REPORT');
+});
+
+it('leaves no empty method_original behind when the verb is canonical', function () {
+    // HttpMethod::original() returns null for a canonical verb, and a null
+    // attribute is not an absence — it reaches the exporter as an empty
+    // string. A correction that makes the method canonical has to clear the
+    // one that was there.
+    Http::setHandler(function ($request, array $options) {
+        $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+        return Create::promiseFor(new PsrResponse(200));
+    })
+        ->withRequestMiddleware(fn ($request) => $request->withMethod('POST'))
+        ->send('PROPFIND', 'https://same.example/path');
+
+    $attributes = allSpans($this->collector)->where('kind', SpanKind::Client)->last()->attributes();
+
+    expect($attributes['http.request.method'])->toBe('POST')
+        ->and($attributes)->not->toHaveKey('http.request.method_original');
 });

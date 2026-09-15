@@ -191,11 +191,39 @@ final class HttpClientSpanMiddleware
         $host = $uri->getHost() !== '' ? $uri->getHost() : 'unknown';
         $path = $uri->getPath() !== '' ? $uri->getPath() : '/';
 
-        if (($span->attributes()['server.address'] ?? null) === $host && ($span->attributes()['url.path'] ?? null) === $path) {
+        $method = HttpMethod::normalize($sent->getMethod());
+        $original = HttpMethod::original($sent->getMethod());
+
+        // The ORIGINAL takes part in the comparison, not just the normalised
+        // method. Two different verbs normalise to the same thing — PROPFIND
+        // and REPORT are both `_OTHER`, `get` and `GET` are both `GET` — so
+        // comparing the normalised form alone skipped a correction and left
+        // the previous verb standing in method_original.
+        if (($span->attributes()['server.address'] ?? null) === $host
+            && ($span->attributes()['url.path'] ?? null) === $path
+            && ($span->attributes()['http.request.method'] ?? null) === $method
+            && ($span->attributes()['http.request.method_original'] ?? null) === $original) {
             return;
         }
 
-        $span->setAttributes(['server.address' => $host, 'url.path' => $path]);
+        // The METHOD too, not only the host. A callback that rewrites the verb
+        // as well as the URI left the name saying POST beside an attribute and
+        // a metric label saying GET — and a callback that rewrites only the
+        // verb was not corrected at all, because the early return above only
+        // looked at where the call went.
+        $span->setAttributes([
+            'server.address' => $host,
+            'url.path' => $path,
+            'http.request.method' => $method,
+        ]);
+
+        // Absent, not null: a null reaches the exporter and serialises as an
+        // empty string, and a correction that made the method canonical has to
+        // clear whatever original was there before.
+        $original === null
+            ? $span->forgetAttribute('http.request.method_original')
+            : $span->setAttribute('http.request.method_original', $original);
+
         $span->updateName(HttpMethod::forSpanName($sent->getMethod()).' '.$host);
     }
 

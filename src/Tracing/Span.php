@@ -49,6 +49,9 @@ final class Span
      */
     private bool $detail = false;
 
+    /** Whether this span took its ambient dimensions when it started. */
+    private bool $contextCaptured = false;
+
     /** Per-span resource baseline (only when measuring is enabled). */
     private ?float $startCpuMs = null;
 
@@ -139,6 +142,21 @@ final class Span
     }
 
     /**
+     * Remove an attribute, rather than setting it to null.
+     *
+     * A null value is not an absence: it survives to the exporter, which
+     * serialises it as an empty string. An attribute that no longer applies —
+     * `http.request.method_original` after a correction that made the method
+     * canonical — has to go, not be blanked.
+     */
+    public function forgetAttribute(string $key): self
+    {
+        unset($this->attributes[$key]);
+
+        return $this;
+    }
+
+    /**
      * Fill attributes without overwriting — span-specific values always
      * win over ambient context dimensions.
      *
@@ -151,6 +169,31 @@ final class Span
         }
 
         return $this;
+    }
+
+    /**
+     * Take the ambient dimensions NOW, and refuse any taken later.
+     *
+     * For a span that outlives the context it was started in — an outgoing
+     * call that settles under a different tenant. Merging at creation alone is
+     * not enough: the merge at completion protects the keys already here, but
+     * still ADDS keys that appeared in between, so a span started under tenant
+     * A ended up carrying tenant B's user. A snapshot is all of it or none.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function captureContext(array $attributes): self
+    {
+        $this->mergeMissingAttributes($attributes);
+
+        $this->contextCaptured = true;
+
+        return $this;
+    }
+
+    public function hasCapturedContext(): bool
+    {
+        return $this->contextCaptured;
     }
 
     /**
