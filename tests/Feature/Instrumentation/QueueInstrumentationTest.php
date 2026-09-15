@@ -285,3 +285,23 @@ it('counts one attempt once, even when Laravel reports it failed and processed',
         ->and($families['queue.jobs.failed']->samples[0]->value)->toBe(1.0)
         ->and($families)->not->toHaveKey('queue.jobs.processed');
 });
+
+it('still finds the snapshot when the app maps the exception to another one', function () {
+    // Handler::map() replaces the throwable BEFORE the reportable callbacks
+    // run, so the object the handler reports is not the one the queue listener
+    // saw. Laravel's own mappers keep the original as `previous`, which is the
+    // thread back to the snapshot.
+    $original = new RuntimeException('the job blew up');
+
+    Telemetry::rememberFailureContext($original, ['tenant' => 'acme']);
+
+    $mapped = new LogicException('a domain-specific wrapper', 0, $original);
+
+    expect(Telemetry::failureContextFor($mapped))->toBe(['tenant' => 'acme']);
+});
+
+it('does not walk off the end of an unrelated exception chain', function () {
+    $unrelated = new LogicException('outer', 0, new RuntimeException('inner'));
+
+    expect(Telemetry::failureContextFor($unrelated))->toBe([]);
+});

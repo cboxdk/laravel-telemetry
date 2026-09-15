@@ -11,6 +11,7 @@ use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -40,6 +41,7 @@ final class DoctorCommand extends Command
 
         $healthy = $this->checkStore($store);
         $this->checkCacheCollision();
+        $this->checkRedaction();
         $this->checkProfiling();
         $healthy = $this->checkPrometheus() && $healthy;
         $healthy = $this->checkOtlp($telemetry) && $healthy;
@@ -147,6 +149,74 @@ final class DoctorCommand extends Command
                 );
             }
         }
+    }
+
+    /**
+     * A published config that COPIED the redaction lists instead of
+     * referencing them.
+     *
+     * `mergeConfigFrom()` is a shallow `array_merge`, so a published
+     * `config/telemetry.php` replaces the package's `redaction` block whole.
+     * An app that published before a pattern was added keeps the list it
+     * copied and never learns the new one — silently, and specifically for the
+     * patterns that catch credentials. This is the only warning it gets.
+     *
+     * Not a failure: replacing the lists deliberately is a legitimate choice.
+     * It is reported so it is a choice rather than an accident.
+     */
+    private function checkRedaction(): void
+    {
+        if (! config('telemetry.redaction.enabled', true)) {
+            $this->components->twoColumnDetail('Redaction', '<fg=yellow>DISABLED — attribute values are exported verbatim</>');
+
+            return;
+        }
+
+        $stale = [];
+
+        foreach ([
+            'patterns' => Redactor::defaultPatterns(),
+            'keys' => Redactor::defaultKeys(),
+            'safe_keys' => Redactor::defaultSafeKeys(),
+        ] as $name => $defaults) {
+            $configured = config("telemetry.redaction.{$name}");
+
+            if (! is_array($configured)) {
+                continue;
+            }
+
+            // Patterns are keyed by regex, keys and safe_keys are lists, so
+            // compare on whichever side carries the identity. Both sides go
+            // through Cast so a config holding junk compares as the strings it
+            // actually has rather than blowing up the check.
+            $have = Cast::stringList($name === 'patterns' ? array_keys($configured) : array_values($configured));
+            $want = Cast::stringList($name === 'patterns' ? array_keys($defaults) : array_values($defaults));
+
+            $missing = count(array_diff($want, $have));
+
+            if ($missing > 0) {
+                $stale[] = "{$missing} of ".count($want)." {$name}";
+            }
+        }
+
+        if ($stale === []) {
+            $this->components->twoColumnDetail('Redaction', '<fg=green>OK — the package defaults are in effect</>');
+
+            return;
+        }
+
+        // Short in the column, remedy on its own line: twoColumnDetail pads to
+        // the terminal width and an 80-column terminal eats the tail, which is
+        // exactly the half that says what to do about it.
+        $this->components->twoColumnDetail(
+            'Redaction',
+            '<fg=yellow>STALE — missing '.implode(', ', $stale).' the package ships</>',
+        );
+
+        $this->components->warn(
+            'A published config that copied the redaction lists cannot receive patterns added later. '
+            ."Reference them instead: 'patterns' => [...Redactor::defaultPatterns(), ...your own].",
+        );
     }
 
     private function checkProfiling(): void

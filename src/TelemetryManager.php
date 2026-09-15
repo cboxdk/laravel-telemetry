@@ -349,13 +349,31 @@ class TelemetryManager
      * it — the WeakMap holds no reference of its own, so an entry dies with
      * the exception it describes, which is why this reads rather than takes.
      *
+     * The `previous` chain is walked because the throwable that reaches the
+     * handler is not always the one the queue listener saw: an app that
+     * registers an exception mapper (`Handler::map()`) has its replacement
+     * reported instead, with the original kept as `previous`. Bounded, so a
+     * deep or self-referential chain cannot spin here.
+     *
      * @return array<string, scalar|null>
      */
     public function failureContextFor(Throwable $e): array
     {
-        $context = $this->failureContext[$e] ?? [];
+        if ($this->failureContext === null) {
+            return [];
+        }
 
-        return is_array($context) ? $context : [];
+        $seen = 0;
+
+        for ($current = $e; $current !== null && $seen < 16; $current = $current->getPrevious(), $seen++) {
+            $context = $this->failureContext[$current] ?? null;
+
+            if (is_array($context)) {
+                return $context;
+            }
+        }
+
+        return [];
     }
 
     /**

@@ -333,10 +333,12 @@ final class QueueInstrumentation implements ManagesRequestState
         });
 
         // A released attempt is reported exactly like a terminal one — the
-        // worker rethrows and the handler runs after this teardown — so with
-        // the default tries > 1 every attempt but the last produced an
-        // unattributable error record. Where the event carries the throwable
-        // that caused the release, that is the one being reported.
+        // worker rethrows and the handler runs after this teardown — so
+        // wherever retries are configured (`queue:work --tries=3`, a job's
+        // own `$tries`, Horizon's `tries`; the framework default is 1) every
+        // attempt but the last produced an unattributable error record. Where
+        // the event carries the throwable that caused the release, that is the
+        // one being reported.
         //
         // `exception` was added to this event in Laravel v13.31.0. On 12.x and
         // on 13.0–13.30 the property does not exist at all, and reading it

@@ -168,3 +168,18 @@ it('still leaves names that merely end in a credential word alone', function () 
         expect($redactor->value('attr', $value))->toBe($value);
     }
 });
+
+it('takes the whole credential when its value carries a delimiter or quotes', function () {
+    // Two ways a value used to escape: a literal `;` ended the match and
+    // published everything after it, and a doubled quote defeated the single
+    // optional one so nothing matched at all. Over-redacting a `;`-separated
+    // query is the right way to be wrong about a credential.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('url.query', 'access_token=abc;secret-suffix'))
+        ->toBe('access_token=[REDACTED]')
+        ->and($redactor->value('log.line', 'access_token=""SECRET'))
+        ->toBe('access_token=[REDACTED]')
+        ->and($redactor->value('url.query', '?api_token=sk_live_1&page=2'))
+        ->toBe('?api_token=[REDACTED]&page=2');
+});

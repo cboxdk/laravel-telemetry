@@ -7,7 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading
+
+- **If you published `config/telemetry.php` before this release, replace the
+  copied redaction lists with the accessors.** `mergeConfigFrom()` is a shallow
+  `array_merge`, so a published config replaces the package's `redaction` block
+  whole and never receives a pattern added later — including the ones added
+  here, which catch credentials. Rebuilding the config cache does not help.
+
+  ```php
+  'keys'      => Redactor::defaultKeys(),
+  'patterns'  => Redactor::defaultPatterns(),
+  'safe_keys' => Redactor::defaultSafeKeys(),
+  ```
+
+  Append your own by spreading them rather than replacing:
+  `'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]']`.
+  `telemetry:doctor` now reports this drift, so a config left behind says so
+  instead of going quiet.
+
 ### Fixed
+
+- **Credential query parameters escaped by how they were spelled.** `url.query`
+  and the captured referer were scrubbed by pattern, over raw text — so
+  `%74oken=`, `token%5B%5D=`, `access_token%5B0%5D=` and `token[name]=` went
+  out with their values intact, and so did any credential that happened to be
+  the FIRST parameter, because `url.query` carries no leading `?` for the
+  pattern to anchor on. An OAuth callback puts the authorization code exactly
+  there.
+
+  Both are now taken apart and matched on the DECODED parameter name, which is
+  the half a pattern cannot do without rewriting the value. Names ending in
+  `_token`, `_secret`, `_password`, `_api_key`, `_signature` (and their `-` and
+  `.` spellings, so `x-api-key` counts) match as a suffix; `key`, `auth`,
+  `code`, `state`, `pwd`, `sig`, `jwt` and `otp` match exactly, so `sort_key`,
+  `postal_code`, `token_count` and `signature_required` stay readable. The
+  referer's path and fragment are left as they were.
+
+- **A credential value ended at the wrong character.** The export pattern ran a
+  value to the next `;`, so `access_token=abc;more` published everything after
+  the semicolon, and its single optional quote could not get past a doubled
+  one, so `access_token=""SECRET` matched nothing at all. Values now run to the
+  next `&` or to whitespace with any number of quotes stripped — over-redacting
+  a `;`-separated query rather than leaking half a key.
+
+- **An exception mapper lost the failed job's dimensions.** `Handler::map()`
+  replaces the throwable before the reportable callbacks run, so the snapshot
+  keyed to the original was never found. The `previous` chain is now walked,
+  bounded, which is where Laravel's own mappers leave the original.
+
+### Added
+
+- **`telemetry:doctor` reports a published config that copied the redaction
+  lists** instead of referencing `Redactor::defaultPatterns()` and friends. It
+  names how many entries are missing. See the upgrading note above — this is
+  the failure that has no other symptom.
+
 
 - **`http.request.method` was an unbounded metric label.** It carried the
   method from the request line — whatever the caller sent, with nothing
@@ -57,14 +112,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A failed job's error record could not say whose it was.** A queue worker
   tears the job down before it reports: Laravel dispatches `JobFailed` — or
-  `JobReleasedAfterException`, which is every attempt but the last when
-  `tries > 1` — from inside `Worker::handleJobException()` and only rethrows
+  `JobReleasedAfterException`, which is every attempt but the last wherever
+  retries are configured — from inside `Worker::handleJobException()` and only rethrows
   afterwards, so the exception reaches the handler in `Worker::runJob()`'s
   catch with the job's context already gone.
 
   The dimensions are now snapshotted at that teardown and merged into the
-  error event by the reportable listener, which clears the snapshot as it
-  reads it. Live context still wins; this only supplies what is missing.
+  error event by the reportable listener. The snapshot is keyed to the
+  throwable in a `WeakMap`, so it can only ever reach the exception it was
+  taken for, and nothing has to clear it — an entry the handler never claims
+  dies with the exception rather than waiting to be mistaken for someone
+  else's. Live context still wins; this only supplies what is missing.
   Deliberately a snapshot rather than keeping the context alive: alive means
   every later span, log, event and outgoing `baggage` header in that worker
   process inherits a dead job's tenant, including the worker's own lifetime

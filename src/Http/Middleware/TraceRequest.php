@@ -55,15 +55,28 @@ final class TraceRequest
     ];
 
     /**
-     * Query parameters blanked in url.query at CAPTURE time.
+     * Query parameter names blanked in url.query at CAPTURE time, matched on
+     * a SUFFIX so `api_token`, `access_token` and `_token` all count.
      *
-     * A first pass, not the thorough one: Redactor's default patterns catch
-     * prefixes, array syntax, encoded names and the same credential wherever
-     * else it appears — referer, exception messages, log records — because
-     * every attribute value passes through it on the way out. This list keeps
-     * the obvious cases out of the span while it is still in memory.
+     * This layer decodes the name before matching, which is the half Redactor
+     * cannot do: a pattern over raw text cannot see that `%74oken` and
+     * `token%5B%5D` are the same parameter without rewriting the value. Here
+     * the string is known to be a query, so it can be taken apart properly.
+     * Redactor still catches the same credential everywhere ELSE it surfaces
+     * — referer, exception messages, log records — because every attribute
+     * value passes through it on the way out.
      */
-    private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
+    private const SENSITIVE_QUERY_PARAMS = ['token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'signature'];
+
+    /**
+     * Names that are credentials only as a whole word.
+     *
+     * `key` is an API key and `code` is an OAuth authorization code — but
+     * `sort_key` is a sort order and `postal_code` is an address, and blanking
+     * those protects nothing while destroying real telemetry. Matched exactly,
+     * never as a suffix.
+     */
+    private const AMBIGUOUS_QUERY_PARAMS = ['key', 'auth', 'code', 'state', 'pwd', 'sig', 'jwt', 'otp'];
 
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
@@ -469,9 +482,115 @@ final class TraceRequest
             return null;
         }
 
-        $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
+        return self::redactQueryString($query);
+    }
 
-        return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
+    /**
+     * The same treatment for a URL captured whole.
+     *
+     * The referer is a URL a browser sends us, and an OAuth callback that the
+     * user navigated away from puts its authorization code in exactly that
+     * header. Only the query part is rewritten; the rest is left alone so the
+     * attribute still reads as the URL it was.
+     */
+    private static function redactedUrl(?string $url): ?string
+    {
+        if ($url === null || $url === '') {
+            return $url;
+        }
+
+        $mark = strpos($url, '?');
+
+        if ($mark === false) {
+            return $url;
+        }
+
+        // A fragment is not part of the query and must survive intact.
+        $query = substr($url, $mark + 1);
+        $hash = strpos($query, '#');
+        $fragment = $hash === false ? '' : substr($query, $hash);
+
+        if ($hash !== false) {
+            $query = substr($query, 0, $hash);
+        }
+
+        return substr($url, 0, $mark + 1).self::redactQueryString($query).$fragment;
+    }
+
+    /**
+     * Blank the value of every credential parameter in a query string.
+     */
+    private static function redactQueryString(string $query): string
+    {
+        // Taken apart rather than pattern-matched: the separators are kept
+        // verbatim so the attribute still reads like the query it was, and
+        // only the value of a sensitive parameter is replaced. A pair with no
+        // `=` is passed through untouched.
+        $parts = preg_split('/([&;])/', $query, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        if ($parts === false) {
+            return $query;
+        }
+
+        $redacted = '';
+
+        foreach ($parts as $part) {
+            if ($part === '&' || $part === ';') {
+                $redacted .= $part;
+
+                continue;
+            }
+
+            $equals = strpos($part, '=');
+
+            if ($equals === false) {
+                $redacted .= $part;
+
+                continue;
+            }
+
+            $name = substr($part, 0, $equals);
+
+            // Spelled like the Redactor's default replacement so the two
+            // passes agree — the export patterns run over this string too, and
+            // re-matching a value they already blanked must be a no-op rather
+            // than a second, differently-spelled substitution.
+            $redacted .= self::parameterIsSensitive($name) ? $name.'=[REDACTED]' : $part;
+        }
+
+        return $redacted;
+    }
+
+    /**
+     * Is this parameter NAME a credential, however it was spelled?
+     *
+     * Decoded first, so `%74oken` and `access_token%5B0%5D` are recognised as
+     * what the application will read them as. Array syntax is dropped for the
+     * same reason: `token[]` and `token[0]` are the parameter `token`.
+     */
+    private static function parameterIsSensitive(string $name): bool
+    {
+        $name = strtolower(rawurldecode($name));
+        $name = preg_replace('/\[[^\]]*\]$/', '', $name) ?? $name;
+
+        // `-` and `.` separate a name the same way `_` does, and a header-ish
+        // spelling is common in a query: `x-api-key` is `x_api_key`.
+        $name = strtr($name, ['-' => '_', '.' => '_']);
+
+        if (in_array($name, self::AMBIGUOUS_QUERY_PARAMS, true)) {
+            return true;
+        }
+
+        foreach (self::SENSITIVE_QUERY_PARAMS as $sensitive) {
+            // Exact, or a suffix after a word boundary — so `api_token` and
+            // `x-api-key` count while `tokens_used`, `token_count` and
+            // `signature_required` do not.
+            if ($name === $sensitive || str_ends_with($name, '_'.$sensitive)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -580,7 +699,7 @@ final class TraceRequest
             'http.request.method_original' => HttpMethod::original($request->getMethod()),
             'http.response.status_code' => $response->getStatusCode(),
             'user_agent.original' => $request->userAgent(),
-            'http.request.header.referer' => $request->headers->get('referer'),
+            'http.request.header.referer' => self::redactedUrl($request->headers->get('referer')),
         ], static fn ($v) => $v !== null);
 
         if (($user = $request->user()) !== null) {

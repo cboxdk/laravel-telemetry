@@ -96,8 +96,11 @@ final class Redactor
             // three.
             //
             // The name matches loosely on purpose: `api_token`, `accessToken`,
-            // `_token`, `token[]` and percent-encoded spellings are all the
-            // same secret. Only words that are ALWAYS credentials are matched
+            // `_token` and `token[]` are all the same secret. A name written
+            // percent-encoded (`%74oken=`, `token%5B%5D=`) is NOT caught here
+            // — the pattern matches literal text, and decoding it would mean
+            // rewriting the value. Query strings are decoded and matched by
+            // parameter name at capture time instead, in TraceRequest. Only words that are ALWAYS credentials are matched
             // this way — `code`, `state` and `key` are ordinary parameters as
             // often as they are secrets, and redacting `postal_code` protects
             // nothing while destroying real telemetry.
@@ -108,7 +111,15 @@ final class Redactor
             // query string. The name still has to end in a credential word
             // immediately before the `=`, which is what keeps `token_count=`,
             // `signature_required=` and `secret_count=` out of it.
-            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
+            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]*[^&\s\'"]+/i' => '$1[REDACTED]',
+            // A credential value runs to the next `&` or to whitespace, and
+            // any number of surrounding quotes is stripped first. Not to the
+            // next `;`: a value legitimately containing one used to be
+            // redacted up to it and published from there on, and `""SECRET`
+            // matched nothing at all because a single optional quote could
+            // not get past two. Over-redacting a `;`-separated query is the
+            // right way to be wrong here.
+            //
             // The ambiguous words, matched EXACTLY, never with a prefix, and
             // only inside something that is actually a query — after `?`, `&`
             // or `;`, never at the start of a value. `?code=` on an OAuth
@@ -116,7 +127,7 @@ final class Redactor
             // exists; `postal_code=` is an address, and a `cache.key`
             // attribute whose whole value is `key=abc` is not a credential at
             // all.
-            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
+            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]*[^&\s\'"]+/i' => '$1[REDACTED]',
         ];
     }
 
