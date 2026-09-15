@@ -5,6 +5,41 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A cancelled outgoing call was retained instead of collected.** 2.2.0 kept
+  every outstanding detached span in a map so the shutdown path could close
+  one whose promise was cancelled or never settled. Nothing else references a
+  cancelled call's span, so the map was the only thing keeping it alive: 30,000
+  cancellations retained about 26MB where the garbage collector had been
+  freeing them. A request, job or Octane context reset released it; a daemon or
+  a long-running command without those resets did not.
+
+- **Shutdown ended calls that were still going to succeed.** `flushOnShutdown`
+  runs on every request, and is registered before the callbacks an application
+  adds to await its own outstanding work — so a call that went on to return 200
+  was exported as an error lasting a third of a millisecond, and its real
+  completion could no longer update or export it.
+
+  Both are gone with the tracking. An abandoned call now leaves no span, which
+  is what the instrumentation has always said it prefers: a missing span is the
+  lesser evil, a span with the wrong duration and status is a lie that reads as
+  data.
+
+- **A detached span mixed the context it started in with the one it ended in.**
+  Taking the ambient dimensions at creation protected the keys already on the
+  span, but the merge at completion still ADDED keys that appeared in between,
+  so a call begun under one tenant carried the next tenant's user. A snapshot
+  is all of it or none.
+
+- **The span name could disagree with its own method attribute.** When a
+  `withRequestMiddleware()` callback rewrote the verb as well as the URI, the
+  name was corrected from the sent request while `http.request.method` and the
+  duration label kept the original — and a callback that rewrote only the verb
+  was not corrected at all.
+
 ## [2.2.0] - 2026-09-15
 
 ### Changed

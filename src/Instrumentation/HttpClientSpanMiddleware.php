@@ -191,11 +191,26 @@ final class HttpClientSpanMiddleware
         $host = $uri->getHost() !== '' ? $uri->getHost() : 'unknown';
         $path = $uri->getPath() !== '' ? $uri->getPath() : '/';
 
-        if (($span->attributes()['server.address'] ?? null) === $host && ($span->attributes()['url.path'] ?? null) === $path) {
+        $method = HttpMethod::normalize($sent->getMethod());
+
+        if (($span->attributes()['server.address'] ?? null) === $host
+            && ($span->attributes()['url.path'] ?? null) === $path
+            && ($span->attributes()['http.request.method'] ?? null) === $method) {
             return;
         }
 
-        $span->setAttributes(['server.address' => $host, 'url.path' => $path]);
+        // The METHOD too, not only the host. A callback that rewrites the verb
+        // as well as the URI left the name saying POST beside an attribute and
+        // a metric label saying GET — and a callback that rewrites only the
+        // verb was not corrected at all, because the early return above only
+        // looked at where the call went.
+        $span->setAttributes([
+            'server.address' => $host,
+            'url.path' => $path,
+            'http.request.method' => $method,
+            'http.request.method_original' => HttpMethod::original($sent->getMethod()),
+        ]);
+
         $span->updateName(HttpMethod::forSpanName($sent->getMethod()).' '.$host);
     }
 
