@@ -70,6 +70,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `dXNlcjpwYXNz` go; `Authentication`, `realm=api` and
   `error=insufficient_scope` stay. Predates 2.0.0.
 
+- **A parameter name full of unclosed brackets could stall the process.** The
+  regex that stripped array levels was quadratic on `token[[[[[…]tail` — 20k
+  brackets took 67ms, 200k over a second — and it raised no PCRE error, so the
+  fail-closed guard never saw it. Reachable from a query string. The root name
+  is now taken by truncating at the first bracket, which is linear and means
+  the same thing. Introduced in this release, never shipped.
+
+- **`safe_keys` are no longer unioned with the package's.** `keys` and
+  `patterns` are rules, so adding the package's can only redact more;
+  `safe_keys` are EXEMPTIONS, and adding those back would re-expose what an app
+  deliberately stopped exempting. An app that narrows `safe_keys` keeps it
+  narrowed.
+
 - **A credential parameter written any way but literally escaped every
   attribute except the two that are parsed.** `url.query` and the referer are
   taken apart at capture, but an exception message quoting the same URL was
@@ -77,8 +90,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `token[name]=SECRET` went out intact. Every attribute value now gets a pass
   that matches on the DECODED parameter name — the name, never the value,
   because decoding the value would publish something the caller never sent.
-  `key`, `auth`, `code` and `state` still need a real query context; `pwd`,
-  `sig`, `jwt` and `otp` do not, being credentials wherever they appear.
+  `key`, `auth`, `code`, `state` and `pwd` still need a real query context —
+  `pwd=/srv/app` is a working directory in any shell-flavoured log — while
+  `sig`, `jwt` and `otp` are credentials wherever they appear, and are now
+  attribute keys in their own right so `log.context.otp` is covered too.
+
+  The two query-parameter patterns this replaces are gone from
+  `defaultPatterns()`. They could not see an encoded name, and a second pass
+  over a value they had already replaced re-matched it — appending its own tail
+  each time, for any `replacement` containing a space. The new pass is
+  idempotent and takes a quoted value whole, so a password with a space in it
+  no longer publishes the rest of itself. `replace_defaults` turns it off with
+  the lists, since it is a built-in rule like the others.
 
 - **An exception mapper lost the failed job's dimensions.** `Handler::map()`
   replaces the throwable before the reportable callbacks run, so the snapshot

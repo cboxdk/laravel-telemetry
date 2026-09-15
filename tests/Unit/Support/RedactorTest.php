@@ -267,10 +267,16 @@ it('keeps the ambiguous names out of loose prose', function () {
         expect($redactor->value('cache.key', $value))->toBe($value);
     }
 
-    // ...but `pwd`, `sig`, `jwt` and `otp` are never ordinary, so they do not
-    // need one.
-    expect($redactor->value('url.query', 'pwd=hunter2&page=1'))
-        ->toBe('pwd=[REDACTED]&page=1');
+    // `pwd` is ambiguous for the same reason: `pwd=/srv/app` is a working
+    // directory in any shell-flavoured log. Inside a query it is a password.
+    expect($redactor->value('log.line', 'pwd=/srv/app is the cwd'))
+        ->toBe('pwd=/srv/app is the cwd')
+        ->and($redactor->value('url.query', 'page=1&pwd=hunter2'))
+        ->toBe('page=1&pwd=[REDACTED]');
+
+    // `sig`, `jwt` and `otp` are never ordinary, so they need no query.
+    expect($redactor->value('log.line', 'otp=998877 sent'))
+        ->toBe('otp=[REDACTED] sent');
 });
 
 it('leaves a WWW-Authenticate challenge readable', function () {
@@ -283,4 +289,48 @@ it('leaves a WWW-Authenticate challenge readable', function () {
         ->and($redactor->value('log.line', 'Bearer error=insufficient_scope'))->toBe('Bearer error=insufficient_scope')
         ->and($redactor->value('log.line', 'Basic YTpi'))->toBe('Basic [REDACTED]')
         ->and($redactor->value('log.line', 'Bearer abc123'))->toBe('Bearer [REDACTED]');
+});
+
+it('cannot be stalled by a parameter name full of open brackets', function () {
+    // `(?:\[[^\]]*\])+$` is quadratic on a name that opens brackets and never
+    // closes them — and it raised no PCRE error, so the fail-closed guard
+    // never saw it. It was reachable from a query string.
+    $name = 'token'.str_repeat('[', 200_000).']tail';
+
+    $started = hrtime(true);
+    $result = Redactor::parameterIsCredential($name);
+
+    expect($result)->toBeTrue()
+        ->and((hrtime(true) - $started) / 1e6)->toBeLessThan(50.0);
+});
+
+it('leaves a value already carrying the replacement alone', function () {
+    // A replacement containing a space used to be re-matched as far as the
+    // space and replaced again, appending its own tail on every pass.
+    $redactor = Redactor::fromConfig(['enabled' => true, 'replacement' => '[HIDDEN VALUE]']);
+
+    $once = $redactor->value('url.query', 'token=SECRET&x=1');
+
+    expect($once)->toBe('token=[HIDDEN VALUE]&x=1')
+        ->and($redactor->value('url.query', $once))->toBe($once);
+});
+
+it('keeps an exemption list the app narrowed', function () {
+    // `keys` and `patterns` are rules, so unioning the package's in can only
+    // redact more. `safe_keys` are exemptions, and adding them back would
+    // re-expose what an app deliberately stopped exempting.
+    expect(Redactor::fromConfig(['enabled' => true, 'safe_keys' => []])->value('session.id', 'SESSION_VALUE'))
+        ->toBe('[REDACTED]');
+});
+
+it('lets an app that takes the lists over turn off the name heuristics too', function () {
+    $redactor = Redactor::fromConfig([
+        'enabled' => true,
+        'replace_defaults' => true,
+        'keys' => [],
+        'patterns' => [],
+        'safe_keys' => [],
+    ]);
+
+    expect($redactor->value('log.message', 'token=SECRET'))->toBe('token=SECRET');
 });

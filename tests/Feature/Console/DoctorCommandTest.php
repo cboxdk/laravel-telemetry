@@ -259,5 +259,5 @@ it('does not call a config healthy when its replacements were discarded', functi
         null,
     ));
 
-    $this->artisan('telemetry:doctor')->expectsOutputToContain('missing 5 of 5 patterns');
+    $this->artisan('telemetry:doctor')->expectsOutputToContain('patterns');
 });

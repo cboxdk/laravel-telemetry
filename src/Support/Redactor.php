@@ -43,6 +43,8 @@ final class Redactor
         private readonly array $patterns = [],
         private readonly string $replacement = '[REDACTED]',
         private readonly array $safeKeys = [],
+        /** Whether the app took the lists over, which also turns off the built-in name heuristics. */
+        private readonly bool $replaceDefaults = false,
     ) {}
 
     /**
@@ -77,7 +79,13 @@ final class Redactor
                 ? self::defaultPatterns()
                 : ($replace ? $patterns : [...self::defaultPatterns(), ...$patterns]),
             replacement: is_string($config['replacement'] ?? null) ? $config['replacement'] : '[REDACTED]',
-            safeKeys: self::union(self::defaultSafeKeys(), $safeKeys, $replace),
+            // NOT unioned. `keys` and `patterns` are rules, so adding the
+            // package's can only redact more; `safe_keys` are EXEMPTIONS, and
+            // adding the package's back would re-expose something an app
+            // deliberately stopped exempting. Unioning a rule is safe in a way
+            // unioning an exemption is not.
+            safeKeys: $safeKeys ?? self::defaultSafeKeys(),
+            replaceDefaults: $replace,
         );
     }
 
@@ -95,25 +103,50 @@ final class Redactor
      * cache key and `code=200` is a status, and blanking those protects
      * nothing.
      *
-     * Idempotent: a value already replaced re-matches and is replaced with
-     * itself, which is what lets the capture pass and this one both run.
+     * A quoted value is taken whole, so a password containing a space does
+     * not publish its tail — but only when the closing quote actually ends the
+     * value. `token=""SECRET` is not an empty quoted string followed by a
+     * word; it is a value that happens to start with two quotes, and reading
+     * it the other way published `SECRET`.
+     *
+     * Idempotent: a value already carrying the replacement is left alone,
+     * checked at the value's offset in the original string so a replacement
+     * containing a space is recognised whole.
      */
     private function redactEncodedParameters(string $value): string
     {
-        if (! str_contains($value, '=')) {
+        // Turned off with the lists. An app that sets replace_defaults has
+        // said the rules are its own, and this pass is a built-in rule.
+        if ($this->replaceDefaults || ! str_contains($value, '=')) {
             return $value;
         }
 
         $scrubbed = preg_replace_callback(
-            '/(^|[?&;\s])([^=&;?\s]{1,64})=([^&\s]+)/',
-            function (array $m): string {
-                $ambiguous = $m[1] === '?' || $m[1] === '&' || $m[1] === ';';
+            '/(^|[?&;\s])([^=&;?\s]{1,64})=("[^"\n]*"(?=[&\s]|$)|\'[^\'\n]*\'(?=[&\s]|$)|[^&\s]+)/',
+            /** @param array<int, array{0: string, 1: int}> $m */
+            function (array $m) use ($value): string {
+                $separator = $m[1][0];
+                $ambiguous = $separator === '?' || $separator === '&' || $separator === ';';
 
-                return self::parameterIsCredential($m[2], $ambiguous)
-                    ? $m[1].$m[2].'='.$this->replacement
-                    : $m[0];
+                if (! self::parameterIsCredential($m[2][0], $ambiguous)) {
+                    return $m[0][0];
+                }
+
+                // Already replaced. Checked against the ORIGINAL string at the
+                // value's offset rather than against the captured value, since
+                // a replacement containing a space — `[HIDDEN VALUE]` — is
+                // captured only as far as the space and would otherwise be
+                // replaced again, leaving the tail behind.
+                $at = $m[3][1];
+
+                if (str_starts_with(substr($value, $at), $this->replacement)) {
+                    return $m[0][0];
+                }
+
+                return $separator.$m[2][0].'='.$this->replacement;
             },
             $value,
+            flags: PREG_OFFSET_CAPTURE,
         );
 
         if (! is_string($scrubbed)) {
@@ -156,6 +189,9 @@ final class Redactor
             'password', 'passwd', 'secret', 'token', 'api_key', 'apikey',
             'auth', 'authorization', 'signature', 'credential', 'credentials',
             'private_key', 'credit_card', 'card_number', 'cvv', 'ssn', 'session',
+            // The short spellings a structured log context uses as its own
+            // key: `log.context.otp`, `log.context.sig`.
+            'otp', 'sig', 'jwt',
         ];
     }
 
@@ -168,8 +204,9 @@ final class Redactor
     public const CREDENTIAL_PARAMETERS = [
         'token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'signature',
         // Never an ordinary parameter name, so they do not need a query
-        // context the way `key` and `code` do.
-        'pwd', 'sig', 'jwt', 'otp',
+        // context the way `key` and `code` do. `pwd` is NOT among them —
+        // `pwd=/srv/app` is a working directory in any shell-flavoured log.
+        'sig', 'jwt', 'otp',
     ];
 
     /**
@@ -182,7 +219,7 @@ final class Redactor
      *
      * @var list<string>
      */
-    public const AMBIGUOUS_PARAMETERS = ['key', 'auth', 'code', 'state'];
+    public const AMBIGUOUS_PARAMETERS = ['key', 'auth', 'code', 'state', 'pwd'];
 
     /**
      * Is this parameter NAME a credential, however it was spelled?
@@ -207,8 +244,17 @@ final class Redactor
 
         $name = strtolower($name);
 
-        if (str_contains($name, '[')) {
-            $name = preg_replace('/(?:\[[^\]]*\])+$/', '', $name) ?? $name;
+        // Truncate at the FIRST bracket rather than stripping trailing levels
+        // with a regex. `(?:\[[^\]]*\])+$` is quadratic on a name that opens
+        // brackets and never closes them — 20k of them took 67ms and 100k over
+        // a second, with no PCRE error to trip the fail-closed guard, so it
+        // was a denial of service reachable from a query string. The root name
+        // is what matters anyway: `token[a][b]` is `token`, and
+        // `filters[postal_code]` is `filters`.
+        $bracket = strpos($name, '[');
+
+        if ($bracket !== false) {
+            $name = substr($name, 0, $bracket);
         }
 
         // `-` and `.` separate a name the way `_` does, so a header-ish
@@ -260,45 +306,13 @@ final class Redactor
             '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,}={0,2}|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
-            // A credential carried as a query parameter, wherever the string
-            // came from: url.query, a referer header, an exception message
-            // that quotes a URL, a log line. One pattern here reaches all of
-            // them, because every attribute value passes through this class —
-            // scrubbing url.query alone left the same secret in the other
-            // three.
-            //
-            // The name matches loosely on purpose: `api_token`, `accessToken`,
-            // `_token` and `token[]` are all the same secret. A name written
-            // percent-encoded (`%74oken=`, `token%5B%5D=`) is NOT caught here
-            // — the pattern matches literal text, and decoding it would mean
-            // rewriting the value. Query strings are decoded and matched by
-            // parameter name at capture time instead, in TraceRequest. Only words that are ALWAYS credentials are matched
-            // this way — `code`, `state` and `key` are ordinary parameters as
-            // often as they are secrets, and redacting `postal_code` protects
-            // nothing while destroying real telemetry.
-            //
-            // Whitespace counts as a separator alongside `?`, `&` and `;`, so
-            // a credential quoted in prose — `Invalid api_token=sk_live_9` in
-            // an exception message — is caught too, not only one sitting in a
-            // query string. The name still has to end in a credential word
-            // immediately before the `=`, which is what keeps `token_count=`,
-            // `signature_required=` and `secret_count=` out of it.
-            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]*[^&\s]+/i' => '$1[REDACTED]',
-            // A credential value runs to the next `&` or to whitespace —
-            // nothing else ends it. It used to stop at a `;` or a quote, so
-            // `access_token=abc;more` and `password=abc'SECRET` published
-            // everything past that character, and `access_token=""SECRET`
-            // matched nothing at all because one optional quote could not get
-            // past two. `;` is not a query separator in PHP anyway.
-            //
-            // The ambiguous words, matched EXACTLY, never with a prefix, and
-            // only inside something that is actually a query — after `?`, `&`
-            // or `;`, never at the start of a value. `?code=` on an OAuth
-            // callback is an authorization code and the reason this list
-            // exists; `postal_code=` is an address, and a `cache.key`
-            // attribute whose whole value is `key=abc` is not a credential at
-            // all.
-            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]*[^&\s]+/i' => '$1[REDACTED]',
+            // NOTE: the two query-parameter patterns that used to live here
+            // are gone. Matching a parameter by literal text could never see
+            // that `%74oken=` and `token%5B%5D=` are the same secret, and a
+            // second pass over an already-replaced value re-matched it — with
+            // a replacement containing a space, appending its own tail each
+            // time. redactEncodedParameters() does the job by DECODED name
+            // instead, on every attribute value, and is idempotent.
         ];
     }
 
