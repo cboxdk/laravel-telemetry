@@ -218,9 +218,14 @@ it('does not give one failure\'s dimensions to a different exception', function 
 
 it('does the same for an attempt released for retry', function () {
     // Released attempts are reported exactly like terminal ones, so with the
-    // default tries > 1 every attempt but the last was unattributable. The
-    // event does carry the throwable — an earlier comment claiming otherwise
-    // was wrong, and cost this path its fix for a commit.
+    // default tries > 1 every attempt but the last was unattributable.
+    //
+    // Only Laravel v13.31.0 and up put the throwable on this event. Below it
+    // there is no `exception` property at all, so this attribution is simply
+    // not available and the listener must not reach for it. The constructor
+    // accepts the extra argument on every version — PHP discards a surplus
+    // positional argument to a userland function — so the property, not the
+    // signature, is what decides, and it is what this skips on.
     app('queue');
 
     $job = Mockery::mock(Job::class);
@@ -238,7 +243,10 @@ it('does the same for an attempt released for retry', function () {
     $events->dispatch(new JobReleasedAfterException('redis', $job, 0, $released));
 
     expect(Telemetry::failureContextFor($released))->toBe(['tenant' => 'acme']);
-});
+})->skip(
+    fn () => ! property_exists(JobReleasedAfterException::class, 'exception'),
+    'JobReleasedAfterException carries no throwable before Laravel 13.31.',
+);
 
 it('needs nothing to clean the snapshot up', function () {
     // report() does not always run — Worker::$reportJobExceptions is a public

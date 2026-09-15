@@ -63,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process inherits a dead job's tenant, including the worker's own lifetime
   span.
 
+  On the released-for-retry half this depends on the framework: Laravel only
+  put the throwable on `JobReleasedAfterException` in v13.31.0, so on 12.x and
+  on 13.0–13.30 a released attempt has no throwable to key the snapshot to and
+  keeps reporting unattributed. The listener coalesces rather than testing the
+  version, so nothing breaks on the versions without it. `JobFailed` — the
+  terminal failure, and the one that matters most — carries its exception on
+  every supported version and is unaffected.
+
 ## [2.0.0] - 2026-09-14
 
 ### Changed

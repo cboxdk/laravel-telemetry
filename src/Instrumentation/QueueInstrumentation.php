@@ -335,10 +335,20 @@ final class QueueInstrumentation implements ManagesRequestState
         // A released attempt is reported exactly like a terminal one — the
         // worker rethrows and the handler runs after this teardown — so with
         // the default tries > 1 every attempt but the last produced an
-        // unattributable error record. The event carries the throwable that
-        // caused the release, which is the one being reported.
-        if ($event->exception instanceof Throwable) {
-            $this->rememberFailureContext($event->exception);
+        // unattributable error record. Where the event carries the throwable
+        // that caused the release, that is the one being reported.
+        //
+        // `exception` was added to this event in Laravel v13.31.0. On 12.x and
+        // on 13.0–13.30 the property does not exist at all, and reading it
+        // raises an undefined-property warning that Laravel's error handler
+        // turns into an ErrorException — inside a queue listener, on every
+        // retry. Coalesced rather than version-tested: the attribution is a
+        // bonus on versions that carry the throwable, and its absence must
+        // never break the release path on the ones that do not.
+        $releasedBy = $event->exception ?? null;
+
+        if ($releasedBy instanceof Throwable) {
+            $this->rememberFailureContext($releasedBy);
         }
 
         $this->completeJob(
