@@ -86,6 +86,16 @@ final class NotificationInstrumentation implements ManagesRequestState
 
     public function flushRequestState(): void
     {
+        // Dropping the map is not enough on its own: the spans stay on the
+        // tracer's context stack, and the shutdown path ends everything still
+        // open as an error that lasted until the process died. Discarded
+        // properly instead — a missing span is the lesser evil, a span with the
+        // wrong duration and status is a lie that reads as data.
+
+        foreach ($this->sending as $span) {
+            FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
+        }
+
         $this->sending = [];
     }
 }

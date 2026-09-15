@@ -6,7 +6,6 @@ use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
-use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
@@ -19,7 +18,6 @@ it('every stateful instrumentation implements the reset contract', function (str
     expect(new $class(app()))->toBeInstanceOf(ManagesRequestState::class);
 })->with([
     CacheInstrumentation::class,
-    HttpClientInstrumentation::class,
     MailInstrumentation::class,
     NotificationInstrumentation::class,
     TransactionInstrumentation::class,

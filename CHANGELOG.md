@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Outgoing HTTP spans are owned by the Guzzle call instead of paired from
+  events.** Laravel dispatches `RequestSending` from a middleware INSIDE
+  Guzzle's redirect middleware, so it fires once per hop, while
+  `ResponseReceived` fires once per CALL — and nothing on either event says
+  which call a hop belongs to. A listener therefore had to pair them by request
+  identity, which a redirect breaks: every hop but the last stayed open, and
+  `Http::pool` interleaves hops with other members, so no "continue the span
+  that is open" rule can pick the right one either. (Verified: a global Guzzle
+  middleware does see `__redirect_count`, but an options key set there does not
+  survive back up through the redirect middleware.)
+
+  A middleware now wraps ONE hop: it opens a span, calls the handler below it,
+  and closes that exact span when that hop's own promise settles. Nothing is
+  matched, so nothing can be mismatched, and a redirect is simply two hops that
+  each open and close.
+
+  The span is DETACHED — it never becomes the ambient context. That also fixes
+  a second defect: an ambient client span made every pooled request a CHILD of
+  the one dispatched before it, and re-parented whatever ran next onto a call
+  that had not finished.
+
+  Consequences worth knowing. `http.client.request.duration` now observes once
+  per HOP, so a call that followed two redirects records three; that is what
+  the metric always claimed to measure. Each hop reads its own transfer timings
+  — Laravel only keeps the last hop's on the response, so this is the only
+  place an earlier hop could get them. And instrumentation now follows the
+  container's HTTP `Factory`, so a hand-constructed `Factory` is no longer
+  covered; `Http::` and everything resolved from the container is.
+
+  `Cbox\Telemetry\Instrumentation\HttpClientInstrumentation` is removed. It
+  held the per-request state that this replaces.
+
+- **A span an instrumentation abandons is discarded rather than published as a
+  failure.** `flushRequestState()` dropped each instrumentation's own map but
+  left the spans on the tracer's context stack, where the shutdown path —
+  registered with `register_shutdown_function`, so it runs on every request —
+  ends everything still open as an error that lasted until the process died.
+  Mail, notification, command and transaction spans abandoned at an Octane or
+  NativePHP boundary now go through the new `Tracer::discardSpan()`.
+
 ### Added
 
 - **Client spans break their duration into transfer phases.** A span saying an

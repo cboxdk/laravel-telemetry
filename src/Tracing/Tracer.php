@@ -186,6 +186,51 @@ final class Tracer
     }
 
     /**
+     * Start a span that does NOT become the ambient context.
+     *
+     * The ambient stack models "what is happening right now, here". An
+     * outgoing HTTP call does not fit that: several can be open at once
+     * (`Http::pool`), and a promise can be created under one parent and
+     * awaited under another. Pushing those onto the stack made each pooled
+     * request a CHILD of the one dispatched before it, and left whatever ran
+     * next parented to a call that had not finished.
+     *
+     * So the parent is fixed at creation and the span is handed back to
+     * whoever owns it, to be ended when that owner's own work completes. It
+     * still ends through finish(), so sampling, context attributes and the
+     * buffer behave exactly as for any other span.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function startDetachedSpan(string $name, SpanKind $kind = SpanKind::Internal, array $attributes = []): Span
+    {
+        $parent = $this->currentSpan();
+
+        if ($this->traceId === null) {
+            $this->traceId = Ids::traceId();
+        }
+
+        $this->sampled ??= $this->lottery();
+
+        $span = new Span(
+            traceId: $this->traceId,
+            spanId: Ids::spanId(),
+            parentSpanId: $parent->spanId ?? $this->remoteParent?->spanId,
+            name: $name,
+            kind: $kind,
+            sampled: $this->sampled,
+            attributes: $attributes,
+            onEnd: fn (Span $span) => $this->finish($span),
+        );
+
+        if ($this->measureSpanResources && $span->sampled) {
+            $span->measureResources();
+        }
+
+        return $span;
+    }
+
+    /**
      * Measure a closure inside a span. Exceptions are recorded on the span
      * and rethrown.
      *

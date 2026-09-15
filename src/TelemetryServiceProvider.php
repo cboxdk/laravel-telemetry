@@ -36,7 +36,7 @@ use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
-use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
+use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
@@ -82,7 +82,7 @@ use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Foundation\Console\AboutCommand;
-use Illuminate\Http\Client\Events\RequestSending;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\Events\JobProcessing;
@@ -857,9 +857,11 @@ class TelemetryServiceProvider extends ServiceProvider
             $this->app->make(NotificationInstrumentation::class)->register($events);
         }
 
-        if ($config->get('telemetry.instrument.http_client', true) && class_exists(RequestSending::class)) {
-            $this->app->singleton(HttpClientInstrumentation::class);
-            $this->app->make(HttpClientInstrumentation::class)->register($events);
+        if ($config->get('telemetry.instrument.http_client', true) && class_exists(HttpFactory::class)) {
+            // A Guzzle middleware rather than event listeners, because the
+            // events cannot say which call a redirect hop belongs to. See
+            // HttpClientSpanMiddleware.
+            $this->app->make(HttpFactory::class)->globalMiddleware(new HttpClientSpanMiddleware($this->app));
         }
 
         if ($config->get('telemetry.instrument.exceptions', true)) {
@@ -1148,9 +1150,10 @@ class TelemetryServiceProvider extends ServiceProvider
         // boundary. Resetting it here would wipe an in-flight job span
         // when a job runs inside an Octane worker (dispatchSync, task
         // workers). It self-cleans on job-completion events.
+        // HttpClientSpanMiddleware holds no per-request state: each hop's span
+        // is closed by that hop's own promise, so there is nothing to flush.
         return [
             CacheInstrumentation::class,
-            HttpClientInstrumentation::class,
             MailInstrumentation::class,
             NotificationInstrumentation::class,
             TransactionInstrumentation::class,

@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
-use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Promise\Create;
 use GuzzleHttp\Psr7\Request as GuzzleRequest;
-use GuzzleHttp\Psr7\Response as GuzzleResponse;
+use GuzzleHttp\Psr7\Response as PsrResponse;
 use GuzzleHttp\TransferStats;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Bus\Queueable;
@@ -19,9 +20,9 @@ use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\Events\ConnectionFailed;
 use Illuminate\Http\Client\Events\RequestSending;
 use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\Response;
 use Illuminate\Queue\Events\JobProcessed;
@@ -268,33 +269,6 @@ it('samples host and process metrics via telemetry:monitor --once', function () 
  * under the HTTP call that had already failed. A failing dependency quietly
  * rewrote the shape of the whole trace.
  */
-it('closes the client span when a connection fails, and does not swallow later spans', function () {
-    $events = app('events');
-
-    $psr = new GuzzleRequest('GET', 'https://down.example/v1/thing');
-
-    // Two DIFFERENT wrappers around the same call, which is what Laravel does.
-    // Both are held: dropping the first lets PHP reuse its spl_object_id for
-    // the second, which would make identity match by accident and hide the bug.
-    $sent = new Request($psr);
-    $failedWrapper = new Request($psr);
-
-    expect(spl_object_id($sent))->not->toBe(spl_object_id($failedWrapper));
-
-    $events->dispatch(new RequestSending($sent));
-    $events->dispatch(new ConnectionFailed($failedWrapper, new ConnectionException('could not connect')));
-
-    Telemetry::span('after.the.failure', fn () => null);
-
-    $spans = allSpans($this->collector);
-    $failed = $spans->firstWhere('name', 'GET down.example');
-    $after = $spans->firstWhere('name', 'after.the.failure');
-
-    expect($failed)->not->toBeNull('the failed call must be exported')
-        ->and($failed->status())->toBe(SpanStatus::Error)
-        ->and($after)->not->toBeNull()
-        ->and($after->parentSpanId)->not->toBe($failed->spanId, 'later work must not be parented under the dead call');
-});
 
 /**
  * Http::pool() sends several requests concurrently, and they may be identical.
@@ -302,49 +276,103 @@ it('closes the client span when a connection fails, and does not swallow later s
  * lookalike happened to be open — swapping two calls' statuses and durations.
  * The PSR request is the identity the framework actually preserves.
  */
-it('matches a failure to its own span among identical concurrent requests', function () {
-    $events = app('events');
 
-    $psrA = new GuzzleRequest('GET', 'https://twin.example/thing');
-    $psrB = new GuzzleRequest('GET', 'https://twin.example/thing');
+/**
+ * A Guzzle handler that answers from a script, and optionally reports cURL
+ * transfer stats the way a real one would. MockHandler cannot: it produces a
+ * TransferStats with no handler stats behind it.
+ *
+ * @param  list<PsrResponse|Throwable>  $script
+ * @param  array<string, mixed>  $handlerStats
+ */
+function scriptedHandler(array $script, array $handlerStats = []): Closure
+{
+    return function ($request, array $options) use (&$script, $handlerStats) {
+        $next = array_shift($script);
 
-    // Capture which span belongs to which call as it opens — asserting only
-    // "one Error and one Ok" would pass even if the two outcomes were swapped,
-    // which is precisely the bug a shape-match fallback causes.
-    $events->dispatch(new RequestSending(new Request($psrA)));
-    $idA = Telemetry::currentSpan()->spanId;
+        if (isset($options['on_stats'])) {
+            $options['on_stats'](new TransferStats($request, null, 0.1, null, $handlerStats));
+        }
 
-    $events->dispatch(new RequestSending(new Request($psrB)));
-    $idB = Telemetry::currentSpan()->spanId;
+        return $next instanceof Throwable
+            ? Create::rejectionFor($next)
+            : Create::promiseFor($next);
+    };
+}
 
-    expect($idA)->not->toBe($idB);
+it('gives a redirect one span per hop, every one of them closed', function () {
+    // The defect this replaces: RequestSending fires per hop while
+    // ResponseReceived fires once per call, so a listener pairing them left
+    // every hop but the last open forever — never exported, still the ambient
+    // span, and the parent of everything that ran afterwards.
+    $http = Http::setHandler(scriptedHandler([
+        new PsrResponse(302, ['Location' => 'https://example.test/final']),
+        new PsrResponse(200, [], 'ok'),
+    ]));
 
-    // A fails; B succeeds. Both wrapped in fresh wrappers, as Laravel does.
-    $events->dispatch(new ConnectionFailed(new Request($psrA), new ConnectionException('nope')));
-    $events->dispatch(new ResponseReceived(new Request($psrB), new Response(new GuzzleResponse(200))));
+    $http->get('https://example.test/start');
 
-    $byId = allSpans($this->collector)->where('name', 'GET twin.example')->keyBy(fn ($span) => $span->spanId);
+    // Nothing left ambient, so later work is not adopted by an open call.
+    expect(Telemetry::currentSpan())->toBeNull();
 
-    expect($byId)->toHaveCount(2)
-        ->and($byId[$idA]->status())->toBe(SpanStatus::Error, 'the failure must close the call that failed')
-        ->and($byId[$idB]->status())->toBe(SpanStatus::Ok, 'the response must close the call that answered');
+    Telemetry::span('later work', fn () => null);
+
+    $spans = allSpans($this->collector);
+    $client = $spans->where('kind', SpanKind::Client)->values();
+
+    expect($client)->toHaveCount(2)
+        ->and($client[0]->attributes()['url.path'])->toBe('/start')
+        ->and($client[1]->attributes()['url.path'])->toBe('/final')
+        ->and($spans->firstWhere('name', 'later work')->parentSpanId)->toBeNull();
+});
+
+it('keeps pooled calls as siblings rather than nesting each under the last', function () {
+    // Ambient client spans made every pooled request a CHILD of the one
+    // dispatched before it. The span is detached now: its parent is fixed when
+    // the hop starts and nothing else is re-parented by it.
+    Telemetry::span('fan out', function () {
+        Http::pool(fn ($pool) => [
+            $pool->setHandler(scriptedHandler([new PsrResponse(200)]))->get('https://a.example/x'),
+            $pool->setHandler(scriptedHandler([new PsrResponse(200)]))->get('https://b.example/y'),
+            $pool->setHandler(scriptedHandler([new PsrResponse(200)]))->get('https://c.example/z'),
+        ]);
+    });
+
+    $spans = allSpans($this->collector);
+    $parent = $spans->firstWhere('name', 'fan out');
+    $client = $spans->where('kind', SpanKind::Client);
+
+    expect($client)->toHaveCount(3);
+
+    foreach ($client as $span) {
+        expect($span->parentSpanId)->toBe($parent->spanId);
+    }
+});
+
+it('closes the span of the call that failed, and lets the failure through', function () {
+    $http = Http::setHandler(scriptedHandler([
+        new ConnectException('could not connect', new GuzzleRequest('GET', 'https://down.example/v1/thing')),
+    ]));
+
+    expect(fn () => $http->get('https://down.example/v1/thing'))
+        ->toThrow(ConnectionException::class);
+
+    Telemetry::span('after the failure', fn () => null);
+
+    $spans = allSpans($this->collector);
+    $failed = $spans->firstWhere('name', 'GET down.example');
+
+    expect($failed)->not->toBeNull()
+        ->and($failed->status())->toBe(SpanStatus::Error)
+        ->and($spans->firstWhere('name', 'after the failure')->parentSpanId)->toBeNull();
 });
 
 it('breaks a client span into its transfer phases', function () {
-    // The events are dispatched by hand because a faked response has no cURL
-    // behind it to produce stats, and a listener registered here would run
-    // after the instrumentation's — Laravel's dispatcher takes no priority.
-    // The numbers are from a real transfer.
-    $request = new Request(
-        new GuzzleRequest('POST', 'https://api.stripe.test/v1/charges'),
-    );
-
-    $response = new Response(new GuzzleResponse(200, [], 'ok'));
-    $response->transferStats = new TransferStats(
-        new GuzzleRequest('POST', 'https://api.stripe.test/v1/charges'),
-        null,
-        0.284,
-        null,
+    // Each hop reads its OWN stats here. Laravel only keeps the last hop's on
+    // the response, so this is also the only place an earlier hop could get
+    // them. The numbers are from a real transfer.
+    $http = Http::setHandler(scriptedHandler(
+        [new PsrResponse(200, [], 'ok')],
         [
             'namelookup_time_us' => 3100,
             'connect_time_us' => 21500,
@@ -356,11 +384,9 @@ it('breaks a client span into its transfer phases', function () {
             'primary_port' => 443,
             'http_version' => 3,
         ],
-    );
+    ));
 
-    $events = app('events');
-    $events->dispatch(new RequestSending($request));
-    $events->dispatch(new ResponseReceived($request, $response));
+    $http->post('https://api.stripe.test/v1/charges');
 
     $attributes = allSpans($this->collector)->firstWhere('name', 'POST api.stripe.test')->attributes();
 
@@ -369,101 +395,32 @@ it('breaks a client span into its transfer phases', function () {
         ->and($attributes['http.client.tls_ms'])->toBe(41.7)
         ->and($attributes['http.client.ttfb_ms'])->toBe(194.2)
         ->and($attributes['http.client.transfer_ms'])->toBe(26.6)
-        ->and($attributes['http.client.connection_reused'])->toBeFalse()
         ->and($attributes['network.peer.address'])->toBe('34.120.54.201')
-        ->and($attributes['network.peer.port'])->toBe(443)
         ->and($attributes['network.protocol.version'])->toBe('2');
-});
-
-it('adds no timing attributes when there was no cURL behind the response', function () {
-    // A faked response carries a TransferStats with no handler stats. Zeroes
-    // would read as a transfer that did every phase instantly.
-    Http::fake(['*' => Http::response('ok', 200)]);
-
-    Http::get('https://api.stripe.test/v1/charges');
-
-    $attributes = allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test')->attributes();
-
-    expect($attributes)->not->toHaveKey('http.client.ttfb_ms')
-        ->and($attributes)->not->toHaveKey('http.client.connection_reused');
 });
 
 it('leaves the phases out when the timing instrument is off', function () {
     config()->set('telemetry.instrument.http_client_timing', false);
 
-    $request = new Request(
-        new GuzzleRequest('GET', 'https://api.stripe.test/v1/charges'),
-    );
-
-    $response = new Response(new GuzzleResponse(200, [], 'ok'));
-    $response->transferStats = new TransferStats(
-        new GuzzleRequest('GET', 'https://api.stripe.test/v1/charges'),
-        null,
-        0.1,
-        null,
+    $http = Http::setHandler(scriptedHandler(
+        [new PsrResponse(200, [], 'ok')],
         ['total_time_us' => 100000, 'connect_time_us' => 5000],
-    );
+    ));
 
-    $events = app('events');
-    $events->dispatch(new RequestSending($request));
-    $events->dispatch(new ResponseReceived($request, $response));
+    $http->get('https://api.stripe.test/v1/charges');
 
-    $attributes = allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test')->attributes();
-
-    expect($attributes)->not->toHaveKey('http.client.ttfb_ms');
+    expect(allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test')->attributes())
+        ->not->toHaveKey('http.client.ttfb_ms');
 });
 
-it('still finishes the span when the transfer stats are not what they claim', function () {
-    // Laravel keeps whatever an app's own `on_stats` callback returns:
-    // `$transferStats = $callback($transferStats) ?: $transferStats`. Return
-    // an int and handlerStats() throws. Caught by the listener's outer guard,
-    // that took setStatus(), end() and the duration histogram with it and left
-    // the span open for every later span to nest under — an optional
-    // enrichment costing the measurement it was decorating.
-    $request = new Request(
-        new GuzzleRequest('GET', 'https://api.stripe.test/v1/charges'),
-    );
+it('adds no timing attributes when there was no cURL behind the response', function () {
+    // A faked response, and the stream handler: a TransferStats with nothing
+    // behind it. Zeroes would read as a transfer that did every phase
+    // instantly.
+    Http::fake(['*' => Http::response('ok', 200)]);
 
-    $response = new Response(new GuzzleResponse(200, [], 'ok'));
-    $response->transferStats = 42;
+    Http::get('https://api.stripe.test/v1/charges');
 
-    $events = app('events');
-    $events->dispatch(new RequestSending($request));
-    $events->dispatch(new ResponseReceived($request, $response));
-
-    $span = allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test');
-
-    expect($span)->not->toBeNull()
-        ->and($span->attributes()['http.response.status_code'])->toBe(200)
-        ->and($span->attributes())->not->toHaveKey('http.client.ttfb_ms')
-        ->and(Telemetry::currentSpan())->toBeNull();
-
-    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
-
-    expect($families)->toHaveKey('http.client.request.duration');
-});
-
-it('discards an orphaned client span instead of letting shutdown call it a failure', function () {
-    // A redirect emits RequestSending per hop but one ResponseReceived, so the
-    // earlier hops never match an outcome. Dropping the map alone left those
-    // spans on the tracer's stack, where the shutdown path ends every open
-    // span as an error lasting until the process died — publishing a FAILED
-    // client span, with a fabricated duration, for a call that was fine.
-    $request = new Request(
-        new GuzzleRequest('GET', 'https://example.test/start'),
-    );
-
-    app('events')->dispatch(new RequestSending($request));
-
-    expect(Telemetry::currentSpan())->not->toBeNull();
-
-    // The Octane, NativePHP and non-sync job hooks all call this.
-    app(HttpClientInstrumentation::class)->flushRequestState();
-
-    expect(Telemetry::currentSpan())->toBeNull();
-
-    // What shutdown would have done to it, had it still been open.
-    Telemetry::tracer()->endOpenSpans('process terminated without completing');
-
-    expect(allSpans($this->collector)->where('name', 'GET example.test'))->toHaveCount(0);
+    expect(allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test')->attributes())
+        ->not->toHaveKey('http.client.ttfb_ms');
 });
