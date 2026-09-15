@@ -5,7 +5,7 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.2.0] - 2026-09-15
 
 ### Changed
 
@@ -1910,7 +1910,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/cboxdk/laravel-telemetry/compare/v1.5.1...v2.0.0
 [1.5.1]: https://github.com/cboxdk/laravel-telemetry/compare/v1.5.0...v1.5.1
