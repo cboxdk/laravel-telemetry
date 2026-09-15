@@ -11,6 +11,7 @@ use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -40,6 +41,7 @@ final class DoctorCommand extends Command
 
         $healthy = $this->checkStore($store);
         $this->checkCacheCollision();
+        $this->checkRedaction();
         $this->checkProfiling();
         $healthy = $this->checkPrometheus() && $healthy;
         $healthy = $this->checkOtlp($telemetry) && $healthy;
@@ -147,6 +149,102 @@ final class DoctorCommand extends Command
                 );
             }
         }
+    }
+
+    /**
+     * A published config that COPIED the redaction lists instead of
+     * referencing them.
+     *
+     * `mergeConfigFrom()` is a shallow `array_merge`, so a published
+     * `config/telemetry.php` replaces the package's `redaction` block whole.
+     * An app that published before a pattern was added keeps the list it
+     * copied and never learns the new one — silently, and specifically for the
+     * patterns that catch credentials. This is the only warning it gets.
+     *
+     * Not a failure: replacing the lists deliberately is a legitimate choice.
+     * It is reported so it is a choice rather than an accident.
+     */
+    private function checkRedaction(): void
+    {
+        if (! config('telemetry.redaction.enabled', true)) {
+            $this->components->twoColumnDetail('Redaction', '<fg=yellow>DISABLED — attribute values are exported verbatim</>');
+
+            return;
+        }
+
+        $stale = [];
+
+        foreach ([
+            'patterns' => Redactor::defaultPatterns(),
+            'keys' => Redactor::defaultKeys(),
+            'safe_keys' => Redactor::defaultSafeKeys(),
+        ] as $name => $defaults) {
+            $configured = config("telemetry.redaction.{$name}");
+
+            if (! is_array($configured)) {
+                continue;
+            }
+
+            // Patterns are keyed by regex, keys and safe_keys are lists, so
+            // compare on whichever side carries the identity. Both sides go
+            // through Cast so a config holding junk compares as the strings it
+            // actually has rather than blowing up the check.
+            // For patterns, a key whose replacement is not a string is not a
+            // pattern in effect — fromConfig() drops it — so counting the key
+            // alone would report defaults active over a config that discarded
+            // every one of them.
+            $present = $name === 'patterns'
+                ? array_keys(array_filter($configured, is_string(...)))
+                : array_values($configured);
+
+            $have = Cast::stringList($present);
+            $want = Cast::stringList($name === 'patterns' ? array_keys($defaults) : array_values($defaults));
+
+            $missing = count(array_diff($want, $have));
+
+            if ($missing > 0) {
+                $stale[] = "{$missing} of ".count($want)." {$name}";
+            }
+        }
+
+        if ($stale === []) {
+            $this->components->twoColumnDetail('Redaction', '<fg=green>OK — the package defaults are in effect</>');
+
+            return;
+        }
+
+        // Short in the column, remedy on its own line: twoColumnDetail pads to
+        // the terminal width and an 80-column terminal eats the tail, which is
+        // exactly the half that says what to do about it.
+        //
+        // What the gap MEANS depends on replace_defaults. Without it the
+        // package lists are unioned in, so a config that copied them is
+        // untidy but covered. With it the app has taken the lists over, and
+        // what is missing is genuinely not running.
+        if (! config('telemetry.redaction.replace_defaults', false)) {
+            $this->components->twoColumnDetail(
+                'Redaction',
+                '<fg=green>OK — package defaults unioned in over a config missing '.implode(', ', $stale).'</>',
+            );
+
+            $this->components->warn(
+                'Your config copied the redaction lists rather than referencing them. Nothing is lost — the '
+                ."package's own entries are unioned in — but the copy will keep drifting. Replace it with "
+                ."'patterns' => [...Redactor::defaultPatterns(), ...your own].",
+            );
+
+            return;
+        }
+
+        $this->components->twoColumnDetail(
+            'Redaction',
+            '<fg=yellow>REPLACED — missing '.implode(', ', $stale).' the package ships</>',
+        );
+
+        $this->components->warn(
+            'redaction.replace_defaults is on, so the package lists are NOT unioned in and the entries above '
+            .'are not running. Turn it off, or copy the missing entries in deliberately.',
+        );
     }
 
     private function checkProfiling(): void

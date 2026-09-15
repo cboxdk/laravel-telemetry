@@ -5,6 +5,225 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Upgrading
+
+- **Redaction lists are now UNIONED with the package's, not replaced by
+  yours.** `mergeConfigFrom()` is a shallow `array_merge`, so a published
+  `config/telemetry.php` replaced the package's `redaction` block whole and
+  could never receive an entry added later — and the entries added later are
+  the ones that catch newly-understood credential spellings. An app that
+  published two versions ago was quietly less protected than one that never
+  published at all. Rebuilding the config cache did not help.
+
+  Nothing is required of you: `keys`, `patterns` and `safe_keys` you configure
+  are added to the package's rather than replacing them, so an old published
+  copy is covered as it stands. Tidying it up is still worth doing —
+
+  ```php
+  'keys'      => Redactor::defaultKeys(),
+  'patterns'  => Redactor::defaultPatterns(),
+  'safe_keys' => Redactor::defaultSafeKeys(),
+  ```
+
+  — and `telemetry:doctor` reports a copy that has drifted.
+
+  **If you relied on your config REPLACING a built-in entry, set
+  `redaction.replace_defaults` to `true`** (or `TELEMETRY_REDACTION_REPLACE_DEFAULTS=true`)
+  to keep the old semantics. Prefer `safe_keys` or the custom hook for a single
+  entry that gets in your way.
+
+### Fixed
+
+- **Credential query parameters escaped by how they were spelled.** `url.query`
+  and the captured referer were scrubbed by pattern, over raw text — so
+  `%74oken=`, `token%5B%5D=`, `access_token%5B0%5D=` and `token[name]=` went
+  out with their values intact, and so did any credential that happened to be
+  the FIRST parameter, because `url.query` carries no leading `?` for the
+  pattern to anchor on. An OAuth callback puts the authorization code exactly
+  there.
+
+  Both are now taken apart and matched on the DECODED parameter name, which is
+  the half a pattern cannot do without rewriting the value. Names ending in
+  `_token`, `_secret`, `_password`, `_api_key`, `_signature` (and their `-` and
+  `.` spellings, so `x-api-key` counts) match as a suffix; `key`, `auth`,
+  `code`, `state`, `pwd`, `sig`, `jwt` and `otp` match exactly, so `sort_key`,
+  `postal_code`, `token_count` and `signature_required` stay readable. The
+  referer's path and fragment are left as they were.
+
+- **A credential value ended at the wrong character.** The export pattern ran a
+  value to the next `;` or quote, so `access_token=abc;more` and
+  `password=abc'SECRET` published everything past that character, and a single
+  optional quote could not get past a doubled one, so `access_token=""SECRET`
+  matched nothing at all. A value now runs to the next `&` or to whitespace and
+  nothing else ends it — which is also how PHP reads a query, where
+  `arg_separator.input` is `&` and a `;` is an ordinary character.
+
+- **A short `Basic`/`Bearer` credential survived in messages, and a
+  `WWW-Authenticate` challenge did not.** The pattern wanted sixteen
+  characters, so `Basic dXNlcjpwYXNz` — base64 for `user:pass`, twelve
+  characters — went out verbatim, while `Bearer error=invalid_token` counted as
+  nineteen characters of credential and was blanked. It now matches from four
+  characters when one of them is neither a lowercase letter nor the first
+  character, and `=` counts only as trailing base64 padding. `YTpi`, `abc123`
+  and `dXNlcjpwYXNz` go; `Authentication`, `realm=api` and
+  `error=insufficient_scope` stay. Predates 2.0.0.
+
+- **A credential in a JSON context value was exported whole.** The log channel
+  `json_encode`s any non-scalar context, so `['password' => 'hunter2']` arrived
+  as `{"password":"hunter2"}` under a key like `log.context.payload` — a name
+  that is not itself sensitive, around a body carrying no `name=value` pairs
+  for a pattern to match. The structure is now redacted by key BEFORE it is
+  encoded, where it is still an array. Deliberately not by decoding the JSON
+  again at export: a round trip through `json_decode(..., true)` cannot tell an
+  empty object from an empty array, turns `{"0":"a","1":"b"}` into a list, and
+  rewrites big integers and float literals — corrupting structures that had
+  nothing in them to redact.
+
+- **Span LINK attributes were never scrubbed.** A link's attributes reach the
+  exporter like any others — a retried job's link to its previous attempt
+  carries whatever the app put on it — and were the one set redaction never
+  walked. Predates 2.0.0.
+
+- **Span names and span event names were never scrubbed.** `Telemetry::span()`
+  and `nameRequestSpansUsing()` take whatever the app hands them, and a name
+  built from a URL carries its query along — so the same credential went out
+  redacted in the attributes and verbatim in the name beside them. Log record
+  names were already covered; these were the gap.
+
+- **A value that merely began with the replacement was taken as already
+  redacted.** `token=[REDACTED]SECRET` passed through untouched, and an empty
+  `replacement` matched everywhere, silently turning the parameter pass off
+  altogether. The comparison now needs a real boundary after it, is bounded to
+  the replacement's length rather than copying the rest of the input — which
+  made it quadratic, 640KB of `token=x&` taking 349ms — and an empty
+  replacement is no longer evidence of anything.
+
+- **An ordinary assignment hid a credential inside its own value.** In a
+  logfmt-style message, `url=https://x/?token=SECRET` matched as the parameter
+  `url`, was judged harmless, and the query inside it was consumed with it. A
+  value carrying a `?` is now looked into. Parameter names are also no longer
+  capped at 64 characters, which silently exempted a long array name.
+
+- **A parameter name full of unclosed brackets could stall the process.** The
+  regex that stripped array levels was quadratic on `token[[[[[…]tail` — 20k
+  brackets took 67ms, 200k over a second — and it raised no PCRE error, so the
+  fail-closed guard never saw it. Reachable from a query string. The root name
+  is now taken by truncating at the first bracket, which is linear and means
+  the same thing. Introduced in this release, never shipped.
+
+- **`safe_keys` are no longer unioned with the package's.** `keys` and
+  `patterns` are rules, so adding the package's can only redact more;
+  `safe_keys` are EXEMPTIONS, and adding those back would re-expose what an app
+  deliberately stopped exempting. An app that narrows `safe_keys` keeps it
+  narrowed.
+
+- **A credential parameter written any way but literally escaped every
+  attribute except the two that are parsed.** `url.query` and the referer are
+  taken apart at capture, but an exception message quoting the same URL was
+  only ever pattern-matched, so `GET https://x/?%74oken=SECRET failed` and
+  `token[name]=SECRET` went out intact. Every attribute value now gets a pass
+  that matches on the DECODED parameter name — the name, never the value,
+  because decoding the value would publish something the caller never sent.
+  `key`, `auth`, `code`, `state` and `pwd` still need a real query context —
+  `pwd=/srv/app` is a working directory in any shell-flavoured log — while
+  `sig`, `jwt` and `otp` are credentials wherever they appear, and are now
+  attribute keys in their own right so `log.context.otp` is covered too.
+
+  The two query-parameter patterns this replaces are gone from
+  `defaultPatterns()`. They could not see an encoded name, and a second pass
+  over a value they had already replaced re-matched it — appending its own tail
+  each time, for any `replacement` containing a space. The new pass is
+  idempotent and takes a quoted value whole, so a password with a space in it
+  no longer publishes the rest of itself. `replace_defaults` turns it off with
+  the lists, since it is a built-in rule like the others.
+
+- **An exception mapper lost the failed job's dimensions.** `Handler::map()`
+  replaces the throwable before the reportable callbacks run, so the snapshot
+  keyed to the original was never found. The `previous` chain is now walked,
+  bounded, which is where Laravel's own mappers leave the original.
+
+### Added
+
+- **`telemetry:doctor` reports a published config that copied the redaction
+  lists** instead of referencing `Redactor::defaultPatterns()` and friends. It
+  names how many entries are missing. See the upgrading note above — this is
+  the failure that has no other symptom.
+
+
+- **`http.request.method` was an unbounded metric label.** It carried the
+  method from the request line — whatever the caller sent, with nothing
+  restricting it to a real verb. Unmatched requests are measured too, so
+  anyone could mint permanent series from outside the app without
+  authenticating or hitting a route. An app could not fix it for itself:
+  core labels win over `labelRequestsUsing()`.
+
+  semconv covers this — an unknown method reports `_OTHER`, the original
+  goes on the span as `http.request.method_original`, and the span NAME uses
+  `HTTP` rather than the raw method, since a name is caller-controlled
+  otherwise and anything deriving a dimension from names inherits the same
+  unbounded set. Applied at every site the attribute appears: server span and
+  name, server metric, analytics page-view event, outgoing client span, name
+  and metric.
+
+  The nine semconv names are not every real method (WebDAV alone adds
+  PROPFIND, MKCOL and REPORT), so the list is configurable via
+  `instrument.known_http_methods` — an explicitly empty array is an override
+  too, for an app that wants everything bucketed.
+
+  **Upgrade note.** A method outside the list now lands in `_OTHER` and its
+  span name starts `HTTP`. If you deliberately serve a non-semconv method,
+  add it to `instrument.known_http_methods` before upgrading or its history
+  will split.
+
+- **Credentials in query strings survived redaction almost everywhere.**
+  `url.query` was scrubbed by exact parameter name, so `api_token`,
+  `accessToken`, `_token`, `token[]` and percent-encoded spellings all went
+  out intact — and the same secret reached the exporter untouched through
+  `http.request.header.referer` and any `exception.message` quoting a URL,
+  neither of which that scrubbing ever saw.
+
+  Fixed where it belongs: two default patterns in `Redactor`, the one choke
+  point every attribute value passes through, so one rule covers the query
+  string, the referer, exception messages and log lines alike. Words that are
+  always credentials match loosely; `code`, `state`, `key` and `auth` match
+  exactly, because `?code=` on an OAuth callback is an authorization code
+  while `postal_code=` is an address.
+
+  Whitespace separates a parameter name as well as `?`, `&` and `;` do, so a
+  credential quoted in prose — `Invalid api_token=sk_live_9` in an exception
+  message, which is where an error report is most likely to carry one — is
+  redacted too, not only one sitting in a query string. The credential word
+  still has to end the name, immediately before the `=`, which is what keeps
+  `token_count=`, `signature_required=` and `secret_count=` intact.
+
+- **A failed job's error record could not say whose it was.** A queue worker
+  tears the job down before it reports: Laravel dispatches `JobFailed` — or
+  `JobReleasedAfterException`, which is every attempt but the last wherever
+  retries are configured — from inside `Worker::handleJobException()` and only rethrows
+  afterwards, so the exception reaches the handler in `Worker::runJob()`'s
+  catch with the job's context already gone.
+
+  The dimensions are now snapshotted at that teardown and merged into the
+  error event by the reportable listener. The snapshot is keyed to the
+  throwable in a `WeakMap`, so it can only ever reach the exception it was
+  taken for, and nothing has to clear it — an entry the handler never claims
+  dies with the exception rather than waiting to be mistaken for someone
+  else's. Live context still wins; this only supplies what is missing.
+  Deliberately a snapshot rather than keeping the context alive: alive means
+  every later span, log, event and outgoing `baggage` header in that worker
+  process inherits a dead job's tenant, including the worker's own lifetime
+  span.
+
+  On the released-for-retry half this depends on the framework: Laravel only
+  put the throwable on `JobReleasedAfterException` in v13.31.0, so on 12.x and
+  on 13.0–13.30 a released attempt has no throwable to key the snapshot to and
+  keeps reporting unattributed. The listener coalesces rather than testing the
+  version, so nothing breaks on the versions without it. `JobFailed` — the
+  terminal failure, and the one that matters most — carries its exception on
+  every supported version and is unaffected.
+
 ## [2.0.0] - 2026-09-14
 
 ### Changed

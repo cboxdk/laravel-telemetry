@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 use Cbox\Telemetry\Http\Middleware\AllowIps;
+use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\Redactor;
 
 // Honor the OpenTelemetry-standard OTEL_EXPORTER_OTLP_HEADERS
 // ("key1=val1,key2=val2") for interop. TELEMETRY_* values win over these.
@@ -311,32 +313,32 @@ return [
     'redaction' => [
         'enabled' => env('TELEMETRY_REDACTION', true),
 
-        // The lists below mirror the built-in defaults exactly
-        // (Redactor::defaultKeys() / defaultPatterns() / defaultSafeKeys())
-        // — append your own entries, or remove the whole key to keep
-        // tracking the package's built-ins across upgrades.
+        // The built-in lists, BY REFERENCE rather than by copy.
+        //
+        // Publishing this file used to freeze them: mergeConfigFrom() is a
+        // shallow merge, so a published block replaced the package's whole and
+        // a copied list meant a package that learned a new credential spelling
+        // could never tell you. Referencing the accessors keeps upstream
+        // additions flowing, and as a second belt the package lists are
+        // UNIONED in at runtime, so an older published copy is still covered.
+        //
+        // Append your own by spreading:
+        //
+        //   'keys'     => [...Redactor::defaultKeys(), 'cpr'],
+        //   'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
+        //   'safe_keys'=> [...Redactor::defaultSafeKeys(), 'my.known_safe.bucket'],
+        //
+        // Set replace_defaults to take the lists over outright — nothing is
+        // unioned in, and what you write here is the whole of it. Only do that
+        // if a built-in entry actively gets in your way; `safe_keys` and the
+        // custom hook are the gentler tools for that.
+        'replace_defaults' => env('TELEMETRY_REDACTION_REPLACE_DEFAULTS', false),
 
-        // Attribute-key segments whose whole value is replaced.
-        'keys' => [
-            'password', 'passwd', 'secret', 'token', 'api_key', 'apikey',
-            'auth', 'authorization', 'signature', 'credential', 'credentials',
-            'private_key', 'credit_card', 'card_number', 'cvv', 'ssn', 'session',
-        ],
+        'keys' => Redactor::defaultKeys(),
 
-        // Regexes scrubbing secrets embedded in any string value
-        // (regex => replacement).
-        'patterns' => [
-            // JWTs — three base64url segments.
-            '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
-            // HTTP credential schemes embedded in messages.
-            '/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{16,}/i' => '$1 [REDACTED]',
-            // Userinfo in URLs: scheme://user:pass@host.
-            '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
-        ],
+        'patterns' => Redactor::defaultPatterns(),
 
-        // Exact keys exempt from KEY-based redaction — known-safe by
-        // construction. Patterns and the redactUsing() hook still apply.
-        'safe_keys' => ['session.driver', 'session.hash', 'session.id'],
+        'safe_keys' => Redactor::defaultSafeKeys(),
 
         'replacement' => '[REDACTED]',
     ],
@@ -490,6 +492,18 @@ return [
         // and a label must never be caller-controlled. Configure
         // TrustHosts to tell your domains apart.
         'host_label' => env('TELEMETRY_INSTRUMENT_HOST_LABEL', true),
+
+        // Methods reported as themselves on http.request.method; anything
+        // else becomes "_OTHER", with the real one kept on the span as
+        // http.request.method_original.
+        //
+        // The method is whatever the caller put on the request line, and a
+        // server span is started for unmatched requests too — so without a
+        // bound it is a metric dimension anyone can grow from outside your
+        // app. The default is the list semconv names. Add to it if you serve
+        // methods it does not cover (WebDAV's PROPFIND, MKCOL, REPORT) and
+        // want them broken out rather than bucketed.
+        'known_http_methods' => HttpMethod::SEMCONV,
 
         // Request headers captured on the span as http.request.header.*
         // (allowlist, lowercase). Credentials and session headers

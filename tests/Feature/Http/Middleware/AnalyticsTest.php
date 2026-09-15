@@ -263,3 +263,22 @@ it('does not parse the UA when the toggle is off', function () {
 
     expect(analyticsServerSpan($this->collector)->attributes())->not->toHaveKey('user_agent.name');
 });
+
+it('blanks a credential carried in the referer', function () {
+    // The referer is a URL a browser hands us, and the page a user navigated
+    // away from is often an OAuth callback — so the authorization code arrives
+    // in this header without anyone in the app ever touching it. Only the
+    // query is rewritten; path and fragment stay as they were.
+    config()->set('telemetry.analytics.enabled', true);
+    config()->set('telemetry.analytics.session.salt', 'test-salt');
+    Route::get('/page', fn () => response('<html>hi</html>')->header('Content-Type', 'text/html'));
+
+    $this->get('/page', [
+        'referer' => 'https://idp.test/cb?%63ode=SECRET&utm_source=mail#top',
+    ])->assertOk();
+
+    $attrs = analyticsEvents($this->collector, 'analytics.page_view')[0]->attributes;
+
+    expect($attrs['http.request.header.referer'])
+        ->toBe('https://idp.test/cb?%63ode=[REDACTED]&utm_source=mail#top');
+});

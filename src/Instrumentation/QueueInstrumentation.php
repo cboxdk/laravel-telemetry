@@ -26,6 +26,7 @@ use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\QueueBusy;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\QueueManager;
+use Throwable;
 
 /**
  * Queue instrumentation.
@@ -331,6 +332,27 @@ final class QueueInstrumentation implements ManagesRequestState
             }
         });
 
+        // A released attempt is reported exactly like a terminal one — the
+        // worker rethrows and the handler runs after this teardown — so
+        // wherever retries are configured (`queue:work --tries=3`, a job's
+        // own `$tries`, Horizon's `tries`; the framework default is 1) every
+        // attempt but the last produced an unattributable error record. Where
+        // the event carries the throwable that caused the release, that is the
+        // one being reported.
+        //
+        // `exception` was added to this event in Laravel v13.31.0. On 12.x and
+        // on 13.0–13.30 the property does not exist at all, and reading it
+        // raises an undefined-property warning that Laravel's error handler
+        // turns into an ErrorException — inside a queue listener, on every
+        // retry. Coalesced rather than version-tested: the attribution is a
+        // bonus on versions that carry the throwable, and its absence must
+        // never break the release path on the ones that do not.
+        $releasedBy = $event->exception ?? null;
+
+        if ($releasedBy instanceof Throwable) {
+            $this->rememberFailureContext($releasedBy);
+        }
+
         $this->completeJob(
             job: $event->job->resolveName(),
             queue: $event->job->getQueue(),
@@ -342,6 +364,8 @@ final class QueueInstrumentation implements ManagesRequestState
     private function jobFailed(JobFailed $event): void
     {
         FailSafe::guard(fn () => $this->currentJobSpan()?->recordException($event->exception));
+
+        $this->rememberFailureContext($event->exception);
 
         $this->completeJob(
             job: $event->job->resolveName(),
@@ -447,6 +471,27 @@ final class QueueInstrumentation implements ManagesRequestState
                 $this->telemetry()->resetContext();
             });
         }
+    }
+
+    /**
+     * Hand this job's dimensions to whoever reports THIS exception.
+     *
+     * Laravel dispatches JobFailed from inside
+     * Worker::handleJobException(), which then rethrows; only in
+     * Worker::runJob()'s catch does the exception reach the handler and,
+     * through it, this package's own reportable listener. Everything below
+     * runs before that, teardown included — so the snapshot is taken here and
+     * the context is still reset as it always was.
+     */
+    private function rememberFailureContext(Throwable $e): void
+    {
+        FailSafe::guard(function () use ($e): void {
+            $context = $this->telemetry()->contextAttributes();
+
+            if ($context !== []) {
+                $this->telemetry()->rememberFailureContext($e, $context);
+            }
+        });
     }
 
     private function currentJobSpan(): ?Span

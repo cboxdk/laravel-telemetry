@@ -29,6 +29,8 @@ use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
+use Throwable;
+use WeakMap;
 
 /**
  * The telemetry entry point, resolved behind the Telemetry facade.
@@ -307,6 +309,74 @@ class TelemetryManager
     }
 
     /**
+     * Context as it was when a unit of work failed, keyed by the throwable it
+     * belongs to.
+     *
+     * @var WeakMap<Throwable, array<string, scalar|null>>|null
+     */
+    private ?WeakMap $failureContext = null;
+
+    /**
+     * Keep the current dimensions for whoever reports THIS throwable.
+     *
+     * A queue worker tears the job down before the exception reaches the
+     * handler: Laravel dispatches JobFailed (or JobReleasedAfterException)
+     * from inside Worker::handleJobException(), and only rethrows afterwards,
+     * so by the time report() runs the job's context is gone and the error
+     * record cannot say whose failure it was.
+     *
+     * Keyed by the throwable, because "the next exception to be reported" is
+     * not the same thing as "this exception". A listener on the same failure
+     * — a notification that itself fails, say — reports first and would
+     * otherwise collect a tenant that was never its own, while the failure it
+     * belongs to gets none.
+     *
+     * A snapshot rather than leaving the live context alive, because "alive"
+     * means every later span, log, event and outgoing baggage header in that
+     * worker process inherits a dead job's tenant.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function rememberFailureContext(Throwable $e, array $attributes): void
+    {
+        $this->failureContext ??= new WeakMap;
+
+        $this->failureContext[$e] = $attributes;
+    }
+
+    /**
+     * The snapshot for this throwable, if one was taken. Nothing has to clear
+     * it — the WeakMap holds no reference of its own, so an entry dies with
+     * the exception it describes, which is why this reads rather than takes.
+     *
+     * The `previous` chain is walked because the throwable that reaches the
+     * handler is not always the one the queue listener saw: an app that
+     * registers an exception mapper (`Handler::map()`) has its replacement
+     * reported instead, with the original kept as `previous`. Bounded, so a
+     * deep or self-referential chain cannot spin here.
+     *
+     * @return array<string, scalar|null>
+     */
+    public function failureContextFor(Throwable $e): array
+    {
+        if ($this->failureContext === null) {
+            return [];
+        }
+
+        $seen = 0;
+
+        for ($current = $e; $current !== null && $seen < 16; $current = $current->getPrevious(), $seen++) {
+            $context = $this->failureContext[$current] ?? null;
+
+            if (is_array($context)) {
+                return $context;
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * Name request root spans yourself — essential behind catch-all
      * routes (Statamic, wildcard APIs) where the route pattern names
      * every request identically. Return null to keep the default
@@ -560,6 +630,26 @@ class TelemetryManager
     public function redactUsing(?Closure $hook): void
     {
         $this->redactor?->redactUsing($hook);
+    }
+
+    /**
+     * Redact the values of sensitive keys in a structure before it is flattened.
+     *
+     * For a caller that still holds the array — the log channel encodes a
+     * non-scalar context value to JSON, and once encoded there is nothing left
+     * for key-based redaction to recognise. Returns the structure unchanged
+     * when redaction is off or no redactor is configured.
+     *
+     * @param  array<array-key, mixed>  $values
+     * @return array<array-key, mixed>
+     */
+    public function redactStructure(array $values): array
+    {
+        if ($this->redactor === null) {
+            return $values;
+        }
+
+        return FailSafe::guard(fn (): array => $this->redactor->redactStructure($values)) ?? $values;
     }
 
     /**
@@ -914,7 +1004,7 @@ class TelemetryManager
     }
 
     /**
-     * @param  Closure(\Throwable): void|null  $handler
+     * @param  Closure(Throwable): void|null  $handler
      */
     public function handleExceptionsUsing(?Closure $handler): void
     {

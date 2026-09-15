@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -262,6 +263,60 @@ it('does not touch Laravel Context when sharing is disabled', function () {
     expect(Context::get('trace_id'))->toBeNull();
 });
 
+it('reports an unknown request method as _OTHER, on the attribute and in the span name', function () {
+    // http.request.method is a METRIC LABEL and the method is whatever the
+    // caller put on the request line. Unmatched requests are measured too, so
+    // without a bound anyone can mint series from outside the app. The span
+    // NAME needs the same treatment — it is caller-controlled otherwise, and
+    // anything deriving a dimension from names inherits the same unbounded set.
+    $this->call('REVIEWVERB', '/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.request.method'])->toBe('_OTHER')
+        ->and($span->attributes()['http.request.method_original'])->toBe('REVIEWVERB')
+        ->and($span->name)->toStartWith('HTTP ');
+});
+
+it('keeps the original whenever normalising changed it, not merely when unknown', function () {
+    // `GeT` is a known method AND is changed by normalising, so the original
+    // still belongs on the span. Asking "is it known" answers the wrong
+    // question.
+    expect(HttpMethod::normalize('GeT'))->toBe('GET')
+        ->and(HttpMethod::original('GeT'))->toBe('GeT')
+        ->and(HttpMethod::original('GET'))->toBeNull();
+});
+
+it('breaks out an extra method the app declares it serves', function () {
+    // The nine semconv names are not every real method — WebDAV alone adds
+    // three. An app that serves them says so and keeps its breakdown.
+    config()->set('telemetry.instrument.known_http_methods', [...HttpMethod::SEMCONV, 'PROPFIND']);
+
+    $this->call('PROPFIND', '/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->attributes()['http.request.method'])->toBe('PROPFIND')
+        ->and($span->attributes())->not->toHaveKey('http.request.method_original');
+});
+
+it('treats an explicitly empty known-method list as an override', function () {
+    // An app entitled to say "bucket everything" was previously ignored,
+    // because an empty array was read as an absent one.
+    config()->set('telemetry.instrument.known_http_methods', []);
+
+    expect(HttpMethod::normalize('GET'))->toBe('_OTHER');
+});
+
+it('leaves a known method alone and adds no original', function () {
+    $this->get('/users/7');
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['http.request.method'])->toBe('GET')
+        ->and($attributes)->not->toHaveKey('http.request.method_original');
+});
+
 it('captures domain, client, protocol and query on the request span', function () {
     $this->get('http://api.acme.test/users/7?page=2&token=supersecret&per_page=50', [
         'User-Agent' => 'DemoAgent/1.0',
@@ -275,7 +330,12 @@ it('captures domain, client, protocol and query on the request span', function (
         ->and($attributes['user_agent.original'])->toBe('DemoAgent/1.0')
         ->and($attributes['network.protocol.name'])->toBe('http')
         ->and($attributes['network.protocol.version'])->toBe('1.1')
-        ->and($attributes['url.query'])->toBe('page=2&token=REDACTED&per_page=50');
+        // Two passes reach this. The middleware takes the query apart at
+        // capture and blanks a parameter by its DECODED name, which is the
+        // half a pattern cannot do; Redactor's patterns then catch the same
+        // credential wherever else it turns up — referer, exception message,
+        // log record. The exported spelling is the Redactor's.
+        ->and($attributes['url.query'])->toBe('page=2&token=[REDACTED]&per_page=50');
 });
 
 it('captures allowlisted headers but never credentials or session material', function () {
@@ -629,4 +689,70 @@ it('records the semconv request duration in seconds, not milliseconds', function
     // one, and in milliseconds it would be well over.
     expect($sample->sum)->toBeLessThan(1.0)
         ->and($family->definition->buckets)->toBe([0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10]);
+});
+
+it('blanks a credential parameter however its name was spelled', function () {
+    // A pattern over raw text cannot see that these are all the parameter
+    // `token`; taking the query apart and decoding the name can. Percent-
+    // encoding is not exotic — it is what a client library emits for array
+    // syntax, and it used to walk straight through both passes.
+    $this->get('http://api.acme.test/x?%74oken=SECRET&token%5B%5D=SECRET2&access_token%5B0%5D=SECRET3&x-api-key=SECRET4');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->not->toContain('SECRET')
+        ->and($query)->toContain('REDACTED');
+});
+
+it('blanks a credential that is the first parameter', function () {
+    // url.query has no leading `?`, so an export pattern anchored on a query
+    // separator never saw the first parameter — and an OAuth callback puts the
+    // authorization code there.
+    $this->get('http://api.acme.test/callback?code=4/0AY0e&state=xyz');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('code=[REDACTED]&state=[REDACTED]');
+});
+
+it('leaves ordinary parameters that merely contain a credential word', function () {
+    // The whole reason the ambiguous names are matched exactly: an address
+    // lookup and a sort order are real telemetry, and blanking them protects
+    // nothing.
+    $this->get('http://api.acme.test/x?postal_code=2100&sort_key=price&token_count=8&signature_required=true');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('postal_code=2100&sort_key=price&token_count=8&signature_required=true');
+});
+
+it('keeps a semicolon inside a value as part of the value', function () {
+    // PHP's arg_separator.input is `&`, so a `;` is an ordinary character in a
+    // value. Treating it as a separator cut the credential in half and
+    // published the tail — and for an ambiguous name in first position the
+    // export pass cannot repair it, because it anchors on a separator.
+    $this->get('http://api.acme.test/cb?code=4/0A;rest&page=2');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('code=[REDACTED]&page=2');
+});
+
+it('sees through every level of array syntax', function () {
+    // `token[a][b]` is still the parameter `token`, encoded or not.
+    $this->get('http://api.acme.test/x?token%5Ba%5D%5Bb%5D=SECRET&access_token[0][x]=SECRET2');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->not->toContain('SECRET');
+});
+
+it('does not mistake a credential word nested inside another parameter', function () {
+    // `filters[postal_code]` is a filter, not a credential: the name is
+    // `filters`, and only trailing array levels are stripped.
+    $this->get('http://api.acme.test/x?filters[postal_code]=2100&data[sort_key]=price');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('filters[postal_code]=2100&data[sort_key]=price');
 });

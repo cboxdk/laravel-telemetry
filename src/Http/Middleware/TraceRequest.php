@@ -11,6 +11,8 @@ use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
@@ -53,9 +55,17 @@ final class TraceRequest
         'x-api-key', 'x-csrf-token', 'x-xsrf-token', 'php-auth-user', 'php-auth-pw', 'php-auth-digest',
     ];
 
-    /** Query parameters whose values are redacted in url.query. */
-    private const SENSITIVE_QUERY_PARAMS = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'signature', 'auth', 'code', 'state'];
-
+    /**
+     * Query parameter names are blanked at CAPTURE time, by their DECODED
+     * name — the half a pattern cannot do, since seeing that `%74oken` and
+     * `token%5B%5D` are the parameter `token` means decoding it.
+     *
+     * The lists themselves live on Redactor, which applies the same test at
+     * export to every attribute value on the way out. One definition, so the
+     * two passes cannot drift apart.
+     *
+     * @see Redactor::parameterIsCredential()
+     */
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -85,10 +95,13 @@ final class TraceRequest
             }
 
             $span = $this->telemetry->tracer()->startSpan(
-                $request->method().' '.$request->path(),
+                HttpMethod::forSpanName($request->method()).' '.$request->path(),
                 SpanKind::Server,
                 array_filter([
-                    'http.request.method' => $request->method(),
+                    'http.request.method' => HttpMethod::normalize($request->method()),
+                    // Only when normalizing hid something, which is exactly
+                    // when the reader needs it.
+                    'http.request.method_original' => HttpMethod::original($request->method()),
                     'url.path' => '/'.ltrim($request->path(), '/'),
                     'url.scheme' => $request->getScheme(),
                     'url.query' => $this->redactedQuery($request),
@@ -181,7 +194,7 @@ final class TraceRequest
             // then "METHOD <logical route>".
             if (! $span->hasCustomName()) {
                 $span->updateName($this->telemetry->resolveRequestName($request, $response)
-                    ?? $request->method().' '.$route);
+                    ?? HttpMethod::forSpanName($request->method()).' '.$route);
             }
 
             $span->setAttributes([
@@ -312,7 +325,7 @@ final class TraceRequest
                 // App-defined bounded dimensions (plan, team, …) via
                 // Telemetry::labelRequestsUsing(); core labels win.
                 ...$this->telemetry->resolveRequestLabels($request),
-                'http.request.method' => $request->method(),
+                'http.request.method' => HttpMethod::normalize($request->method()),
                 'http.route' => $route,
                 'http.response.status_code' => (string) $response->getStatusCode(),
             ];
@@ -457,9 +470,84 @@ final class TraceRequest
             return null;
         }
 
-        $pattern = '/(^|&)('.implode('|', self::SENSITIVE_QUERY_PARAMS).')=[^&]*/i';
+        return self::redactQueryString($query);
+    }
 
-        return (string) preg_replace($pattern, '$1$2=REDACTED', $query);
+    /**
+     * The same treatment for a URL captured whole.
+     *
+     * The referer is a URL a browser sends us, and an OAuth callback that the
+     * user navigated away from puts its authorization code in exactly that
+     * header. Only the query part is rewritten; the rest is left alone so the
+     * attribute still reads as the URL it was.
+     */
+    private static function redactedUrl(?string $url): ?string
+    {
+        if ($url === null || $url === '') {
+            return $url;
+        }
+
+        $mark = strpos($url, '?');
+
+        if ($mark === false) {
+            return $url;
+        }
+
+        // A fragment is not part of the query and must survive intact.
+        $query = substr($url, $mark + 1);
+        $hash = strpos($query, '#');
+        $fragment = $hash === false ? '' : substr($query, $hash);
+
+        if ($hash !== false) {
+            $query = substr($query, 0, $hash);
+        }
+
+        return substr($url, 0, $mark + 1).self::redactQueryString($query).$fragment;
+    }
+
+    /**
+     * Blank the value of every credential parameter in a query string.
+     */
+    private static function redactQueryString(string $query): string
+    {
+        // Taken apart rather than pattern-matched: the separators are kept
+        // verbatim so the attribute still reads like the query it was, and
+        // only the value of a sensitive parameter is replaced. A pair with no
+        // `=` is passed through untouched.
+        //
+        // Split on `&` ALONE. PHP's arg_separator.input is `&`, so a `;` is an
+        // ordinary character inside a value — treating it as a separator cut
+        // `code=4/0A;rest` in half and published the tail, which is worse than
+        // what a single pattern used to do.
+        $parts = explode('&', $query);
+        $redacted = [];
+
+        foreach ($parts as $part) {
+            $equals = strpos($part, '=');
+
+            if ($equals === false) {
+                $redacted[] = $part;
+
+                continue;
+            }
+
+            $name = substr($part, 0, $equals);
+
+            // Spelled like the Redactor's default replacement so the two
+            // passes agree — the export patterns run over this string too, and
+            // re-matching a value they already blanked must be a no-op rather
+            // than a second, differently-spelled substitution.
+            $redacted[] = self::parameterIsSensitive($name) ? $name.'=[REDACTED]' : $part;
+        }
+
+        return implode('&', $redacted);
+    }
+
+    private static function parameterIsSensitive(string $name): bool
+    {
+        // A query string is a real query, so the ambiguous names — `key`,
+        // `code`, `state`, `auth` — mean what they say here.
+        return Redactor::parameterIsCredential($name, allowAmbiguous: true);
     }
 
     /**
@@ -564,10 +652,11 @@ final class TraceRequest
             'session.id' => $sessionId,
             'url.path' => $this->requestPath($request),
             'http.route' => $this->routePattern($request),
-            'http.request.method' => $request->getMethod(),
+            'http.request.method' => HttpMethod::normalize($request->getMethod()),
+            'http.request.method_original' => HttpMethod::original($request->getMethod()),
             'http.response.status_code' => $response->getStatusCode(),
             'user_agent.original' => $request->userAgent(),
-            'http.request.header.referer' => $request->headers->get('referer'),
+            'http.request.header.referer' => self::redactedUrl($request->headers->get('referer')),
         ], static fn ($v) => $v !== null);
 
         if (($user = $request->user()) !== null) {

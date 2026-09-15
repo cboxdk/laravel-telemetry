@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 use Cbox\Telemetry\Exporters\Spool\Spool;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tests\Support\StubOtlpServer;
 use Illuminate\Support\Facades\Artisan;
@@ -201,4 +202,62 @@ it('reports when telemetry is disabled', function () {
     $this->artisan('telemetry:doctor')
         ->expectsOutputToContain('DISABLED')
         ->assertSuccessful();
+});
+
+it('reports a published config that copied the redaction lists instead of referencing them', function () {
+    // The 2.0.0 config hard-copied these. mergeConfigFrom is a shallow
+    // array_merge, so such a config replaces the block whole and the app never
+    // receives a pattern added later — including the ones that catch
+    // credentials. doctor is the only place that can say so.
+    config()->set('telemetry.redaction.patterns', ['/\bnothing\b/' => '[REDACTED]']);
+
+    $this->artisan('telemetry:doctor')
+        ->expectsOutputToContain('package defaults unioned in')
+        ->expectsOutputToContain('copied the redaction lists');
+});
+
+it('warns properly when the app took the lists over and left entries out', function () {
+    // With replace_defaults on, nothing is unioned in and what is missing is
+    // genuinely not running — the one case where drift is a real gap.
+    config()->set('telemetry.redaction.replace_defaults', true);
+    config()->set('telemetry.redaction.patterns', ['/\bnothing\b/' => '[REDACTED]']);
+
+    $this->artisan('telemetry:doctor')
+        ->expectsOutputToContain('REPLACED')
+        ->expectsOutputToContain('are not running');
+});
+
+it('says nothing about redaction when the config references the defaults', function () {
+    config()->set('telemetry.redaction.patterns', Redactor::defaultPatterns());
+    config()->set('telemetry.redaction.keys', Redactor::defaultKeys());
+    config()->set('telemetry.redaction.safe_keys', Redactor::defaultSafeKeys());
+
+    $this->artisan('telemetry:doctor')
+        ->expectsOutputToContain('the package defaults are in effect')
+        ->assertSuccessful();
+});
+
+it('still reports an app that appended its own patterns as healthy', function () {
+    // Spreading is what the config comment tells users to do; it must not be
+    // mistaken for drift just because the list got longer.
+    config()->set('telemetry.redaction.patterns', [
+        ...Redactor::defaultPatterns(),
+        '/\bCPR-\d+/' => '[REDACTED:cpr]',
+    ]);
+
+    $this->artisan('telemetry:doctor')
+        ->expectsOutputToContain('the package defaults are in effect')
+        ->assertSuccessful();
+});
+
+it('does not call a config healthy when its replacements were discarded', function () {
+    // Right keys, no replacements: fromConfig() drops every one of them, so
+    // nothing is redacted at all. Counting keys alone reported this as the
+    // package defaults being in effect.
+    config()->set('telemetry.redaction.patterns', array_fill_keys(
+        array_keys(Redactor::defaultPatterns()),
+        null,
+    ));
+
+    $this->artisan('telemetry:doctor')->expectsOutputToContain('patterns');
 });
