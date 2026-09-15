@@ -5,6 +5,22 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The shutdown flush added in 2.2.1 had no test that could fail without it.**
+  `FatalErrorFlushTest` calls `flushOnShutdown()` directly, which never runs the
+  callback that method registers — so the fix shipped unproven. A subprocess
+  test now exercises PHP's real shutdown ordering and fails without it.
+
+  Its comment also promised more than PHP does. A function registered during
+  shutdown is APPENDED to the current queue, so it runs after everything
+  already in it; it does not reserve the final position. A callback that itself
+  registers another one to do the awaiting still lands behind the flush, and an
+  `exit()` earlier in the queue stops it running at all. Both leave the call
+  buffered, as they did before — now said plainly rather than implied away.
+
 ## [2.2.1] - 2026-09-15
 
 ### Fixed
