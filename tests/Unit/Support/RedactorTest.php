@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Support\Redactor;
+use Cbox\Telemetry\Tracing\Span;
+use Cbox\Telemetry\Tracing\SpanKind;
 
 function redactor(array $config = []): Redactor
 {
@@ -333,4 +335,58 @@ it('lets an app that takes the lists over turn off the name heuristics too', fun
     ]);
 
     expect($redactor->value('log.message', 'token=SECRET'))->toBe('token=SECRET');
+});
+
+it('redacts a credential that arrives as a JSON key', function () {
+    // The log handler json_encodes any non-scalar context value, so
+    // `['password' => 'hunter2']` becomes a JSON body under a key — like
+    // `log.context.payload` — that is not itself sensitive, and no pattern
+    // matches a JSON object because it carries no `name=value` pairs.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.context.payload', '{"password":"hunter2","api_key":"sk_live","user":"bob"}'))
+        ->toBe('{"password":"[REDACTED]","api_key":"[REDACTED]","user":"bob"}')
+        ->and($redactor->value('log.context.payload', '{"a":{"b":{"token":"SECRET","page":2}}}'))
+        ->toBe('{"a":{"b":{"token":"[REDACTED]","page":2}}}')
+        ->and($redactor->value('log.context.rows', '[{"otp":123456},{"id":7}]'))
+        ->toBe('[{"otp":"[REDACTED]"},{"id":7}]');
+});
+
+it('leaves anything that is not a JSON structure exactly as it found it', function () {
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    foreach ([
+        'not json at all',
+        '{invalid json',
+        '{"postal_code":"2100","sort_key":"price"}',
+        '{"n":1.5,"b":true,"z":null}',
+        '[1,2,3]',
+    ] as $value) {
+        expect($redactor->value('log.context.payload', $value))->toBe($value);
+    }
+});
+
+it('scrubs a span name and a span event name, not only the attributes beside them', function () {
+    // `Telemetry::span()` and nameRequestSpansUsing() take whatever the app
+    // hands them, and a name built from a URL carries its query along. The
+    // same credential used to go out scrubbed in the attributes and verbatim
+    // in the name next to them.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    $span = new Span(
+        traceId: str_repeat('a', 32),
+        spanId: str_repeat('b', 16),
+        parentSpanId: null,
+        name: 'GET https://x/?token=SECRET',
+        kind: SpanKind::Server,
+        sampled: true,
+        attributes: [],
+        onEnd: static function (): void {},
+    );
+    $span->addEvent('token=EVENT_SECRET');
+
+    $redactor->spans([$span]);
+
+    expect($span->name)->toBe('GET https://x/?token=[REDACTED]')
+        ->and($span->events()[0]->name)->toBe('token=[REDACTED]');
 });

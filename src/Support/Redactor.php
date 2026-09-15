@@ -90,6 +90,68 @@ final class Redactor
     }
 
     /**
+     * A JSON object carries its names as KEYS, not as `name=value` pairs.
+     *
+     * The log handler json_encodes any non-scalar context value, so
+     * `['password' => 'hunter2']` arrives as `{"password":"hunter2"}` under a
+     * key like `log.context.payload` — a name that is not itself sensitive,
+     * around a body no pattern matches. The same is true of any attribute an
+     * app sets to an encoded structure.
+     *
+     * So the structure is decoded, its keys are judged by the same rules that
+     * judge an attribute key, and it is encoded again. Bounded in depth, and
+     * anything that does not decode to an array is returned untouched.
+     */
+    private function redactJsonByKey(string $value): string
+    {
+        $first = $value[strspn($value, " \t\n\r")] ?? '';
+
+        if ($first !== '{' && $first !== '[') {
+            return $value;
+        }
+
+        $decoded = json_decode($value, true, 32);
+
+        if (! is_array($decoded)) {
+            return $value;
+        }
+
+        $encoded = json_encode(
+            $this->redactArrayByKey($decoded),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR,
+        );
+
+        return is_string($encoded) ? $encoded : $value;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $values
+     * @return array<array-key, mixed>
+     */
+    private function redactArrayByKey(array $values, int $depth = 0): array
+    {
+        if ($depth > 16) {
+            return $values;
+        }
+
+        $redacted = [];
+
+        foreach ($values as $key => $value) {
+            if (is_array($value)) {
+                $redacted[$key] = $this->redactArrayByKey($value, $depth + 1);
+
+                continue;
+            }
+
+            $redacted[$key] = is_string($key) && $this->keyIsSensitive($key)
+                ? $this->replacement
+                : $value;
+        }
+
+        return $redacted;
+    }
+
+    /**
      * The pass the patterns cannot do: match a parameter by its DECODED name.
      *
      * A regex matches literal text, so `%74oken=` and `token%5Ba%5D=` walk
@@ -357,8 +419,20 @@ final class Redactor
         foreach ($spans as $span) {
             $span->setAttributes($this->attributes($span->attributes()));
 
+            // Names are free text too. `Telemetry::span()` and
+            // `nameRequestSpansUsing()` both take whatever the app hands them,
+            // and a name built from a URL carries its query with it — so the
+            // same credential went out scrubbed in the attributes and verbatim
+            // in the name beside them. The name only changes when there is
+            // something in it to change.
+            $span->updateName($this->value('span.name', $span->name));
+
             $span->replaceEvents(array_map(
-                fn (SpanEvent $event): SpanEvent => new SpanEvent($event->name, $event->timeUnixNano, $this->attributes($event->attributes)),
+                fn (SpanEvent $event): SpanEvent => new SpanEvent(
+                    $this->value('event.name', $event->name),
+                    $event->timeUnixNano,
+                    $this->attributes($event->attributes),
+                ),
                 $span->events(),
             ));
 
@@ -440,6 +514,8 @@ final class Redactor
         if ($this->keyIsSensitive($key)) {
             return $this->replacement;
         }
+
+        $value = $this->redactJsonByKey($value);
 
         foreach ($this->patterns as $pattern => $replacement) {
             if (! $this->patternCompiles($pattern)) {

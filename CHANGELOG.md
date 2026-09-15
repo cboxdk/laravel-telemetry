@@ -70,6 +70,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `dXNlcjpwYXNz` go; `Authentication`, `realm=api` and
   `error=insufficient_scope` stay. Predates 2.0.0.
 
+- **A credential in a JSON context value was exported whole.** The log channel
+  `json_encode`s any non-scalar context, so `['password' => 'hunter2']` arrived
+  as `{"password":"hunter2"}` under a key like `log.context.payload` — a name
+  that is not itself sensitive, around a body carrying no `name=value` pairs
+  for a pattern to match. A JSON object or array is now decoded, its keys
+  judged by the same rules that judge an attribute key, and re-encoded. Applies
+  to any attribute holding an encoded structure, not just log context.
+
+- **Span names and span event names were never scrubbed.** `Telemetry::span()`
+  and `nameRequestSpansUsing()` take whatever the app hands them, and a name
+  built from a URL carries its query along — so the same credential went out
+  redacted in the attributes and verbatim in the name beside them. Log record
+  names were already covered; these were the gap.
+
 - **A parameter name full of unclosed brackets could stall the process.** The
   regex that stripped array levels was quadratic on `token[[[[[…]tail` — 20k
   brackets took 67ms, 200k over a second — and it raised no PCRE error, so the
