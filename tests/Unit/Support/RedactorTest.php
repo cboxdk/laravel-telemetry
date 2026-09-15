@@ -419,31 +419,22 @@ it('looks inside a URL that an ordinary assignment carries', function () {
 
 it('stays linear on a value that is almost all credentials', function () {
     // Comparing the replacement with substr()+str_starts_with copied the rest
-    // of the input per match: 640KB of `token=x&` took 349ms.
+    // of the input per match: 640KB of `token=x&` took 349ms where linear
+    // takes 38ms, and it grew from there.
     //
-    // Asserted as a SHAPE rather than a stopwatch. A wall-clock budget has to
-    // hold on a loaded CI box running twelve suites at once, so it has to be
-    // loose enough to pass the very quadratic behaviour it is guarding. Four
-    // times the input costs about four times as much when linear and sixteen
-    // when not, and both measurements are slowed equally by whatever else the
-    // machine is doing.
+    // Sized so the two answers are not close. At 160k pairs linear measures
+    // about 110ms and quadratic well over a second, so a budget loose enough
+    // to survive a twelve-way parallel run still fails decisively if the
+    // copying comes back. A ratio between two wall-clock samples does not
+    // survive that load — one sample gets a good slice and the other does not.
     $redactor = Redactor::fromConfig(['enabled' => true]);
 
-    $time = function (int $pairs) use ($redactor): float {
-        $value = str_repeat('token=x&', $pairs);
+    $redactor->value('log.line', str_repeat('token=x&', 2_000));
 
-        $started = hrtime(true);
-        $redactor->value('log.line', $value);
+    $started = hrtime(true);
+    $redactor->value('log.line', str_repeat('token=x&', 160_000));
 
-        return (hrtime(true) - $started) / 1e6;
-    };
-
-    $time(5_000); // warm up: first call pays for pattern compilation
-
-    $small = $time(20_000);
-    $large = $time(80_000);
-
-    expect($large / max($small, 0.1))->toBeLessThan(8.0);
+    expect((hrtime(true) - $started) / 1e6)->toBeLessThan(1_500.0);
 });
 
 it('walks a span link\'s attributes too', function () {
