@@ -101,7 +101,14 @@ final class Redactor
             // this way — `code`, `state` and `key` are ordinary parameters as
             // often as they are secrets, and redacting `postal_code` protects
             // nothing while destroying real telemetry.
-            '/((?:^|[?&;])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
+            //
+            // Whitespace counts as a separator alongside `?`, `&` and `;`, so
+            // a credential quoted in prose — `Invalid api_token=sk_live_9` in
+            // an exception message — is caught too, not only one sitting in a
+            // query string. The name still has to end in a credential word
+            // immediately before the `=`, which is what keeps `token_count=`,
+            // `signature_required=` and `secret_count=` out of it.
+            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]?[^&;\s\'"]+/i' => '$1[REDACTED]',
             // The ambiguous words, matched EXACTLY, never with a prefix, and
             // only inside something that is actually a query — after `?`, `&`
             // or `;`, never at the start of a value. `?code=` on an OAuth

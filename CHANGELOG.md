@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly, because `?code=` on an OAuth callback is an authorization code
   while `postal_code=` is an address.
 
+  Whitespace separates a parameter name as well as `?`, `&` and `;` do, so a
+  credential quoted in prose — `Invalid api_token=sk_live_9` in an exception
+  message, which is where an error report is most likely to carry one — is
+  redacted too, not only one sitting in a query string. The credential word
+  still has to end the name, immediately before the `=`, which is what keeps
+  `token_count=`, `signature_required=` and `secret_count=` intact.
+
 - **A failed job's error record could not say whose it was.** A queue worker
   tears the job down before it reports: Laravel dispatches `JobFailed` — or
   `JobReleasedAfterException`, which is every attempt but the last when

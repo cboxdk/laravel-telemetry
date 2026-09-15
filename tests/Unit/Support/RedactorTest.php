@@ -132,3 +132,39 @@ it('keeps tracking the package lists when an app appends its own', function () {
     expect($redactor->value('note', 'CPR-123456 and ?token=SECRET'))
         ->toBe('[REDACTED:cpr] and ?token=[REDACTED]');
 });
+
+it('catches a credential quoted in prose, not only one in a query string', function () {
+    // The pattern's reach is the point: the same secret shows up in url.query,
+    // in a referer, and in the exception message that quotes the failing call.
+    // Anchoring on `?`/`&`/`;` alone covered the first two and left the third
+    // — the one an error report is most likely to carry — in the clear.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('exception.message', 'Invalid api_token=sk_live_9 supplied'))
+        ->toBe('Invalid api_token=[REDACTED] supplied')
+        ->and($redactor->value('log.line', 'err: token=abc123 was rejected'))
+        ->toBe('err: token=[REDACTED] was rejected')
+        ->and($redactor->value('log.line', 'Guzzle error with password=hunter2'))
+        ->toBe('Guzzle error with password=[REDACTED]');
+});
+
+it('still leaves names that merely end in a credential word alone', function () {
+    // The guard is that the credential word has to sit immediately before the
+    // `=`. Widening the separator must not start eating ordinary telemetry:
+    // these are real attribute values from this package and its consumers.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    $untouched = [
+        'tokens_in=880 tokens_out=120 cost=0.004',
+        'signature_required=true',
+        'db.statement: SELECT id, token_count FROM ai_usage WHERE id=?',
+        'secret_count=3',
+        'api_key_name=prod',
+        'sort_key=price',
+        'postal_code=2100',
+    ];
+
+    foreach ($untouched as $value) {
+        expect($redactor->value('attr', $value))->toBe($value);
+    }
+});
