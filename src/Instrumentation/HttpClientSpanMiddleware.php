@@ -65,20 +65,20 @@ final class HttpClientSpanMiddleware
             // can skip the rejection callback, and a handler can throw before
             // returning one at all.
             $settled = false;
-            $finish = function (?ResponseInterface $response, ?Throwable $error) use (&$settled, $span, &$stats): void {
+            $finish = function (?ResponseInterface $response, ?Throwable $error, bool $rejected = false) use (&$settled, $span, &$stats): void {
                 if ($settled) {
                     return;
                 }
 
                 $settled = true;
 
-                FailSafe::guard(fn () => $this->end($span, $response, $error, $stats));
+                FailSafe::guard(fn () => $this->end($span, $response, $error, $stats, $rejected));
             };
 
             try {
                 $promise = $handler($request, $options);
             } catch (Throwable $e) {
-                $finish(null, $e);
+                $finish(null, $e, rejected: true);
 
                 throw $e;
             }
@@ -90,7 +90,12 @@ final class HttpClientSpanMiddleware
                     return $response;
                 },
                 function ($reason) use ($finish) {
-                    $finish(null, $reason instanceof Throwable ? $reason : null);
+                    // Rejected is rejected. A promise may be rejected with
+                    // anything — Guzzle's own paths use throwables, but a
+                    // string or an array is legal — and recording those as a
+                    // success would also hide them from the error-sampling
+                    // escape hatch.
+                    $finish(null, $reason instanceof Throwable ? $reason : null, rejected: true);
 
                     // Rejected exactly as it arrived: the caller's error
                     // handling must not change because it was measured.
@@ -143,8 +148,19 @@ final class HttpClientSpanMiddleware
         return $options;
     }
 
-    private function end(Span $span, ?ResponseInterface $response, ?Throwable $error, ?TransferStats $stats): void
+    private function end(Span $span, ?ResponseInterface $response, ?Throwable $error, ?TransferStats $stats, bool $rejected = false): void
     {
+        // Where the call actually went. This middleware is registered before
+        // the app's own, so it is OUTSIDE them and reads the request before
+        // `withRequestMiddleware()` has had its say — a callback rewriting the
+        // URI would leave the span naming a host nobody called. The stats
+        // carry the request as it went on the wire.
+        $sent = $stats?->getRequest();
+
+        if ($sent !== null) {
+            $this->correctDestination($span, $sent);
+        }
+
         if ($stats !== null && config('telemetry.instrument.http_client_timing', true)) {
             $span->setAttributes(HttpTransferTimings::attributes($stats->getHandlerStats()));
         }
@@ -158,6 +174,8 @@ final class HttpClientSpanMiddleware
         if ($error !== null) {
             $span->recordException($error);
             $span->setStatus(SpanStatus::Error, $error->getMessage());
+        } elseif ($rejected) {
+            $span->setStatus(SpanStatus::Error, 'the request was rejected');
         } else {
             $span->setStatus($status !== null && $status >= 400 ? SpanStatus::Error : SpanStatus::Ok);
         }
@@ -165,6 +183,20 @@ final class HttpClientSpanMiddleware
         $span->end();
 
         $this->recordDuration($span, $status);
+    }
+
+    private function correctDestination(Span $span, RequestInterface $sent): void
+    {
+        $uri = $sent->getUri();
+        $host = $uri->getHost() !== '' ? $uri->getHost() : 'unknown';
+        $path = $uri->getPath() !== '' ? $uri->getPath() : '/';
+
+        if (($span->attributes()['server.address'] ?? null) === $host && ($span->attributes()['url.path'] ?? null) === $path) {
+            return;
+        }
+
+        $span->setAttributes(['server.address' => $host, 'url.path' => $path]);
+        $span->updateName(HttpMethod::forSpanName($sent->getMethod()).' '.$host);
     }
 
     private function recordDuration(Span $span, ?int $status): void

@@ -9,8 +9,10 @@ use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Promise\Create;
+use GuzzleHttp\Promise\Promise;
 use GuzzleHttp\Psr7\Request as GuzzleRequest;
 use GuzzleHttp\Psr7\Response as PsrResponse;
+use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\TransferStats;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Bus\Queueable;
@@ -423,4 +425,84 @@ it('adds no timing attributes when there was no cURL behind the response', funct
 
     expect(allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test')->attributes())
         ->not->toHaveKey('http.client.ttfb_ms');
+});
+
+it('gives a retried call one span per attempt, and still hands back the answer', function () {
+    // retry() re-enters the stack, so each attempt is its own hop with its own
+    // promise — and each closes itself. The caller sees only the final answer.
+    $attempts = 0;
+
+    $response = Http::setHandler(function ($request, array $options) use (&$attempts) {
+        $attempts++;
+
+        return Create::promiseFor(new PsrResponse($attempts < 3 ? 500 : 200, [], 'x'));
+    })->retry(3, 0)->get('https://retry.example/x');
+
+    expect($response->status())->toBe(200)
+        ->and($attempts)->toBe(3)
+        ->and(allSpans($this->collector)->where('kind', SpanKind::Client))->toHaveCount(3);
+});
+
+it('does not change what the caller catches', function () {
+    // Measuring a call must not alter its failure. Guzzle's ConnectException
+    // still reaches the caller as Laravel's ConnectionException.
+    $http = Http::setHandler(fn ($request, array $options) => Create::rejectionFor(
+        new ConnectException('nope', $request),
+    ));
+
+    expect(fn () => $http->get('https://down.example/x'))
+        ->toThrow(ConnectionException::class);
+});
+
+it('records a detached span that was abandoned rather than losing it entirely', function () {
+    // A detached span is not on the context stack, so the shutdown path could
+    // not see it: a call whose promise was cancelled or never settled left no
+    // trace of having been made. Asserted on the tracer, because Laravel's
+    // async() hands back a LazyPromise that sends nothing until it is awaited
+    // — there is no way to abandon a call from outside that has also started.
+    $span = Telemetry::tracer()->startDetachedSpan('GET slow.example', SpanKind::Client);
+
+    expect(Telemetry::currentSpan())->toBeNull('a detached span is not ambient');
+
+    Telemetry::tracer()->endOpenSpans('process terminated without completing');
+
+    $closed = allSpans($this->collector)->firstWhere('name', 'GET slow.example');
+
+    expect($closed)->not->toBeNull()
+        ->and($closed->status())->toBe(SpanStatus::Error)
+        ->and($closed->spanId)->toBe($span->spanId);
+});
+
+it('marks a rejection as a failure whatever it was rejected with', function () {
+    // A promise may be rejected with anything. Recording a non-throwable
+    // rejection as a success also hid it from error sampling.
+    $http = Http::setHandler(fn ($request, array $options) => Create::rejectionFor('bad'));
+
+    try {
+        $http->get('https://odd.example/x');
+    } catch (Throwable) {
+        // Laravel wraps it; the point is the span, not the exception.
+    }
+
+    expect(allSpans($this->collector)->firstWhere('name', 'GET odd.example')?->status())
+        ->toBe(SpanStatus::Error);
+});
+
+it('names the host the call actually went to, not the one first asked for', function () {
+    // This middleware is outside the app's own, so it reads the request before
+    // withRequestMiddleware() has had its say. The stats carry what went on
+    // the wire.
+    Http::setHandler(function ($request, array $options) {
+        $options['on_stats'](new TransferStats($request, null, 0.01, null, []));
+
+        return Create::promiseFor(new PsrResponse(200));
+    })
+        ->withRequestMiddleware(fn ($request) => $request->withUri(new Uri('https://actual.example/new')))
+        ->get('https://configured.example/old');
+
+    $span = allSpans($this->collector)->where('kind', SpanKind::Client)->first();
+
+    expect($span->name)->toBe('GET actual.example')
+        ->and($span->attributes()['server.address'])->toBe('actual.example')
+        ->and($span->attributes()['url.path'])->toBe('/new');
 });

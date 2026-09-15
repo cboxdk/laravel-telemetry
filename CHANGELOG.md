@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the one dispatched before it, and re-parented whatever ran next onto a call
   that had not finished.
 
+  Two behaviours change for anyone who reached into the ambient context around
+  an HTTP call. A `beforeSending` callback calling `Telemetry::currentSpan()`
+  used to annotate the client span and now annotates the span the call was made
+  from — the client span is no longer ambient, deliberately, because several
+  can be open at once. And a call created under one set of context dimensions
+  now keeps THOSE: the ambient dimensions are snapshotted when the span starts
+  rather than merged when it ends, so an async call built under one tenant and
+  settled under another is no longer attributed to the second.
+
   Consequences worth knowing. `http.client.request.duration` now observes once
   per HOP, so a call that followed two redirects records three; that is what
   the metric always claimed to measure. Each hop reads its own transfer timings
