@@ -6,6 +6,7 @@ use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanLink;
 
 function redactor(array $config = []): Redactor
 {
@@ -425,4 +426,30 @@ it('stays linear on a value that is almost all credentials', function () {
     $redactor->value('log.line', str_repeat('token=x&', 80_000));
 
     expect((hrtime(true) - $started) / 1e6)->toBeLessThan(200.0);
+});
+
+it('walks a span link\'s attributes too', function () {
+    // Links reach the exporter like any other attributes and were the one set
+    // redaction never touched — a retried job's link to its previous attempt
+    // carries whatever the app put on it.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    $link = new SpanLink(str_repeat('c', 32), str_repeat('d', 16), ['password' => 'LINK_SECRET', 'attempt' => 2]);
+
+    $span = new Span(
+        traceId: str_repeat('a', 32),
+        spanId: str_repeat('b', 16),
+        parentSpanId: null,
+        name: 'retry',
+        kind: SpanKind::Internal,
+        sampled: true,
+        attributes: [],
+        onEnd: static function (): void {},
+        startUnixNano: null,
+        links: [$link],
+    );
+
+    $redactor->spans([$span]);
+
+    expect($span->links()[0]->attributes)->toBe(['password' => '[REDACTED]', 'attempt' => 2]);
 });

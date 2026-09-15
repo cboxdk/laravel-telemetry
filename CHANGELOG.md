@@ -81,6 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrites big integers and float literals — corrupting structures that had
   nothing in them to redact.
 
+- **Span LINK attributes were never scrubbed.** A link's attributes reach the
+  exporter like any others — a retried job's link to its previous attempt
+  carries whatever the app put on it — and were the one set redaction never
+  walked. Predates 2.0.0.
+
 - **Span names and span event names were never scrubbed.** `Telemetry::span()`
   and `nameRequestSpansUsing()` take whatever the app hands them, and a name
   built from a URL carries its query along — so the same credential went out

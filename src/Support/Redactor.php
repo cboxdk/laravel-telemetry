@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Support;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanEvent;
+use Cbox\Telemetry\Tracing\SpanLink;
 use Closure;
 
 /**
@@ -429,6 +430,14 @@ final class Redactor
                     $this->attributes($event->attributes),
                 ),
                 $span->events(),
+            ));
+
+            // A link's attributes reach the exporter like any others and were
+            // the one set redaction never walked. A retried job's link to its
+            // previous attempt carries whatever the app put on it.
+            $span->replaceLinks(array_map(
+                fn (SpanLink $link): SpanLink => new SpanLink($link->traceId, $link->spanId, $this->attributes($link->attributes)),
+                $span->links(),
             ));
 
             // The status description is free text and is exported as
