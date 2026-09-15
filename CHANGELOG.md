@@ -5,6 +5,60 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Client spans break their duration into transfer phases.** A span saying an
+  outgoing call took 284ms does not say whether that was DNS, connection setup,
+  waiting on the far end, or the response coming back down — and those have
+  entirely different fixes. `http.client.dns_ms`, `.tcp_ms`, `.tls_ms`,
+  `.ttfb_ms` and `.transfer_ms` now say which, alongside
+  `network.peer.address`, `network.peer.port` and `network.protocol.version`.
+
+  Needs no extension and nothing to wire: Laravel's HTTP client already
+  installs cURL's `on_stats` callback and keeps the result on the response, so
+  this reads what is there. Nothing is recorded when there was no cURL behind
+  the response — a faked response, or the stream handler — because a row of
+  zeroes reads as a transfer that did every phase instantly.
+
+  What the intervals are, and are not. `ttfb_ms` runs from "about to transmit"
+  to the first response headers cURL processes, so it INCLUDES sending the
+  request body, and for a body large enough that Guzzle adds
+  `Expect: 100-continue` it ends at the interim `100 Continue` rather than the
+  real response — pushing the upload and the server's work into `transfer_ms`
+  instead. `tls_ms` through an HTTP CONNECT proxy also contains the proxy
+  tunnel negotiation, so a slow proxy reads as slow TLS. Over HTTP/3 there is
+  no TCP handshake to time, so a single `http.client.connect_ms` replaces the
+  TCP/TLS split rather than inventing one.
+
+  A reused connection is reported as `http.client.connection_reused` with the
+  connection phases absent, not as a DNS lookup that took no time. Plain HTTP
+  gets no TLS phase. Guzzle follows redirects itself, so the phases describe
+  the last hop while the span covers them all.
+
+- **An orphaned client span is discarded rather than published as a failure.**
+  A redirect emits `RequestSending` per hop but one `ResponseReceived`, so
+  earlier hops never match an outcome. `flushRequestState()` dropped its map of
+  them but left the spans on the tracer's context stack, where the shutdown
+  path ends everything still open as an error lasting until the process died —
+  so a healthy call that merely followed a redirect published a FAILED client
+  span with a fabricated duration. They are now discarded through the new
+  `Tracer::discardSpan()`, which is what the instrumentation always said it
+  did: a missing span is the lesser evil, a span with the wrong duration and
+  status is a lie that reads as data.
+
+  A stopgap, not the fix. Nothing available on Laravel's HTTP client events
+  identifies which call a redirect hop belongs to — a global Guzzle middleware
+  can see `__redirect_count`, but an options key set there does not survive
+  back up through the redirect middleware, so hops cannot be paired to calls
+  while `Http::pool` interleaves them. Owning the span inside a middleware is
+  the real answer and is its own change.
+
+  Turn it off with `telemetry.instrument.http_client_timing`: collecting costs
+  about a microsecond, but up to nine more attributes per client span are
+  stored and run through redaction at flush.
+
 ## [2.1.0] - 2026-09-15
 
 ### Upgrading

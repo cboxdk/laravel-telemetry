@@ -419,13 +419,22 @@ it('looks inside a URL that an ordinary assignment carries', function () {
 
 it('stays linear on a value that is almost all credentials', function () {
     // Comparing the replacement with substr()+str_starts_with copied the rest
-    // of the input per match: 640KB of `token=x&` took 349ms.
+    // of the input per match: 640KB of `token=x&` took 349ms where linear
+    // takes 38ms, and it grew from there.
+    //
+    // Sized so the two answers are not close. At 160k pairs linear measures
+    // about 110ms and quadratic well over a second, so a budget loose enough
+    // to survive a twelve-way parallel run still fails decisively if the
+    // copying comes back. A ratio between two wall-clock samples does not
+    // survive that load — one sample gets a good slice and the other does not.
     $redactor = Redactor::fromConfig(['enabled' => true]);
 
-    $started = hrtime(true);
-    $redactor->value('log.line', str_repeat('token=x&', 80_000));
+    $redactor->value('log.line', str_repeat('token=x&', 2_000));
 
-    expect((hrtime(true) - $started) / 1e6)->toBeLessThan(200.0);
+    $started = hrtime(true);
+    $redactor->value('log.line', str_repeat('token=x&', 160_000));
+
+    expect((hrtime(true) - $started) / 1e6)->toBeLessThan(1_500.0);
 });
 
 it('walks a span link\'s attributes too', function () {

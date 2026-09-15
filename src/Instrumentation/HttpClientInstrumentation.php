@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Instrumentation;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\HttpTransferTimings;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -69,6 +70,27 @@ final class HttpClientInstrumentation implements ManagesRequestState
 
             if ($span !== null) {
                 $span->setAttribute('http.response.status_code', $event->response->status());
+
+                // What the 284ms was actually spent on. Laravel's HTTP client
+                // already keeps cURL's transfer stats on the response, so this
+                // costs one array read — no `on_stats` to install, no option
+                // for the caller to remember, and nothing at all when the
+                // handler is not cURL.
+                //
+                // Guarded SEPARATELY from the rest of this listener, not by
+                // the outer guard. An app's own `on_stats` callback can return
+                // anything, and Laravel keeps whatever it returns — so
+                // `handlerStats()` can throw on something that is not a
+                // TransferStats at all. Caught out here, that would take
+                // setStatus(), end() and the duration histogram with it, and
+                // leave the span open for every later span to nest under.
+                // Enrichment must never be able to cost the measurement.
+                if (config('telemetry.instrument.http_client_timing', true)) {
+                    FailSafe::guard(fn () => $span->setAttributes(
+                        HttpTransferTimings::attributes($event->response->handlerStats()),
+                    ));
+                }
+
                 $span->setStatus($event->response->status() >= 400 ? SpanStatus::Error : SpanStatus::Ok);
                 $span->end();
 
@@ -174,6 +196,16 @@ final class HttpClientInstrumentation implements ManagesRequestState
 
     public function flushRequestState(): void
     {
+        // Dropping the map is not enough on its own: the spans stay on the
+        // tracer's context stack, and the shutdown path ends every span still
+        // open as an error that lasted until the process died. A healthy call
+        // that merely followed a redirect would publish a FAILED client span
+        // with a duration stretching to the end of the request — exactly the
+        // lie the comment above says to avoid. Discarded properly instead.
+        foreach ($this->inFlight as $span) {
+            FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
+        }
+
         $this->inFlight = [];
     }
 }
