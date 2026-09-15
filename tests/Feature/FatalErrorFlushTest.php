@@ -40,3 +40,25 @@ it('delivers the error and the open span when the process dies without terminati
 
     expect($span->hasEnded())->toBeTrue();
 });
+
+it('flushes a call the application finished in its own shutdown callback', function () {
+    // Run in a SUBPROCESS, because this is about PHP's real shutdown ordering
+    // and nothing else can exercise it: calling flushOnShutdown() directly —
+    // as the test above does — never runs the callback it registers, which is
+    // why the fix went out with no test that could fail without it.
+    //
+    // An application that awaits its own outstanding HTTP work registers that
+    // callback after the package's, so it runs later, and what completed there
+    // had nothing left to flush it.
+    $exported = tempnam(sys_get_temp_dir(), 'telemetry-shutdown-');
+
+    $script = __DIR__.'/../Support/late-shutdown-flush.php';
+
+    exec(sprintf('%s %s %s %s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg($script), escapeshellarg(dirname(__DIR__, 2)), escapeshellarg($exported)), $output, $status);
+
+    expect($status)->toBe(0, 'subprocess failed: '.implode("\n", $output))
+        ->and($output)->toContain('SCRIPT DONE')
+        ->and(trim((string) file_get_contents($exported)))->toBe('EXPORTED GET awaited.example');
+
+    @unlink($exported);
+});
