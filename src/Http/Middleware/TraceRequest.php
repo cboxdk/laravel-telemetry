@@ -12,6 +12,7 @@ use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
@@ -55,29 +56,16 @@ final class TraceRequest
     ];
 
     /**
-     * Query parameter names blanked in url.query at CAPTURE time, matched on
-     * a SUFFIX so `api_token`, `access_token` and `_token` all count.
+     * Query parameter names are blanked at CAPTURE time, by their DECODED
+     * name — the half a pattern cannot do, since seeing that `%74oken` and
+     * `token%5B%5D` are the parameter `token` means decoding it.
      *
-     * This layer decodes the name before matching, which is the half Redactor
-     * cannot do: a pattern over raw text cannot see that `%74oken` and
-     * `token%5B%5D` are the same parameter without rewriting the value. Here
-     * the string is known to be a query, so it can be taken apart properly.
-     * Redactor still catches the same credential everywhere ELSE it surfaces
-     * — referer, exception messages, log records — because every attribute
-     * value passes through it on the way out.
-     */
-    private const SENSITIVE_QUERY_PARAMS = ['token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'signature'];
-
-    /**
-     * Names that are credentials only as a whole word.
+     * The lists themselves live on Redactor, which applies the same test at
+     * export to every attribute value on the way out. One definition, so the
+     * two passes cannot drift apart.
      *
-     * `key` is an API key and `code` is an OAuth authorization code — but
-     * `sort_key` is a sort order and `postal_code` is an address, and blanking
-     * those protects nothing while destroying real telemetry. Matched exactly,
-     * never as a suffix.
+     * @see Redactor::parameterIsCredential()
      */
-    private const AMBIGUOUS_QUERY_PARAMS = ['key', 'auth', 'code', 'state', 'pwd', 'sig', 'jwt', 'otp'];
-
     public function __construct(private readonly TelemetryManager $telemetry) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -555,48 +543,11 @@ final class TraceRequest
         return implode('&', $redacted);
     }
 
-    /**
-     * Is this parameter NAME a credential, however it was spelled?
-     *
-     * Decoded first, so `%74oken` and `access_token%5B0%5D` are recognised as
-     * what the application will read them as. Array syntax is dropped for the
-     * same reason: `token[]` and `token[0]` are the parameter `token`.
-     */
     private static function parameterIsSensitive(string $name): bool
     {
-        // Decode and strip only when there is something to decode or strip:
-        // almost every parameter name is plain, and this runs once per pair on
-        // every instrumented request.
-        if (str_contains($name, '%')) {
-            $name = rawurldecode($name);
-        }
-
-        $name = strtolower($name);
-
-        if (str_contains($name, '[')) {
-            // Every trailing level, not just the last: `token[a][b]` is still
-            // the parameter `token`.
-            $name = preg_replace('/(?:\[[^\]]*\])+$/', '', $name) ?? $name;
-        }
-
-        // `-` and `.` separate a name the same way `_` does, and a header-ish
-        // spelling is common in a query: `x-api-key` is `x_api_key`.
-        $name = strtr($name, ['-' => '_', '.' => '_']);
-
-        if (in_array($name, self::AMBIGUOUS_QUERY_PARAMS, true)) {
-            return true;
-        }
-
-        foreach (self::SENSITIVE_QUERY_PARAMS as $sensitive) {
-            // Exact, or a suffix after a word boundary — so `api_token` and
-            // `x-api-key` count while `tokens_used`, `token_count` and
-            // `signature_required` do not.
-            if ($name === $sensitive || str_ends_with($name, '_'.$sensitive)) {
-                return true;
-            }
-        }
-
-        return false;
+        // A query string is a real query, so the ambiguous names — `key`,
+        // `code`, `state`, `auth` — mean what they say here.
+        return Redactor::parameterIsCredential($name, allowAmbiguous: true);
     }
 
     /**

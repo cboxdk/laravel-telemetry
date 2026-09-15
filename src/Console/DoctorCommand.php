@@ -216,14 +216,34 @@ final class DoctorCommand extends Command
         // Short in the column, remedy on its own line: twoColumnDetail pads to
         // the terminal width and an 80-column terminal eats the tail, which is
         // exactly the half that says what to do about it.
+        //
+        // What the gap MEANS depends on replace_defaults. Without it the
+        // package lists are unioned in, so a config that copied them is
+        // untidy but covered. With it the app has taken the lists over, and
+        // what is missing is genuinely not running.
+        if (! config('telemetry.redaction.replace_defaults', false)) {
+            $this->components->twoColumnDetail(
+                'Redaction',
+                '<fg=green>OK — package defaults unioned in over a config missing '.implode(', ', $stale).'</>',
+            );
+
+            $this->components->warn(
+                'Your config copied the redaction lists rather than referencing them. Nothing is lost — the '
+                ."package's own entries are unioned in — but the copy will keep drifting. Replace it with "
+                ."'patterns' => [...Redactor::defaultPatterns(), ...your own].",
+            );
+
+            return;
+        }
+
         $this->components->twoColumnDetail(
             'Redaction',
-            '<fg=yellow>STALE — missing '.implode(', ', $stale).' the package ships</>',
+            '<fg=yellow>REPLACED — missing '.implode(', ', $stale).' the package ships</>',
         );
 
         $this->components->warn(
-            'A published config that copied the redaction lists cannot receive patterns added later. '
-            ."Reference them instead: 'patterns' => [...Redactor::defaultPatterns(), ...your own].",
+            'redaction.replace_defaults is on, so the package lists are NOT unioned in and the entries above '
+            .'are not running. Turn it off, or copy the missing entries in deliberately.',
         );
     }
 

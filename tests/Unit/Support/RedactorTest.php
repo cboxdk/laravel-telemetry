@@ -38,7 +38,11 @@ it('scrubs secrets embedded in any string value', function () {
         ->and($redactor->value('db.query.text', 'connect to redis://admin:hunter2@cache.internal:6379'))->toBe('connect to redis://[REDACTED]@cache.internal:6379');
 });
 
-it('supports custom keys, patterns and replacement', function () {
+it('adds custom keys and patterns to the package lists rather than replacing them', function () {
+    // A published config that copied the lists cannot receive an entry added
+    // later, and the entries added later are the ones that catch newly
+    // understood credential spellings. So an app's lists are UNIONED in, and
+    // `user.password` stays redacted whatever else the app added.
     $redactor = redactor([
         'keys' => ['cpr'],
         'patterns' => ['/\d{6}-\d{4}/' => '[CPR]'],
@@ -47,6 +51,20 @@ it('supports custom keys, patterns and replacement', function () {
 
     expect($redactor->value('customer.cpr', '010203-1234'))->toBe('(gone)')
         ->and($redactor->value('note.body', 'cpr is 010203-1234'))->toBe('cpr is [CPR]')
+        ->and($redactor->value('user.password', 'still a package key'))->toBe('(gone)');
+});
+
+it('hands the lists over entirely when an app asks to replace them', function () {
+    // The escape hatch for an app that means it: with replace_defaults on,
+    // what is configured is the whole of it.
+    $redactor = redactor([
+        'keys' => ['cpr'],
+        'patterns' => ['/\d{6}-\d{4}/' => '[CPR]'],
+        'replacement' => '(gone)',
+        'replace_defaults' => true,
+    ]);
+
+    expect($redactor->value('customer.cpr', '010203-1234'))->toBe('(gone)')
         ->and($redactor->value('user.password', 'left alone — defaults were overridden'))->toBe('left alone — defaults were overridden');
 });
 
@@ -222,4 +240,47 @@ it('leaves capitalised authentication prose alone', function () {
         ->toBe('Bearer Scheme expected')
         ->and($redactor->value('log.line', 'rejected: Basic dXNlcjpwYXNz'))
         ->toBe('rejected: Basic [REDACTED]');
+});
+
+it('matches a credential by its decoded name anywhere it turns up', function () {
+    // A pattern matches literal text, so `%74oken=` walks past one written for
+    // `token=`. The NAME is decoded instead of the value — decoding the value
+    // would publish something the caller never sent.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('exception.message', 'GET https://x.test/?%74oken=SECRET failed'))
+        ->toBe('GET https://x.test/?%74oken=[REDACTED] failed')
+        ->and($redactor->value('log.line', 'url with token[name]=SECRET'))
+        ->toBe('url with token[name]=[REDACTED]')
+        ->and($redactor->value('log.line', 'token%5Ba%5D%5Bb%5D=SECRET'))
+        ->toBe('token%5Ba%5D%5Bb%5D=[REDACTED]')
+        ->and($redactor->value('http.request.header.referer', 'https://x/cb?%63ode=SECRET'))
+        ->toBe('https://x/cb?%63ode=[REDACTED]');
+});
+
+it('keeps the ambiguous names out of loose prose', function () {
+    // `code`, `key`, `state` and `auth` only mean a credential inside a real
+    // query. At the start of a value they are a cache key and a status.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    foreach (['key=abc', 'cache.key=user:42', 'code=200', 'state=open'] as $value) {
+        expect($redactor->value('cache.key', $value))->toBe($value);
+    }
+
+    // ...but `pwd`, `sig`, `jwt` and `otp` are never ordinary, so they do not
+    // need one.
+    expect($redactor->value('url.query', 'pwd=hunter2&page=1'))
+        ->toBe('pwd=[REDACTED]&page=1');
+});
+
+it('leaves a WWW-Authenticate challenge readable', function () {
+    // `realm=api` and `error=invalid_token` are diagnostics, not credentials.
+    // The old sixteen-character rule ate them because `=` and `_` counted
+    // towards the length.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.line', 'Basic realm=api'))->toBe('Basic realm=api')
+        ->and($redactor->value('log.line', 'Bearer error=insufficient_scope'))->toBe('Bearer error=insufficient_scope')
+        ->and($redactor->value('log.line', 'Basic YTpi'))->toBe('Basic [REDACTED]')
+        ->and($redactor->value('log.line', 'Bearer abc123'))->toBe('Bearer [REDACTED]');
 });

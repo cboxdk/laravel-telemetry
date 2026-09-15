@@ -50,18 +50,101 @@ final class Redactor
      */
     public static function fromConfig(array $config): self
     {
-        $keys = $config['keys'] ?? null;
-        $patterns = $config['patterns'] ?? null;
+        // The package lists are UNIONED with whatever the app configured,
+        // unless it explicitly asks to replace them.
+        //
+        // `mergeConfigFrom()` is a shallow `array_merge`, so a published
+        // `config/telemetry.php` replaces this block whole and can never
+        // receive an entry added later — and the entries added later are the
+        // ones that catch newly-understood credential spellings. An app that
+        // published two versions ago should not be quietly less protected than
+        // one that did not publish at all.
+        //
+        // Set `redaction.replace_defaults` to true to get the old semantics
+        // and control the lists outright.
+        $replace = (bool) ($config['replace_defaults'] ?? false);
+
+        $keys = self::stringList($config['keys'] ?? null);
+        $patterns = is_array($config['patterns'] ?? null)
+            ? array_filter($config['patterns'], is_string(...))
+            : null;
+        $safeKeys = self::stringList($config['safe_keys'] ?? null);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),
-            keys: is_array($keys) ? array_values(array_filter($keys, is_string(...))) : self::defaultKeys(),
-            patterns: is_array($patterns) ? array_filter($patterns, is_string(...)) : self::defaultPatterns(),
+            keys: self::union(self::defaultKeys(), $keys, $replace),
+            patterns: $patterns === null
+                ? self::defaultPatterns()
+                : ($replace ? $patterns : [...self::defaultPatterns(), ...$patterns]),
             replacement: is_string($config['replacement'] ?? null) ? $config['replacement'] : '[REDACTED]',
-            safeKeys: is_array($config['safe_keys'] ?? null)
-                ? array_values(array_filter($config['safe_keys'], is_string(...)))
-                : self::defaultSafeKeys(),
+            safeKeys: self::union(self::defaultSafeKeys(), $safeKeys, $replace),
         );
+    }
+
+    /**
+     * The pass the patterns cannot do: match a parameter by its DECODED name.
+     *
+     * A regex matches literal text, so `%74oken=` and `token%5Ba%5D=` walk
+     * straight past a pattern written for `token=`. Decoding the value to
+     * match it would mean publishing something the caller never sent, so the
+     * NAME is decoded instead and the original text is left exactly as it was
+     * apart from the credential itself.
+     *
+     * Ambiguous names are honoured only after `?`, `&` or `;` — a real query
+     * context. At the start of a value or after whitespace, `key=abc` is a
+     * cache key and `code=200` is a status, and blanking those protects
+     * nothing.
+     *
+     * Idempotent: a value already replaced re-matches and is replaced with
+     * itself, which is what lets the capture pass and this one both run.
+     */
+    private function redactEncodedParameters(string $value): string
+    {
+        if (! str_contains($value, '=')) {
+            return $value;
+        }
+
+        $scrubbed = preg_replace_callback(
+            '/(^|[?&;\s])([^=&;?\s]{1,64})=([^&\s]+)/',
+            function (array $m): string {
+                $ambiguous = $m[1] === '?' || $m[1] === '&' || $m[1] === ';';
+
+                return self::parameterIsCredential($m[2], $ambiguous)
+                    ? $m[1].$m[2].'='.$this->replacement
+                    : $m[0];
+            },
+            $value,
+        );
+
+        if (! is_string($scrubbed)) {
+            // Same reasoning as the pattern loop: the one value long enough to
+            // defeat the matcher must not be the one value that escapes it.
+            return preg_last_error() !== PREG_NO_ERROR ? $this->replacement : $value;
+        }
+
+        return $scrubbed;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private static function stringList(mixed $value): ?array
+    {
+        return is_array($value) ? array_values(array_filter($value, is_string(...))) : null;
+    }
+
+    /**
+     * @param  list<string>  $defaults
+     * @param  list<string>|null  $configured
+     * @return list<string>
+     */
+    private static function union(array $defaults, ?array $configured, bool $replace): array
+    {
+        if ($configured === null) {
+            return $defaults;
+        }
+
+        return $replace ? $configured : array_values(array_unique([...$defaults, ...$configured]));
     }
 
     /**
@@ -77,6 +160,75 @@ final class Redactor
     }
 
     /**
+     * Parameter names that are ALWAYS a credential, matched as a suffix after
+     * a word boundary — `api_token`, `access_token`, `x-api-key`.
+     *
+     * @var list<string>
+     */
+    public const CREDENTIAL_PARAMETERS = [
+        'token', 'secret', 'passwd', 'password', 'api_key', 'apikey', 'signature',
+        // Never an ordinary parameter name, so they do not need a query
+        // context the way `key` and `code` do.
+        'pwd', 'sig', 'jwt', 'otp',
+    ];
+
+    /**
+     * Names that are a credential only as a whole word, and only inside
+     * something that is actually a query.
+     *
+     * `key` is an API key and `code` is an OAuth authorization code — but
+     * `sort_key` is a sort order, `postal_code` is an address, and a
+     * `cache.key` attribute whose entire value is `key=abc` is neither.
+     *
+     * @var list<string>
+     */
+    public const AMBIGUOUS_PARAMETERS = ['key', 'auth', 'code', 'state'];
+
+    /**
+     * Is this parameter NAME a credential, however it was spelled?
+     *
+     * Decoded first, because `%74oken` and `access_token%5B0%5D` are the same
+     * parameter to every application that reads them and to no regex that does
+     * not. Trailing array levels are dropped for the same reason, all of them:
+     * `token[a][b]` is still `token`, while `filters[postal_code]` is the
+     * parameter `filters`.
+     *
+     * @param  bool  $allowAmbiguous  Whether the name sits in a real query,
+     *                                where `code` and `key` mean what they
+     *                                say. False for loose prose.
+     */
+    public static function parameterIsCredential(string $name, bool $allowAmbiguous = true): bool
+    {
+        // Decode and strip only when there is something to decode or strip:
+        // almost every name is plain, and this runs once per pair.
+        if (str_contains($name, '%')) {
+            $name = rawurldecode($name);
+        }
+
+        $name = strtolower($name);
+
+        if (str_contains($name, '[')) {
+            $name = preg_replace('/(?:\[[^\]]*\])+$/', '', $name) ?? $name;
+        }
+
+        // `-` and `.` separate a name the way `_` does, so a header-ish
+        // spelling counts: `x-api-key` is `x_api_key`.
+        $name = strtr($name, ['-' => '_', '.' => '_']);
+
+        if ($allowAmbiguous && in_array($name, self::AMBIGUOUS_PARAMETERS, true)) {
+            return true;
+        }
+
+        foreach (self::CREDENTIAL_PARAMETERS as $credential) {
+            if ($name === $credential || str_ends_with($name, '_'.$credential)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @return array<string, string>
      */
     public static function defaultPatterns(): array
@@ -86,17 +238,26 @@ final class Redactor
             '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
             //
-            // Two ways to qualify, because a flat length threshold cannot tell
-            // a short credential from an ordinary word. Sixteen characters is
-            // enough on its own; from eight, a character that is not a
-            // lowercase letter and is not the FIRST one separates
-            // `dXNlcjpwYXNz` (base64 for user:pass, twelve characters) from
-            // the sentence "Basic Authentication is required" — an English
-            // word capitalises only its first letter, a base64 payload does
-            // not. Only the scheme is matched case-insensitively: an `/i` over
-            // the whole pattern makes `[A-Z0-9]` match lowercase too and
-            // swallows the prose, which is how the first attempt failed.
-            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/=-]{16,}|(?=[A-Za-z0-9._~+\/=-]{8,})[A-Za-z][a-z]*[A-Z0-9._~+\/=-][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
+            // Two ways to qualify, because a flat length threshold cannot
+            // tell a short credential from an ordinary word.
+            //
+            // Sixteen characters is enough on its own — but `=` counts only as
+            // trailing base64 padding, never inside, or `Bearer
+            // error=invalid_token` (a real WWW-Authenticate header) reads as
+            // nineteen characters of credential.
+            //
+            // Otherwise, from four characters, one that is neither a lowercase
+            // letter nor the FIRST character. An English word capitalises only
+            // its first letter and carries no digit, so `Authentication`,
+            // `auth`, `realm` and `scheme` stay; `YTpi`, `abc123` and
+            // `dXNlcjpwYXNz` — base64 for user:pass, twelve characters — go.
+            // `=`, `.` and `-` do not qualify a token on their own: they are
+            // ordinary punctuation in `realm=api`.
+            //
+            // Only the scheme is case-insensitive. An `/i` over the whole
+            // pattern makes `[A-Z0-9]` match lowercase too and swallows the
+            // prose, which is how the first attempt at this failed.
+            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,}={0,2}|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
             // A credential carried as a query parameter, wherever the string
@@ -289,6 +450,8 @@ final class Redactor
                 return $this->replacement;
             }
         }
+
+        $value = $this->redactEncodedParameters($value);
 
         if ($this->custom !== null) {
             $value = FailSafe::guard(fn (): string => ($this->custom)($key, $value) ?? $value) ?? $value;

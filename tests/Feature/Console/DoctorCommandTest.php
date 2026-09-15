@@ -212,8 +212,19 @@ it('reports a published config that copied the redaction lists instead of refere
     config()->set('telemetry.redaction.patterns', ['/\bnothing\b/' => '[REDACTED]']);
 
     $this->artisan('telemetry:doctor')
-        ->expectsOutputToContain('STALE')
+        ->expectsOutputToContain('package defaults unioned in')
         ->expectsOutputToContain('copied the redaction lists');
+});
+
+it('warns properly when the app took the lists over and left entries out', function () {
+    // With replace_defaults on, nothing is unioned in and what is missing is
+    // genuinely not running — the one case where drift is a real gap.
+    config()->set('telemetry.redaction.replace_defaults', true);
+    config()->set('telemetry.redaction.patterns', ['/\bnothing\b/' => '[REDACTED]']);
+
+    $this->artisan('telemetry:doctor')
+        ->expectsOutputToContain('REPLACED')
+        ->expectsOutputToContain('are not running');
 });
 
 it('says nothing about redaction when the config references the defaults', function () {
@@ -248,5 +259,5 @@ it('does not call a config healthy when its replacements were discarded', functi
         null,
     ));
 
-    $this->artisan('telemetry:doctor')->expectsOutputToContain('STALE');
+    $this->artisan('telemetry:doctor')->expectsOutputToContain('missing 5 of 5 patterns');
 });

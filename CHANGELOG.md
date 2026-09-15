@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading
 
-- **If you published `config/telemetry.php` before this release, replace the
-  copied redaction lists with the accessors.** `mergeConfigFrom()` is a shallow
-  `array_merge`, so a published config replaces the package's `redaction` block
-  whole and never receives a pattern added later — including the ones added
-  here, which catch credentials. Rebuilding the config cache does not help.
+- **Redaction lists are now UNIONED with the package's, not replaced by
+  yours.** `mergeConfigFrom()` is a shallow `array_merge`, so a published
+  `config/telemetry.php` replaced the package's `redaction` block whole and
+  could never receive an entry added later — and the entries added later are
+  the ones that catch newly-understood credential spellings. An app that
+  published two versions ago was quietly less protected than one that never
+  published at all. Rebuilding the config cache did not help.
+
+  Nothing is required of you: `keys`, `patterns` and `safe_keys` you configure
+  are added to the package's rather than replacing them, so an old published
+  copy is covered as it stands. Tidying it up is still worth doing —
 
   ```php
   'keys'      => Redactor::defaultKeys(),
@@ -21,10 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   'safe_keys' => Redactor::defaultSafeKeys(),
   ```
 
-  Append your own by spreading them rather than replacing:
-  `'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]']`.
-  `telemetry:doctor` now reports this drift, so a config left behind says so
-  instead of going quiet.
+  — and `telemetry:doctor` reports a copy that has drifted.
+
+  **If you relied on your config REPLACING a built-in entry, set
+  `redaction.replace_defaults` to `true`** (or `TELEMETRY_REDACTION_REPLACE_DEFAULTS=true`)
+  to keep the old semantics. Prefer `safe_keys` or the custom hook for a single
+  entry that gets in your way.
 
 ### Fixed
 
@@ -52,12 +60,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing else ends it — which is also how PHP reads a query, where
   `arg_separator.input` is `&` and a `;` is an ordinary character.
 
-- **A short `Basic`/`Bearer` credential survived in messages.** The pattern
-  wanted sixteen characters, so `Basic dXNlcjpwYXNz` — base64 for `user:pass`,
-  twelve characters — went out verbatim. It now also matches from eight
-  characters when one of them is not a lowercase letter, which is what
-  separates a credential from the sentence "Basic authentication is required".
-  Predates 2.0.0.
+- **A short `Basic`/`Bearer` credential survived in messages, and a
+  `WWW-Authenticate` challenge did not.** The pattern wanted sixteen
+  characters, so `Basic dXNlcjpwYXNz` — base64 for `user:pass`, twelve
+  characters — went out verbatim, while `Bearer error=invalid_token` counted as
+  nineteen characters of credential and was blanked. It now matches from four
+  characters when one of them is neither a lowercase letter nor the first
+  character, and `=` counts only as trailing base64 padding. `YTpi`, `abc123`
+  and `dXNlcjpwYXNz` go; `Authentication`, `realm=api` and
+  `error=insufficient_scope` stay. Predates 2.0.0.
+
+- **A credential parameter written any way but literally escaped every
+  attribute except the two that are parsed.** `url.query` and the referer are
+  taken apart at capture, but an exception message quoting the same URL was
+  only ever pattern-matched, so `GET https://x/?%74oken=SECRET failed` and
+  `token[name]=SECRET` went out intact. Every attribute value now gets a pass
+  that matches on the DECODED parameter name — the name, never the value,
+  because decoding the value would publish something the caller never sent.
+  `key`, `auth`, `code` and `state` still need a real query context; `pwd`,
+  `sig`, `jwt` and `otp` do not, being credentials wherever they appear.
 
 - **An exception mapper lost the failed job's dimensions.** `Handler::map()`
   replaces the throwable before the reportable callbacks run, so the snapshot

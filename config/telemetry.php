@@ -315,16 +315,25 @@ return [
 
         // The built-in lists, BY REFERENCE rather than by copy.
         //
-        // Publishing this file used to freeze them: fromConfig() prefers what
-        // is here over the defaults, so a copied list meant a package that
-        // learned a new credential pattern could never tell you. Referencing
-        // the accessors keeps upstream additions flowing.
+        // Publishing this file used to freeze them: mergeConfigFrom() is a
+        // shallow merge, so a published block replaced the package's whole and
+        // a copied list meant a package that learned a new credential spelling
+        // could never tell you. Referencing the accessors keeps upstream
+        // additions flowing, and as a second belt the package lists are
+        // UNIONED in at runtime, so an older published copy is still covered.
         //
         // Append your own by spreading:
         //
         //   'keys'     => [...Redactor::defaultKeys(), 'cpr'],
         //   'patterns' => [...Redactor::defaultPatterns(), '/\d{6}-\d{4}/' => '[REDACTED]'],
         //   'safe_keys'=> [...Redactor::defaultSafeKeys(), 'my.known_safe.bucket'],
+        //
+        // Set replace_defaults to take the lists over outright — nothing is
+        // unioned in, and what you write here is the whole of it. Only do that
+        // if a built-in entry actively gets in your way; `safe_keys` and the
+        // custom hook are the gentler tools for that.
+        'replace_defaults' => env('TELEMETRY_REDACTION_REPLACE_DEFAULTS', false),
+
         'keys' => Redactor::defaultKeys(),
 
         'patterns' => Redactor::defaultPatterns(),
