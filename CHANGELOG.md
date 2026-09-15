@@ -5,6 +5,31 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Client spans break their duration into transfer phases.** A span saying an
+  outgoing call took 284ms does not say whether that was DNS, a slow TLS
+  handshake, the far end thinking, or a large body coming back down — and those
+  have entirely different fixes. `http.client.dns_ms`, `.tcp_ms`, `.tls_ms`,
+  `.ttfb_ms` and `.transfer_ms` now say which, alongside
+  `network.peer.address`, `network.peer.port` and `network.protocol.version`.
+
+  Free to collect and needs no extension: Laravel's HTTP client already
+  installs cURL's `on_stats` callback and keeps the result on the response, so
+  this reads what is there. Nothing is recorded when there was no cURL behind
+  the response — a faked response, or the stream handler — because a row of
+  zeroes reads as a transfer that did every phase instantly.
+
+  A reused connection is reported as `http.client.connection_reused` with the
+  connection phases absent, not as a DNS lookup that took no time. Plain HTTP
+  gets no TLS phase. Guzzle follows redirects with a fresh cURL handle per hop,
+  so the phases describe the last hop while the span covers them all.
+
+  Turn it off with `telemetry.instrument.http_client_timing` if the extra
+  attributes per client span are not worth it.
+
 ## [2.1.0] - 2026-09-15
 
 ### Upgrading
