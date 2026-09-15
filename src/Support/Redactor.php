@@ -88,13 +88,15 @@ final class Redactor
             //
             // Two ways to qualify, because a flat length threshold cannot tell
             // a short credential from an ordinary word. Sixteen characters is
-            // enough on its own; from eight, one character that is not a
-            // lowercase letter is what separates `dXNlcjpwYXNz` (base64 for
-            // user:pass, and only twelve characters) from the sentence "Basic
-            // authentication is required". Only the scheme is matched
-            // case-insensitively — an `/i` over the whole pattern would make
-            // `[A-Z0-9]` match lowercase too and swallow the prose.
-            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/=-]{16,}|(?=[A-Za-z0-9._~+\/=-]{8,})[a-z]*[A-Z0-9._~+\/=-][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
+            // enough on its own; from eight, a character that is not a
+            // lowercase letter and is not the FIRST one separates
+            // `dXNlcjpwYXNz` (base64 for user:pass, twelve characters) from
+            // the sentence "Basic Authentication is required" — an English
+            // word capitalises only its first letter, a base64 payload does
+            // not. Only the scheme is matched case-insensitively: an `/i` over
+            // the whole pattern makes `[A-Z0-9]` match lowercase too and
+            // swallows the prose, which is how the first attempt failed.
+            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/=-]{16,}|(?=[A-Za-z0-9._~+\/=-]{8,})[A-Za-z][a-z]*[A-Z0-9._~+\/=-][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
             // A credential carried as a query parameter, wherever the string
@@ -120,14 +122,13 @@ final class Redactor
             // query string. The name still has to end in a credential word
             // immediately before the `=`, which is what keeps `token_count=`,
             // `signature_required=` and `secret_count=` out of it.
-            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]*[^&\s\'"]+/i' => '$1[REDACTED]',
-            // A credential value runs to the next `&` or to whitespace, and
-            // any number of surrounding quotes is stripped first. Not to the
-            // next `;`: a value legitimately containing one used to be
-            // redacted up to it and published from there on, and `""SECRET`
-            // matched nothing at all because a single optional quote could
-            // not get past two. Over-redacting a `;`-separated query is the
-            // right way to be wrong here.
+            '/((?:^|[?&;\s])[^=&;\s]{0,48}(?:token|secret|passwd|password|api[_\-.]?key|apikey|signature)[\[\]0-9]{0,8}=)[\'"]*[^&\s]+/i' => '$1[REDACTED]',
+            // A credential value runs to the next `&` or to whitespace —
+            // nothing else ends it. It used to stop at a `;` or a quote, so
+            // `access_token=abc;more` and `password=abc'SECRET` published
+            // everything past that character, and `access_token=""SECRET`
+            // matched nothing at all because one optional quote could not get
+            // past two. `;` is not a query separator in PHP anyway.
             //
             // The ambiguous words, matched EXACTLY, never with a prefix, and
             // only inside something that is actually a query — after `?`, `&`
@@ -136,7 +137,7 @@ final class Redactor
             // exists; `postal_code=` is an address, and a `cache.key`
             // attribute whose whole value is `key=abc` is not a credential at
             // all.
-            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]*[^&\s\'"]+/i' => '$1[REDACTED]',
+            '/([?&;](?:code|state|key|auth|pwd|sig|jwt|otp)=)[\'"]*[^&\s]+/i' => '$1[REDACTED]',
         ];
     }
 

@@ -189,7 +189,15 @@ final class DoctorCommand extends Command
             // compare on whichever side carries the identity. Both sides go
             // through Cast so a config holding junk compares as the strings it
             // actually has rather than blowing up the check.
-            $have = Cast::stringList($name === 'patterns' ? array_keys($configured) : array_values($configured));
+            // For patterns, a key whose replacement is not a string is not a
+            // pattern in effect — fromConfig() drops it — so counting the key
+            // alone would report defaults active over a config that discarded
+            // every one of them.
+            $present = $name === 'patterns'
+                ? array_keys(array_filter($configured, is_string(...)))
+                : array_values($configured);
+
+            $have = Cast::stringList($present);
             $want = Cast::stringList($name === 'patterns' ? array_keys($defaults) : array_values($defaults));
 
             $missing = count(array_diff($want, $have));

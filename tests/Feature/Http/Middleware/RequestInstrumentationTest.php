@@ -725,3 +725,34 @@ it('leaves ordinary parameters that merely contain a credential word', function 
 
     expect($query)->toBe('postal_code=2100&sort_key=price&token_count=8&signature_required=true');
 });
+
+it('keeps a semicolon inside a value as part of the value', function () {
+    // PHP's arg_separator.input is `&`, so a `;` is an ordinary character in a
+    // value. Treating it as a separator cut the credential in half and
+    // published the tail — and for an ambiguous name in first position the
+    // export pass cannot repair it, because it anchors on a separator.
+    $this->get('http://api.acme.test/cb?code=4/0A;rest&page=2');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('code=[REDACTED]&page=2');
+});
+
+it('sees through every level of array syntax', function () {
+    // `token[a][b]` is still the parameter `token`, encoded or not.
+    $this->get('http://api.acme.test/x?token%5Ba%5D%5Bb%5D=SECRET&access_token[0][x]=SECRET2');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->not->toContain('SECRET');
+});
+
+it('does not mistake a credential word nested inside another parameter', function () {
+    // `filters[postal_code]` is a filter, not a credential: the name is
+    // `filters`, and only trailing array levels are stripped.
+    $this->get('http://api.acme.test/x?filters[postal_code]=2100&data[sort_key]=price');
+
+    $query = requestSpans($this->collector)[0]->attributes()['url.query'];
+
+    expect($query)->toBe('filters[postal_code]=2100&data[sort_key]=price');
+});

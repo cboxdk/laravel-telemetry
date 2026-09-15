@@ -526,25 +526,19 @@ final class TraceRequest
         // verbatim so the attribute still reads like the query it was, and
         // only the value of a sensitive parameter is replaced. A pair with no
         // `=` is passed through untouched.
-        $parts = preg_split('/([&;])/', $query, -1, PREG_SPLIT_DELIM_CAPTURE);
-
-        if ($parts === false) {
-            return $query;
-        }
-
-        $redacted = '';
+        //
+        // Split on `&` ALONE. PHP's arg_separator.input is `&`, so a `;` is an
+        // ordinary character inside a value — treating it as a separator cut
+        // `code=4/0A;rest` in half and published the tail, which is worse than
+        // what a single pattern used to do.
+        $parts = explode('&', $query);
+        $redacted = [];
 
         foreach ($parts as $part) {
-            if ($part === '&' || $part === ';') {
-                $redacted .= $part;
-
-                continue;
-            }
-
             $equals = strpos($part, '=');
 
             if ($equals === false) {
-                $redacted .= $part;
+                $redacted[] = $part;
 
                 continue;
             }
@@ -555,10 +549,10 @@ final class TraceRequest
             // passes agree — the export patterns run over this string too, and
             // re-matching a value they already blanked must be a no-op rather
             // than a second, differently-spelled substitution.
-            $redacted .= self::parameterIsSensitive($name) ? $name.'=[REDACTED]' : $part;
+            $redacted[] = self::parameterIsSensitive($name) ? $name.'=[REDACTED]' : $part;
         }
 
-        return $redacted;
+        return implode('&', $redacted);
     }
 
     /**
@@ -570,8 +564,20 @@ final class TraceRequest
      */
     private static function parameterIsSensitive(string $name): bool
     {
-        $name = strtolower(rawurldecode($name));
-        $name = preg_replace('/\[[^\]]*\]$/', '', $name) ?? $name;
+        // Decode and strip only when there is something to decode or strip:
+        // almost every parameter name is plain, and this runs once per pair on
+        // every instrumented request.
+        if (str_contains($name, '%')) {
+            $name = rawurldecode($name);
+        }
+
+        $name = strtolower($name);
+
+        if (str_contains($name, '[')) {
+            // Every trailing level, not just the last: `token[a][b]` is still
+            // the parameter `token`.
+            $name = preg_replace('/(?:\[[^\]]*\])+$/', '', $name) ?? $name;
+        }
 
         // `-` and `.` separate a name the same way `_` does, and a header-ish
         // spelling is common in a query: `x-api-key` is `x_api_key`.

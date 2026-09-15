@@ -200,3 +200,26 @@ it('redacts a short credential scheme value without eating the words around it',
         ->and($redactor->value('log.line', 'Basic authorization header missing'))
         ->toBe('Basic authorization header missing');
 });
+
+it('does not let a quote inside a credential end the redaction', function () {
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.line', "Invalid password=abc'SECRET supplied"))
+        ->toBe('Invalid password=[REDACTED] supplied')
+        ->and($redactor->value('log.line', 'token=ab"cd more'))
+        ->toBe('token=[REDACTED] more');
+});
+
+it('leaves capitalised authentication prose alone', function () {
+    // An English word capitalises only its first letter; a base64 payload does
+    // not. Requiring the non-lowercase character somewhere after the first is
+    // what keeps this sentence readable while `dXNlcjpwYXNz` still goes.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.line', 'Basic Authentication is required'))
+        ->toBe('Basic Authentication is required')
+        ->and($redactor->value('log.line', 'Bearer Scheme expected'))
+        ->toBe('Bearer Scheme expected')
+        ->and($redactor->value('log.line', 'rejected: Basic dXNlcjpwYXNz'))
+        ->toBe('rejected: Basic [REDACTED]');
+});

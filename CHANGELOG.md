@@ -45,11 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   referer's path and fragment are left as they were.
 
 - **A credential value ended at the wrong character.** The export pattern ran a
-  value to the next `;`, so `access_token=abc;more` published everything after
-  the semicolon, and its single optional quote could not get past a doubled
-  one, so `access_token=""SECRET` matched nothing at all. Values now run to the
-  next `&` or to whitespace with any number of quotes stripped — over-redacting
-  a `;`-separated query rather than leaking half a key.
+  value to the next `;` or quote, so `access_token=abc;more` and
+  `password=abc'SECRET` published everything past that character, and a single
+  optional quote could not get past a doubled one, so `access_token=""SECRET`
+  matched nothing at all. A value now runs to the next `&` or to whitespace and
+  nothing else ends it — which is also how PHP reads a query, where
+  `arg_separator.input` is `&` and a `;` is an ordinary character.
 
 - **A short `Basic`/`Bearer` credential survived in messages.** The pattern
   wanted sixteen characters, so `Basic dXNlcjpwYXNz` — base64 for `user:pass`,

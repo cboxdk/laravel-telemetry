@@ -238,3 +238,15 @@ it('still reports an app that appended its own patterns as healthy', function ()
         ->expectsOutputToContain('the package defaults are in effect')
         ->assertSuccessful();
 });
+
+it('does not call a config healthy when its replacements were discarded', function () {
+    // Right keys, no replacements: fromConfig() drops every one of them, so
+    // nothing is redacted at all. Counting keys alone reported this as the
+    // package defaults being in effect.
+    config()->set('telemetry.redaction.patterns', array_fill_keys(
+        array_keys(Redactor::defaultPatterns()),
+        null,
+    ));
+
+    $this->artisan('telemetry:doctor')->expectsOutputToContain('STALE');
+});
