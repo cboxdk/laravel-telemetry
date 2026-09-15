@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Outgoing HTTP spans are owned by the Guzzle call instead of paired from
+  events.** Laravel dispatches `RequestSending` from a middleware INSIDE
+  Guzzle's redirect middleware, so it fires once per hop, while
+  `ResponseReceived` fires once per CALL — and nothing on either event says
+  which call a hop belongs to. A listener therefore had to pair them by request
+  identity, which a redirect breaks: every hop but the last stayed open, and
+  `Http::pool` interleaves hops with other members, so no "continue the span
+  that is open" rule can pick the right one either. (Verified: a global Guzzle
+  middleware does see `__redirect_count`, but an options key set there does not
+  survive back up through the redirect middleware.)
+
+  A middleware now wraps ONE hop: it opens a span, calls the handler below it,
+  and closes that exact span when that hop's own promise settles. Nothing is
+  matched, so nothing can be mismatched, and a redirect is simply two hops that
+  each open and close.
+
+  The span is DETACHED — it never becomes the ambient context. That also fixes
+  a second defect: an ambient client span made every pooled request a CHILD of
+  the one dispatched before it, and re-parented whatever ran next onto a call
+  that had not finished.
+
+  Two behaviours change for anyone who reached into the ambient context around
+  an HTTP call. A `beforeSending` callback calling `Telemetry::currentSpan()`
+  used to annotate the client span and now annotates the span the call was made
+  from — the client span is no longer ambient, deliberately, because several
+  can be open at once. And a call created under one set of context dimensions
+  now keeps THOSE: the ambient dimensions are snapshotted when the span starts
+  rather than merged when it ends, so an async call built under one tenant and
+  settled under another is no longer attributed to the second.
+
+  Consequences worth knowing. `http.client.request.duration` now observes once
+  per HOP, so a call that followed two redirects records three; that is what
+  the metric always claimed to measure. Each hop reads its own transfer timings
+  — Laravel only keeps the last hop's on the response, so this is the only
+  place an earlier hop could get them. And instrumentation now follows the
+  container's HTTP `Factory`, so a hand-constructed `Factory` is no longer
+  covered; `Http::` and everything resolved from the container is.
+
+  `Cbox\Telemetry\Instrumentation\HttpClientInstrumentation` is removed. It
+  held the per-request state that this replaces.
+
 ### Added
 
 - **Client spans break their duration into transfer phases.** A span saying an
@@ -37,23 +80,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets no TLS phase. Guzzle follows redirects itself, so the phases describe
   the last hop while the span covers them all.
 
-- **An orphaned client span is discarded rather than published as a failure.**
-  A redirect emits `RequestSending` per hop but one `ResponseReceived`, so
-  earlier hops never match an outcome. `flushRequestState()` dropped its map of
-  them but left the spans on the tracer's context stack, where the shutdown
-  path ends everything still open as an error lasting until the process died —
-  so a healthy call that merely followed a redirect published a FAILED client
-  span with a fabricated duration. They are now discarded through the new
-  `Tracer::discardSpan()`, which is what the instrumentation always said it
-  did: a missing span is the lesser evil, a span with the wrong duration and
-  status is a lie that reads as data.
-
-  A stopgap, not the fix. Nothing available on Laravel's HTTP client events
-  identifies which call a redirect hop belongs to — a global Guzzle middleware
-  can see `__redirect_count`, but an options key set there does not survive
-  back up through the redirect middleware, so hops cannot be paired to calls
-  while `Http::pool` interleaves them. Owning the span inside a middleware is
-  the real answer and is its own change.
+- **`Tracer::discardSpan()`.** A span an instrumentation abandons is removed
+  from the context stack without being exported. Dropping a map alone was not
+  enough: the spans stayed on the stack, where the shutdown path — registered
+  with `register_shutdown_function`, so it runs on every request — ends
+  everything still open as an error that lasted until the process died. A
+  missing span is the lesser evil; a span with the wrong duration and status
+  is a lie that reads as data. Applied to mail, notification, command and
+  transaction spans abandoned at an Octane or NativePHP boundary; the HTTP
+  client no longer needs it, per the ownership change above.
 
   Turn it off with `telemetry.instrument.http_client_timing`: collecting costs
   about a microsecond, but up to nine more attributes per client span are

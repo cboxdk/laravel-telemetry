@@ -25,6 +25,17 @@ final class Tracer
     /** @var list<Span> */
     private array $stack = [];
 
+    /**
+     * Spans started detached and not yet ended, keyed by object id.
+     *
+     * They are not on the context stack, so nothing else would ever notice
+     * them — including the shutdown path, which is what turns an abandoned or
+     * cancelled call into a recorded one rather than silence.
+     *
+     * @var array<int, Span>
+     */
+    private array $detached = [];
+
     private ?TraceParent $remoteParent = null;
 
     private ?string $traceId = null;
@@ -186,6 +197,63 @@ final class Tracer
     }
 
     /**
+     * Start a span that does NOT become the ambient context.
+     *
+     * The ambient stack models "what is happening right now, here". An
+     * outgoing HTTP call does not fit that: several can be open at once
+     * (`Http::pool`), and a promise can be created under one parent and
+     * awaited under another. Pushing those onto the stack made each pooled
+     * request a CHILD of the one dispatched before it, and left whatever ran
+     * next parented to a call that had not finished.
+     *
+     * So the parent is fixed at creation and the span is handed back to
+     * whoever owns it, to be ended when that owner's own work completes. It
+     * still ends through finish(), so sampling, context attributes and the
+     * buffer behave exactly as for any other span.
+     *
+     * @param  array<string, scalar|null>  $attributes
+     */
+    public function startDetachedSpan(string $name, SpanKind $kind = SpanKind::Internal, array $attributes = []): Span
+    {
+        $parent = $this->currentSpan();
+
+        if ($this->traceId === null) {
+            $this->traceId = Ids::traceId();
+        }
+
+        $this->sampled ??= $this->lottery();
+
+        $span = new Span(
+            traceId: $this->traceId,
+            spanId: Ids::spanId(),
+            parentSpanId: $parent->spanId ?? $this->remoteParent?->spanId,
+            name: $name,
+            kind: $kind,
+            sampled: $this->sampled,
+            attributes: $attributes,
+            onEnd: fn (Span $span) => $this->finish($span),
+        );
+
+        if ($this->measureSpanResources && $span->sampled) {
+            $span->measureResources();
+        }
+
+        // The ambient dimensions are taken NOW, not at finish(). A detached
+        // span can be created under one tenant and settle under another —
+        // that is the whole point of detaching it — and finish() merges
+        // whatever the tracer holds at the moment the span ends. Merged here
+        // as missing attributes, so the span carries the context it was
+        // started in and the later merge is a no-op for those keys.
+        if ($this->contextAttributes !== []) {
+            $span->mergeMissingAttributes($this->contextAttributes);
+        }
+
+        $this->detached[spl_object_id($span)] = $span;
+
+        return $span;
+    }
+
+    /**
      * Measure a closure inside a span. Exceptions are recorded on the span
      * and rethrown.
      *
@@ -288,6 +356,18 @@ final class Tracer
             }
         }
 
+        // Detached spans are not on the stack, so the loop above cannot see
+        // them. A call whose promise was cancelled, or simply never awaited,
+        // settles nothing — and would otherwise leave no trace of having been
+        // made at all.
+        foreach ($this->detached as $span) {
+            $span->setStatus(SpanStatus::Error, $reason);
+            $span->end();
+            $closed++;
+        }
+
+        $this->detached = [];
+
         return $closed;
     }
 
@@ -348,6 +428,7 @@ final class Tracer
     public function resetContext(): void
     {
         $this->stack = [];
+        $this->detached = [];
         $this->remoteParent = null;
         $this->traceId = null;
         $this->sampled = null;
@@ -390,10 +471,14 @@ final class Tracer
         if ($index !== false) {
             array_splice($this->stack, (int) $index, 1);
         }
+
+        unset($this->detached[spl_object_id($span)]);
     }
 
     private function finish(Span $span): void
     {
+        unset($this->detached[spl_object_id($span)]);
+
         // Remove wherever it sits — out-of-order ends must not corrupt
         // the context stack.
         $index = array_search($span, $this->stack, true);
