@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
+use Cbox\Telemetry\Instrumentation\HttpClientInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -440,4 +441,29 @@ it('still finishes the span when the transfer stats are not what they claim', fu
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
     expect($families)->toHaveKey('http.client.request.duration');
+});
+
+it('discards an orphaned client span instead of letting shutdown call it a failure', function () {
+    // A redirect emits RequestSending per hop but one ResponseReceived, so the
+    // earlier hops never match an outcome. Dropping the map alone left those
+    // spans on the tracer's stack, where the shutdown path ends every open
+    // span as an error lasting until the process died — publishing a FAILED
+    // client span, with a fabricated duration, for a call that was fine.
+    $request = new Request(
+        new GuzzleRequest('GET', 'https://example.test/start'),
+    );
+
+    app('events')->dispatch(new RequestSending($request));
+
+    expect(Telemetry::currentSpan())->not->toBeNull();
+
+    // The Octane, NativePHP and non-sync job hooks all call this.
+    app(HttpClientInstrumentation::class)->flushRequestState();
+
+    expect(Telemetry::currentSpan())->toBeNull();
+
+    // What shutdown would have done to it, had it still been open.
+    Telemetry::tracer()->endOpenSpans('process terminated without completing');
+
+    expect(allSpans($this->collector)->where('name', 'GET example.test'))->toHaveCount(0);
 });

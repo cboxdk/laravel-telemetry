@@ -367,6 +367,31 @@ final class Tracer
         $this->traceStats[$attribute] = ($this->traceStats[$attribute] ?? 0.0) + $delta;
     }
 
+    /**
+     * Drop a span that will never be answered, without exporting it.
+     *
+     * For an instrumentation that opened a span and then learned it can never
+     * match an outcome to it — a redirect hop, a request whose wrapper was
+     * replaced. Leaving it on the stack is not neutral: the shutdown path ends
+     * every open span as an error lasting until the process died, so a healthy
+     * redirected call would publish a failed span with a fabricated duration.
+     * A missing span is the lesser evil; a span with the wrong duration and
+     * status is a lie that reads as data.
+     *
+     * The span is removed from the context stack and never buffered, so its
+     * children keep the parent id of a span that is not exported — which is
+     * what already happens today, and is why this is a stopgap rather than the
+     * fix.
+     */
+    public function discardSpan(Span $span): void
+    {
+        $index = array_search($span, $this->stack, true);
+
+        if ($index !== false) {
+            array_splice($this->stack, (int) $index, 1);
+        }
+    }
+
     private function finish(Span $span): void
     {
         // Remove wherever it sits — out-of-order ends must not corrupt

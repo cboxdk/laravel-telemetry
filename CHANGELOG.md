@@ -37,6 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets no TLS phase. Guzzle follows redirects itself, so the phases describe
   the last hop while the span covers them all.
 
+- **An orphaned client span is discarded rather than published as a failure.**
+  A redirect emits `RequestSending` per hop but one `ResponseReceived`, so
+  earlier hops never match an outcome. `flushRequestState()` dropped its map of
+  them but left the spans on the tracer's context stack, where the shutdown
+  path ends everything still open as an error lasting until the process died —
+  so a healthy call that merely followed a redirect published a FAILED client
+  span with a fabricated duration. They are now discarded through the new
+  `Tracer::discardSpan()`, which is what the instrumentation always said it
+  did: a missing span is the lesser evil, a span with the wrong duration and
+  status is a lie that reads as data.
+
+  A stopgap, not the fix. Nothing available on Laravel's HTTP client events
+  identifies which call a redirect hop belongs to — a global Guzzle middleware
+  can see `__redirect_count`, but an options key set there does not survive
+  back up through the redirect middleware, so hops cannot be paired to calls
+  while `Http::pool` interleaves them. Owning the span inside a middleware is
+  the real answer and is its own change.
+
   Turn it off with `telemetry.instrument.http_client_timing`: collecting costs
   about a microsecond, but up to nine more attributes per client span are
   stored and run through redaction at flush.

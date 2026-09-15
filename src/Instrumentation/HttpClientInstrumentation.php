@@ -196,6 +196,16 @@ final class HttpClientInstrumentation implements ManagesRequestState
 
     public function flushRequestState(): void
     {
+        // Dropping the map is not enough on its own: the spans stay on the
+        // tracer's context stack, and the shutdown path ends every span still
+        // open as an error that lasted until the process died. A healthy call
+        // that merely followed a redirect would publish a FAILED client span
+        // with a duration stretching to the end of the request — exactly the
+        // lie the comment above says to avoid. Discarded properly instead.
+        foreach ($this->inFlight as $span) {
+            FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
+        }
+
         $this->inFlight = [];
     }
 }
