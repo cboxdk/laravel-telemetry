@@ -633,6 +633,26 @@ class TelemetryManager
     }
 
     /**
+     * Redact the values of sensitive keys in a structure before it is flattened.
+     *
+     * For a caller that still holds the array — the log channel encodes a
+     * non-scalar context value to JSON, and once encoded there is nothing left
+     * for key-based redaction to recognise. Returns the structure unchanged
+     * when redaction is off or no redactor is configured.
+     *
+     * @param  array<array-key, mixed>  $values
+     * @return array<array-key, mixed>
+     */
+    public function redactStructure(array $values): array
+    {
+        if ($this->redactor === null) {
+            return $values;
+        }
+
+        return FailSafe::guard(fn (): array => $this->redactor->redactStructure($values)) ?? $values;
+    }
+
+    /**
      * @internal used by the request middleware
      *
      * @return array<string, scalar|null>

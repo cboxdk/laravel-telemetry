@@ -74,15 +74,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `json_encode`s any non-scalar context, so `['password' => 'hunter2']` arrived
   as `{"password":"hunter2"}` under a key like `log.context.payload` — a name
   that is not itself sensitive, around a body carrying no `name=value` pairs
-  for a pattern to match. A JSON object or array is now decoded, its keys
-  judged by the same rules that judge an attribute key, and re-encoded. Applies
-  to any attribute holding an encoded structure, not just log context.
+  for a pattern to match. The structure is now redacted by key BEFORE it is
+  encoded, where it is still an array. Deliberately not by decoding the JSON
+  again at export: a round trip through `json_decode(..., true)` cannot tell an
+  empty object from an empty array, turns `{"0":"a","1":"b"}` into a list, and
+  rewrites big integers and float literals — corrupting structures that had
+  nothing in them to redact.
 
 - **Span names and span event names were never scrubbed.** `Telemetry::span()`
   and `nameRequestSpansUsing()` take whatever the app hands them, and a name
   built from a URL carries its query along — so the same credential went out
   redacted in the attributes and verbatim in the name beside them. Log record
   names were already covered; these were the gap.
+
+- **A value that merely began with the replacement was taken as already
+  redacted.** `token=[REDACTED]SECRET` passed through untouched, and an empty
+  `replacement` matched everywhere, silently turning the parameter pass off
+  altogether. The comparison now needs a real boundary after it, is bounded to
+  the replacement's length rather than copying the rest of the input — which
+  made it quadratic, 640KB of `token=x&` taking 349ms — and an empty
+  replacement is no longer evidence of anything.
+
+- **An ordinary assignment hid a credential inside its own value.** In a
+  logfmt-style message, `url=https://x/?token=SECRET` matched as the parameter
+  `url`, was judged harmless, and the query inside it was consumed with it. A
+  value carrying a `?` is now looked into. Parameter names are also no longer
+  capped at 64 characters, which silently exempted a long array name.
 
 - **A parameter name full of unclosed brackets could stall the process.** The
   regex that stripped array levels was quadratic on `token[[[[[…]tail` — 20k

@@ -337,30 +337,34 @@ it('lets an app that takes the lists over turn off the name heuristics too', fun
     expect($redactor->value('log.message', 'token=SECRET'))->toBe('token=SECRET');
 });
 
-it('redacts a credential that arrives as a JSON key', function () {
-    // The log handler json_encodes any non-scalar context value, so
-    // `['password' => 'hunter2']` becomes a JSON body under a key — like
-    // `log.context.payload` — that is not itself sensitive, and no pattern
-    // matches a JSON object because it carries no `name=value` pairs.
+it('redacts a credential by key in a structure, before anything encodes it', function () {
+    // The log channel json_encodes a non-scalar context value, and once it is
+    // a string the key is gone. Done on the array instead — decoding the JSON
+    // again at export cannot tell an empty object from an empty array and
+    // rewrites big integers, corrupting structures with nothing to hide.
     $redactor = Redactor::fromConfig(['enabled' => true]);
 
-    expect($redactor->value('log.context.payload', '{"password":"hunter2","api_key":"sk_live","user":"bob"}'))
-        ->toBe('{"password":"[REDACTED]","api_key":"[REDACTED]","user":"bob"}')
-        ->and($redactor->value('log.context.payload', '{"a":{"b":{"token":"SECRET","page":2}}}'))
-        ->toBe('{"a":{"b":{"token":"[REDACTED]","page":2}}}')
-        ->and($redactor->value('log.context.rows', '[{"otp":123456},{"id":7}]'))
-        ->toBe('[{"otp":"[REDACTED]"},{"id":7}]');
+    expect($redactor->redactStructure(['password' => 'hunter2', 'api_key' => 'sk_live', 'user' => 'bob']))
+        ->toBe(['password' => '[REDACTED]', 'api_key' => '[REDACTED]', 'user' => 'bob'])
+        ->and($redactor->redactStructure(['a' => ['b' => ['token' => 'SECRET', 'page' => 2]]]))
+        ->toBe(['a' => ['b' => ['token' => '[REDACTED]', 'page' => 2]]])
+        ->and($redactor->redactStructure(['postal_code' => '2100', 'sort_key' => 'price']))
+        ->toBe(['postal_code' => '2100', 'sort_key' => 'price']);
 });
 
-it('leaves anything that is not a JSON structure exactly as it found it', function () {
+it('never rewrites a JSON attribute value it has no business changing', function () {
+    // An earlier attempt decoded and re-encoded any JSON attribute. It turned
+    // `{}` into `[]`, `{"0":"a"}` into a list, and dropped the precision of
+    // every big integer and float literal — on values with nothing in them to
+    // redact.
     $redactor = Redactor::fromConfig(['enabled' => true]);
 
     foreach ([
-        'not json at all',
-        '{invalid json',
-        '{"postal_code":"2100","sort_key":"price"}',
-        '{"n":1.5,"b":true,"z":null}',
-        '[1,2,3]',
+        '{"meta":{}}',
+        '{"0":"zero","1":"one"}',
+        '{"n":1.0}',
+        '{"id":9223372036854775809}',
+        '{"amount":1e400}',
     ] as $value) {
         expect($redactor->value('log.context.payload', $value))->toBe($value);
     }
@@ -389,4 +393,36 @@ it('scrubs a span name and a span event name, not only the attributes beside the
 
     expect($span->name)->toBe('GET https://x/?token=[REDACTED]')
         ->and($span->events()[0]->name)->toBe('token=[REDACTED]');
+});
+
+it('does not mistake a value that merely starts with the replacement', function () {
+    // `token=[REDACTED]SECRET` starts with the replacement and is emphatically
+    // not redacted. A prefix says nothing without a boundary after it, and an
+    // empty replacement matches everywhere — which silently turned the whole
+    // pass off.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.line', 'token=[REDACTED]SECRET'))->toBe('token=[REDACTED]')
+        ->and(Redactor::fromConfig(['enabled' => true, 'replacement' => ''])->value('log.line', 'token=SECRET'))
+        ->toBe('token=');
+});
+
+it('looks inside a URL that an ordinary assignment carries', function () {
+    // logfmt: the outer `url=` is not a credential, but the match consumed its
+    // value and the query inside it along with it.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    expect($redactor->value('log.line', 'url=https://x.test/?token=SECRET'))
+        ->toBe('url=https://x.test/?token=[REDACTED]');
+});
+
+it('stays linear on a value that is almost all credentials', function () {
+    // Comparing the replacement with substr()+str_starts_with copied the rest
+    // of the input per match: 640KB of `token=x&` took 349ms.
+    $redactor = Redactor::fromConfig(['enabled' => true]);
+
+    $started = hrtime(true);
+    $redactor->value('log.line', str_repeat('token=x&', 80_000));
+
+    expect((hrtime(true) - $started) / 1e6)->toBeLessThan(200.0);
 });

@@ -90,47 +90,23 @@ final class Redactor
     }
 
     /**
-     * A JSON object carries its names as KEYS, not as `name=value` pairs.
+     * Redact the values of sensitive KEYS in a structure, in place.
      *
-     * The log handler json_encodes any non-scalar context value, so
-     * `['password' => 'hunter2']` arrives as `{"password":"hunter2"}` under a
-     * key like `log.context.payload` — a name that is not itself sensitive,
-     * around a body no pattern matches. The same is true of any attribute an
-     * app sets to an encoded structure.
+     * For a caller holding the array itself — the log channel, which
+     * `json_encode`s any non-scalar context value and would otherwise ship
+     * `['password' => 'hunter2']` as a body no pattern can match. Done here,
+     * before encoding, rather than by decoding and re-encoding the JSON at
+     * export: a round trip through `json_decode(..., true)` cannot tell an
+     * empty object from an empty array, turns `{"0":"a","1":"b"}` into a list,
+     * and rewrites big integers and float literals — corrupting data that had
+     * nothing to redact in it.
      *
-     * So the structure is decoded, its keys are judged by the same rules that
-     * judge an attribute key, and it is encoded again. Bounded in depth, and
-     * anything that does not decode to an array is returned untouched.
-     */
-    private function redactJsonByKey(string $value): string
-    {
-        $first = $value[strspn($value, " \t\n\r")] ?? '';
-
-        if ($first !== '{' && $first !== '[') {
-            return $value;
-        }
-
-        $decoded = json_decode($value, true, 32);
-
-        if (! is_array($decoded)) {
-            return $value;
-        }
-
-        $encoded = json_encode(
-            $this->redactArrayByKey($decoded),
-            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR,
-        );
-
-        return is_string($encoded) ? $encoded : $value;
-    }
-
-    /**
      * @param  array<array-key, mixed>  $values
      * @return array<array-key, mixed>
      */
-    private function redactArrayByKey(array $values, int $depth = 0): array
+    public function redactStructure(array $values, int $depth = 0): array
     {
-        if ($depth > 16) {
+        if (! $this->enabled || $depth > 16) {
             return $values;
         }
 
@@ -138,7 +114,7 @@ final class Redactor
 
         foreach ($values as $key => $value) {
             if (is_array($value)) {
-                $redacted[$key] = $this->redactArrayByKey($value, $depth + 1);
+                $redacted[$key] = $this->redactStructure($value, $depth + 1);
 
                 continue;
             }
@@ -175,34 +151,53 @@ final class Redactor
      * checked at the value's offset in the original string so a replacement
      * containing a space is recognised whole.
      */
-    private function redactEncodedParameters(string $value): string
+    private function redactEncodedParameters(string $value, int $depth = 0): string
     {
         // Turned off with the lists. An app that sets replace_defaults has
         // said the rules are its own, and this pass is a built-in rule.
-        if ($this->replaceDefaults || ! str_contains($value, '=')) {
+        if ($this->replaceDefaults || $depth > 4 || ! str_contains($value, '=')) {
             return $value;
         }
 
         $scrubbed = preg_replace_callback(
-            '/(^|[?&;\s])([^=&;?\s]{1,64})=("[^"\n]*"(?=[&\s]|$)|\'[^\'\n]*\'(?=[&\s]|$)|[^&\s]+)/',
+            '/(^|[?&;\s])([^=&;?\s]+)=("[^"\n]*"(?=[&\s]|$)|\'[^\'\n]*\'(?=[&\s]|$)|[^&\s]+)/',
             /** @param array<int, array{0: string, 1: int}> $m */
-            function (array $m) use ($value): string {
+            function (array $m) use ($value, $depth): string {
                 $separator = $m[1][0];
                 $ambiguous = $separator === '?' || $separator === '&' || $separator === ';';
 
                 if (! self::parameterIsCredential($m[2][0], $ambiguous)) {
-                    return $m[0][0];
+                    // `url=https://x/?token=SECRET` — the outer assignment is
+                    // not a credential, but the match consumed its value and
+                    // with it the query inside. Look again in there, once.
+                    return str_contains($m[3][0], '?')
+                        ? $m[1][0].$m[2][0].'='.$this->redactEncodedParameters($m[3][0], $depth + 1)
+                        : $m[0][0];
                 }
 
-                // Already replaced. Checked against the ORIGINAL string at the
-                // value's offset rather than against the captured value, since
-                // a replacement containing a space — `[HIDDEN VALUE]` — is
-                // captured only as far as the space and would otherwise be
-                // replaced again, leaving the tail behind.
+                // Already replaced? Compared at the value's offset in the
+                // ORIGINAL string, because a replacement containing a space —
+                // `[HIDDEN VALUE]` — is captured only as far as the space and
+                // would otherwise be replaced again, leaving its own tail
+                // behind each time.
+                //
+                // substr_compare, not substr()+str_starts_with: copying the
+                // rest of the input to compare a short prefix made this
+                // quadratic, 640KB of `token=x&` taking 349ms.
+                //
+                // A prefix is not enough either. `token=[REDACTED]SECRET`
+                // starts with the replacement and is emphatically not redacted,
+                // so what follows must actually end the value. An empty
+                // replacement matches everywhere and is no evidence at all.
                 $at = $m[3][1];
+                $length = strlen($this->replacement);
 
-                if (str_starts_with(substr($value, $at), $this->replacement)) {
-                    return $m[0][0];
+                if ($length > 0 && substr_compare($value, $this->replacement, $at, $length) === 0) {
+                    $after = $value[$at + $length] ?? '';
+
+                    if ($after === '' || $after === '&' || $after === ' ' || $after === "\t" || $after === "\n" || $after === "\r") {
+                        return $m[0][0];
+                    }
                 }
 
                 return $separator.$m[2][0].'='.$this->replacement;
@@ -514,8 +509,6 @@ final class Redactor
         if ($this->keyIsSensitive($key)) {
             return $this->replacement;
         }
-
-        $value = $this->redactJsonByKey($value);
 
         foreach ($this->patterns as $pattern => $replacement) {
             if (! $this->patternCompiles($pattern)) {

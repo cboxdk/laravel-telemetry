@@ -115,6 +115,16 @@ final class TelemetryLogHandler extends AbstractProcessingHandler
                 continue;
             }
 
+            // Redacted BEFORE encoding. Once this is a JSON string, a
+            // `['password' => 'hunter2']` context is a body with no
+            // `name=value` pairs under a key — `log.context.payload` — that is
+            // not itself sensitive, so nothing downstream can recognise it.
+            // Decoding it again at export is not the answer: a round trip
+            // through json_decode cannot tell an empty object from an empty
+            // array and rewrites big integers, corrupting structures that had
+            // nothing to hide.
+            $value = is_array($value) ? ($this->resolveTelemetry)()->redactStructure($value) : $value;
+
             $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
 
             $attributes["log.context.{$key}"] = $encoded === false ? get_debug_type($value) : $encoded;
