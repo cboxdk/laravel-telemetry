@@ -21,16 +21,16 @@ it('breaks a cold request into its phases', function () {
     ]);
 
     expect($attributes)->toBe([
+        'network.peer.address' => '172.66.147.243',
+        'network.peer.port' => 443,
+        // CURL_HTTP_VERSION_2_0 is the integer 3, not 2.
+        'network.protocol.version' => '2',
         'http.client.connection_reused' => false,
         'http.client.dns_ms' => 3.458,
         'http.client.tcp_ms' => 7.636,
         'http.client.tls_ms' => 19.446,
         'http.client.ttfb_ms' => 16.711,
         'http.client.transfer_ms' => 0.923,
-        'network.peer.address' => '172.66.147.243',
-        'network.peer.port' => 443,
-        // CURL_HTTP_VERSION_2_0 is the integer 3, not 2.
-        'network.protocol.version' => '2',
     ]);
 });
 
@@ -75,8 +75,54 @@ it('does not invent a TLS handshake for plain HTTP', function () {
 it('reports nothing at all when the handler is not cURL', function () {
     // The stream handler, and a faked response — which carries a TransferStats
     // with no handler stats behind it. Zeroes would have to be explained.
-    expect(HttpTransferTimings::attributes([]))->toBe([])
-        ->and(HttpTransferTimings::attributes(['primary_ip' => '1.2.3.4']))->toBe([]);
+    expect(HttpTransferTimings::attributes([]))->toBe([]);
+});
+
+it('reports the peer without inventing phases from partial stats', function () {
+    // Knowing WHICH address answered is half the story on a slow call, and a
+    // build too old for one set of keys still has the other. Absent connect
+    // time means the stats are partial — guessing 0 there would report a fresh
+    // connection as a reused one.
+    expect(HttpTransferTimings::attributes(['primary_ip' => '1.2.3.4', 'total_time_us' => 1000]))
+        ->toBe(['network.peer.address' => '1.2.3.4']);
+});
+
+it('falls back to the seconds keys when libcurl is too old for microseconds', function () {
+    // PHP populates the `_us` keys only when built against libcurl 7.61+, and
+    // PHP 8.3 still builds against 7.29. Losing precision beats losing every
+    // attribute on those installations.
+    $attributes = HttpTransferTimings::attributes([
+        'namelookup_time' => 0.003458,
+        'connect_time' => 0.011094,
+        'appconnect_time' => 0.030540,
+        'pretransfer_time' => 0.030619,
+        'starttransfer_time' => 0.047330,
+        'total_time' => 0.048253,
+    ]);
+
+    expect($attributes['http.client.dns_ms'])->toBe(3.458)
+        ->and($attributes['http.client.tcp_ms'])->toBe(7.636)
+        ->and($attributes['http.client.tls_ms'])->toBe(19.446);
+});
+
+it('does not split a QUIC connection into TCP and TLS', function () {
+    // HTTP/3 has no TCP handshake to time — cURL's connect timestamp for QUIC
+    // marks the first data from the peer — so the split would be fiction. One
+    // number covers the setup instead.
+    $attributes = HttpTransferTimings::attributes([
+        'namelookup_time_us' => 3458,
+        'connect_time_us' => 11094,
+        'appconnect_time_us' => 30540,
+        'pretransfer_time_us' => 30619,
+        'starttransfer_time_us' => 47330,
+        'total_time_us' => 48253,
+        'http_version' => 30,
+    ]);
+
+    expect($attributes['network.protocol.version'])->toBe('3')
+        ->and($attributes['http.client.connect_ms'])->toBe(27.082)
+        ->and($attributes)->not->toHaveKey('http.client.tcp_ms')
+        ->and($attributes)->not->toHaveKey('http.client.tls_ms');
 });
 
 it('never reports a negative phase', function () {

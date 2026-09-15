@@ -76,8 +76,19 @@ final class HttpClientInstrumentation implements ManagesRequestState
                 // costs one array read — no `on_stats` to install, no option
                 // for the caller to remember, and nothing at all when the
                 // handler is not cURL.
+                //
+                // Guarded SEPARATELY from the rest of this listener, not by
+                // the outer guard. An app's own `on_stats` callback can return
+                // anything, and Laravel keeps whatever it returns — so
+                // `handlerStats()` can throw on something that is not a
+                // TransferStats at all. Caught out here, that would take
+                // setStatus(), end() and the duration histogram with it, and
+                // leave the span open for every later span to nest under.
+                // Enrichment must never be able to cost the measurement.
                 if (config('telemetry.instrument.http_client_timing', true)) {
-                    $span->setAttributes(HttpTransferTimings::attributes($event->response->handlerStats()));
+                    FailSafe::guard(fn () => $span->setAttributes(
+                        HttpTransferTimings::attributes($event->response->handlerStats()),
+                    ));
                 }
 
                 $span->setStatus($event->response->status() >= 400 ? SpanStatus::Error : SpanStatus::Ok);

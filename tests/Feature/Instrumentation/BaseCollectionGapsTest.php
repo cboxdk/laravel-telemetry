@@ -411,3 +411,33 @@ it('leaves the phases out when the timing instrument is off', function () {
 
     expect($attributes)->not->toHaveKey('http.client.ttfb_ms');
 });
+
+it('still finishes the span when the transfer stats are not what they claim', function () {
+    // Laravel keeps whatever an app's own `on_stats` callback returns:
+    // `$transferStats = $callback($transferStats) ?: $transferStats`. Return
+    // an int and handlerStats() throws. Caught by the listener's outer guard,
+    // that took setStatus(), end() and the duration histogram with it and left
+    // the span open for every later span to nest under — an optional
+    // enrichment costing the measurement it was decorating.
+    $request = new Request(
+        new GuzzleRequest('GET', 'https://api.stripe.test/v1/charges'),
+    );
+
+    $response = new Response(new GuzzleResponse(200, [], 'ok'));
+    $response->transferStats = 42;
+
+    $events = app('events');
+    $events->dispatch(new RequestSending($request));
+    $events->dispatch(new ResponseReceived($request, $response));
+
+    $span = allSpans($this->collector)->firstWhere('name', 'GET api.stripe.test');
+
+    expect($span)->not->toBeNull()
+        ->and($span->attributes()['http.response.status_code'])->toBe(200)
+        ->and($span->attributes())->not->toHaveKey('http.client.ttfb_ms')
+        ->and(Telemetry::currentSpan())->toBeNull();
+
+    $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
+
+    expect($families)->toHaveKey('http.client.request.duration');
+});

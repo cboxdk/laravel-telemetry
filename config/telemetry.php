@@ -635,11 +635,13 @@ return [
         // the peer address, port and negotiated protocol version. Answers
         // which of them a slow call was actually slow in.
         //
-        // Free to collect: Laravel's HTTP client already installs cURL's
-        // on_stats callback and keeps the result on the response, so this only
-        // reads what is there. It adds up to seven attributes per client span,
-        // which is the only reason to turn it off. Nothing is recorded when
-        // the handler is not cURL — a faked response, or the stream handler.
+        // Nearly free to collect: Laravel's HTTP client already installs
+        // cURL's on_stats callback and keeps the result on the response, so
+        // this only reads what is there — about a microsecond per call. The
+        // cost that is worth weighing is the other end: up to NINE more
+        // attributes per client span to store, and to run redaction over at
+        // flush. Nothing is recorded when the handler is not cURL — a faked
+        // response, or the stream handler.
         'http_client_timing' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT_TIMING', true),
 
         // exceptions.reported counter — includes HANDLED exceptions that
