@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Console;
 use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Native\CrashReporter;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
 
@@ -28,6 +29,12 @@ final class CrashesCommand extends Command
 
     public function handle(NativeRuntime $runtime, TelemetryManager $telemetry, CrashReporter $reporter): int
     {
+        if (! $telemetry->enabled()) {
+            $this->components->warn('Telemetry is disabled (TELEMETRY_ENABLED=false); crash records are left where they are.');
+
+            return self::SUCCESS;
+        }
+
         if (! $runtime->available()) {
             $this->components->warn('The cbox_telemetry extension is not loaded — no crash records are being recorded.');
 
@@ -66,7 +73,21 @@ final class CrashesCommand extends Command
 
         // Reported, not just printed: a record drained and dropped on the
         // floor is worse than one still sitting in the sink.
-        $telemetry->flush();
+        $report = FailSafe::guard(static fn () => $telemetry->flush());
+
+        // And the drain already consumed them, so a rejected batch is a
+        // record that no longer exists anywhere. Without the spool there is
+        // no retry either — say so, and exit non-zero, because under cron an
+        // exit code is the only thing anyone reads.
+        if ($report === null || ! $report->successful()) {
+            $this->components->error(sprintf(
+                '%d crash record(s) were drained but NOT accepted%s — that data is gone unless the OTLP spool is enabled.',
+                count($records),
+                $report === null ? '' : ': '.$report->summary(),
+            ));
+
+            return self::FAILURE;
+        }
 
         $this->components->info(sprintf('Reported %d crash record(s).', count($records)));
 

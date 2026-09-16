@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Http\Middleware\Sample;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Testing\CollectingExporter;
@@ -15,6 +16,7 @@ use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\InteractsWithQueue;
@@ -274,4 +276,112 @@ it('matches the excluded-command patterns with wildcards', function () {
         ->and($profiler->hostsItsOwnUnits('horizon:supervisor'))->toBeTrue()
         ->and($profiler->hostsItsOwnUnits('octane:start'))->toBeTrue()
         ->and($profiler->hostsItsOwnUnits('app:import'))->toBeFalse();
+});
+
+/**
+ * A unit opens whether or not a sampler exists — the handle is real and
+ * finish() reports `profiling => false`. Treating the handle as proof that
+ * profiling was covered silenced an installed ext-excimer on every host
+ * with the extension but no usable timer (macOS, `profiler.enabled=0`).
+ */
+it('knows the difference between having a unit and having a profiler', function () {
+    $profiler = $this->app->make(NativeProfiler::class);
+
+    expect($profiler->profiles())->toBeTrue();
+
+    config()->set('telemetry.native.profile', false);
+    expect($profiler->profiles())->toBeFalse()
+        // …and the unit still opens: operations, counters and crash context
+        // do not depend on the sampler.
+        ->and($profiler->begin('http'))->not->toBeNull();
+});
+
+it('leaves profiling to excimer when the extension has no sampler', function () {
+    $native = new FakeNativeRuntime;
+    $native->status['profiler_enabled'] = false;
+
+    $this->app->instance(NativeRuntime::class, $native);
+    $this->app->forgetInstance(NativeProfiler::class);
+
+    $this->get('/native/7')->assertOk();
+
+    expect($this->app->make(NativeProfiler::class)->profiles())->toBeFalse()
+        // The unit is still opened and still measured.
+        ->and($native->begun)->toHaveCount(1)
+        ->and($native->begun[0]['profile'])->toBeFalse();
+});
+
+/**
+ * With cbox_telemetry.auto the unit starts at RINIT and begin() adopts it,
+ * which is the whole point — the samples worth having are the bootstrap's.
+ * Timing from the adoption instead threw exactly those away: an 800 ms
+ * bootstrap plus 10 ms of routing read as a 10 ms unit.
+ */
+it('counts the bootstrap an adopted unit already measured', function () {
+    $this->native->status['unit_handle'] = 7;
+    $this->native->status['unit_automatic'] = true;
+
+    $unit = $this->app->make(NativeProfiler::class)->begin('http');
+
+    // The anchor is the SAPI's request start — this process's start here —
+    // so the adopted unit's elapsed time is everything since, not the zero
+    // a freshly opened unit would report.
+    expect($unit?->elapsedMs())->toBeGreaterThan(1.0);
+});
+
+it('measures only its own time when no unit was adopted', function () {
+    $unit = $this->app->make(NativeProfiler::class)->begin('http');
+
+    expect($unit?->elapsedMs())->toBeLessThan(1000.0);
+});
+
+/**
+ * The decision that matters is the one in force at finish(): a per-route
+ * Sample::never() drops every span of the trace, and a profile with no
+ * trace to line it up against is not worth materialising.
+ */
+it('keeps no profile for a trace that resampled itself away', function () {
+    $this->app->instance(NativeRuntime::class, $this->native = FakeNativeRuntime::withProfile());
+    $this->app->forgetInstance(NativeProfiler::class);
+
+    config()->set('telemetry.profiling.min_duration_ms', 0);
+
+    // Its own path: /native/{id} is registered first and would match.
+    Route::middleware(Sample::never())->get('/unsampled-native', fn () => 'ok');
+
+    $this->get('/unsampled-native')->assertOk();
+    Telemetry::flush();
+
+    expect($this->native->finished[0]['profile'])->toBeFalse()
+        ->and(nativeEvents($this->collector, 'profile.captured'))->toBe([]);
+});
+
+/**
+ * Laravel has an attempt path with no outcome event at all: a job that
+ * releases itself and then throws is neither processed, nor failed, nor
+ * released BY THE WORKER — so none of the listeners that close a unit ever
+ * run, and every later job in that worker would be refused a unit.
+ */
+it('closes a unit for an attempt that never reported an outcome', function () {
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfReleasingJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    app('queue');
+    $events = app('events');
+
+    $events->dispatch(new JobProcessing('redis', $job));
+    // No JobProcessed/JobFailed/JobReleasedAfterException — only the
+    // finally-block event Laravel dispatches for every attempt.
+    $events->dispatch(new JobAttempted('redis', $job));
+
+    expect($this->native->finished)->toHaveCount(1);
+
+    // And the next job still gets a unit.
+    $events->dispatch(new JobProcessing('redis', $job));
+    $events->dispatch(new JobProcessed('redis', $job));
+
+    expect($this->native->begun)->toHaveCount(2);
 });

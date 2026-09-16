@@ -71,6 +71,11 @@ over. That is worth having under FPM: the profile then covers autoloading,
 service providers and config loading — the part of a cold request no
 middleware can see, and often most of it.
 
+The tail threshold counts the adopted time too: a unit that spent 800 ms in
+the bootstrap and 10 ms in routing is an 810 ms unit, and keeps its profile
+under the default 500 ms. Timing it from the adoption would have thrown away
+precisely the profiles automatic mode exists to collect.
+
 It is wrong everywhere a process serves more than one unit. `RINIT` fires
 once per *process* in a queue worker or an Octane server, so an automatic
 unit there would cover hours. Set `auto=0` in any php.ini that serves
@@ -113,19 +118,31 @@ profile.source          native
 profile.sample_count    814
 profile.period_ns       1000000
 profile.clock           cpu
-profile.confidence      0.9807
+profile.confidence      0.9804
 profile.dropped         2
 profile.timer_overruns  14
+profile.deferred_samples 0
 profile.top_functions   [{"function":"App\\Services\\Pricing::calculate","file":"…","line":82,"samples":612}, …]
 ```
 
-`confidence` is the number to read before acting on the rest. Samples that
-could not be taken at a safe point (`dropped`) and ticks the kernel never
-delivered (`timer_overruns`) are counted separately, so you can tell "94% of
-this was sampled directly" from "most of this is arithmetic because the
-period is finer than the kernel can deliver". A `HZ=250` kernel — the
-Debian/Ubuntu generic default — cannot deliver a 1 ms period at all, and
-will say so here rather than quietly inventing one.
+`confidence` is the number to read before acting on the rest. It is the
+share of this profile that means what it appears to mean, and the
+arithmetic is worth knowing because it is easy to get wrong in the
+flattering direction: a sample carries the **weight** of every tick it
+accounts for, so `sample_count` is ticks, not stack walks. Of the ticks
+accounted for (`sample_count + dropped`):
+
+- `timer_overruns` were never delivered — nothing was observed, and their
+  weight landed on whichever stack was walked next;
+- `deferred_samples` were delivered late, because the VM was somewhere it
+  could not be interrupted — real observations, booked next door;
+- `dropped` were observed but had nowhere to go (frame table, trie or arena
+  full).
+
+So you can tell "98% of this was sampled where it says" from "most of this
+is arithmetic because the period is finer than the kernel can deliver". A
+`HZ=250` kernel — the Debian/Ubuntu generic default — cannot deliver a 1 ms
+period at all, and will say so here rather than quietly inventing one.
 
 Profiling always runs and the result is usually thrown away. That is the
 cheap arrangement, not the wasteful one: the sampler's cost is roughly
@@ -159,27 +176,49 @@ php artisan telemetry:flush        # drains, reports, exports
 php artisan telemetry:crashes      # the same thing, by hand, with output
 ```
 
-Each record becomes a FATAL-severity `crash.recorded` event **in the trace
-the process died in** — so a segfault appears on the Tempo waterfall for the
-request that caused it, next to the operation that was open at the time.
+Each record becomes a FATAL-severity `crash.recorded` event carrying the
+trace and span id the process died in. Events are exported as OTLP **log
+records**, not spans — so the crash shows up in Loki filtered to that trace
+id, and in Grafana's "logs for this trace" view next to the request that
+caused it, carrying the operation that was open at the time. It does not
+add a bar to the Tempo waterfall, and the request span itself may never have
+been exported at all: the process died before terminate.
 
 Draining consumes. Both commands are safe to run, but a record reported by
 one is not reported again by the other.
 
-If you scrape Prometheus and never run `telemetry:flush`, nothing drains the
-sink and `runtime.crashes` stays at zero — schedule the flush, or run
-`telemetry:crashes` from cron:
+Three things decide whether a record is ever collected, and all three are
+easy to get wrong:
+
+**Every host has its own sink.** Records are files on the machine that
+crashed, so `onOneServer()` — right for the metric flush — collects only the
+winner's records. Give crash draining its own per-host schedule:
 
 ```php
 Schedule::command('telemetry:flush')->everyMinute()->onOneServer();
+Schedule::command('telemetry:crashes')->everyFiveMinutes();   // every host
 ```
+
+**Every uid has its own sink.** The extension gives each uid a private
+`0700` subdirectory of `crash.dir`, and a drain reads only the directory of
+the user running it. A scheduler running as `deploy` will not see the
+records written by an FPM pool running as `www-data` — run the drain as the
+same user, or give each pool its own `cbox_telemetry.crash.dir`.
+
+**Something has to run.** If you scrape Prometheus and never run either
+command, nothing drains the sink and `runtime.crashes` stays at zero while
+records pile up.
+
+With telemetry disabled (`TELEMETRY_ENABLED=false`) neither command drains
+anything: consuming a record and handing it to an exporter that is not there
+would destroy the only artefact the dead process left.
 
 ## Configuration
 
 | Key | Env | Default |
 |---|---|---|
 | `native.enabled` | `TELEMETRY_NATIVE` | `true` — master switch; off means no unit is ever opened |
-| `native.profile` | `TELEMETRY_NATIVE_PROFILE` | `true` — use the native profiler (replaces ext-excimer where both exist) |
+| `native.profile` | `TELEMETRY_NATIVE_PROFILE` | `true` — use the native profiler. Where both extensions are installed, excimer runs only when the native sampler does not — including on a host where the extension is loaded but has no usable timer |
 | `native.period_us` | `TELEMETRY_NATIVE_PERIOD_US` | `null` — leaves the extension's INI period (1000 µs) alone |
 | `native.max_depth` | `TELEMETRY_NATIVE_MAX_DEPTH` | `null` — leaves the extension's INI depth (64 frames) alone |
 | `native.stacks` | `TELEMETRY_NATIVE_STACKS` | `false` — the full call tree alongside the top functions |

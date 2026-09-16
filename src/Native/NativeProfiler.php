@@ -30,6 +30,18 @@ final class NativeProfiler implements ManagesRequestState
 {
     private ?NativeUnit $active = null;
 
+    /**
+     * The process that opened `$active`. A fork copies the PHP object but
+     * not the ownership: the child's copy refers to a unit the parent is
+     * going to finish, so the child must not hold it — and must not finish
+     * it either, since the extension's own fork detection has already made
+     * that handle mean something different there.
+     */
+    private ?int $activePid = null;
+
+    /** Whether a sampler exists at all in this process. Cannot change. */
+    private ?bool $profilerEnabled = null;
+
     public function __construct(private readonly NativeRuntime $runtime) {}
 
     public function available(): bool
@@ -43,24 +55,52 @@ final class NativeProfiler implements ManagesRequestState
     }
 
     /**
+     * Whether the NATIVE profiler is the one that will sample this process.
+     *
+     * Not the same question as "did this call get a unit". A unit opens
+     * even when profiling is unavailable — the handle is real and
+     * `finish()` then reports `profiling => false` — so treating a handle
+     * as proof of profiling would silence an installed ext-excimer on
+     * every host where the extension is loaded but its sampler is not
+     * running (`native.profile=false`, `cbox_telemetry.profiler.enabled=0`,
+     * or macOS, which has no per-thread CPU timer).
+     *
+     * Call sites use this, and only this, to decide whether to start
+     * excimer — including when they were refused a unit for nesting, which
+     * means an outer native unit is already sampling this process.
+     */
+    public function profiles(): bool
+    {
+        if (! $this->runtime->available()
+            || ! Cast::bool(config('telemetry.native.enabled'), true)
+            || ! Cast::bool(config('telemetry.native.profile'), true)
+            || ! Cast::bool(config('telemetry.instrument.profiling'), true)
+        ) {
+            return false;
+        }
+
+        // Decided at module startup (timer backend, INI, platform), so it is
+        // read once per process rather than once per unit.
+        return $this->profilerEnabled ??= Cast::bool($this->runtime->status()['profiler_enabled'] ?? null, false);
+    }
+
+    /**
      * @param  'command'|'http'|'queue'|'schedule'  $unit
      */
     public function begin(string $unit, ?Span $span = null): ?NativeUnit
     {
-        // Units do not nest, and the outermost one is the one that was
-        // asked for first.
-        if ($this->active !== null || ! $this->runtime->available()) {
+        if (! $this->runtime->available() || ! Cast::bool(config('telemetry.native.enabled'), true)) {
             return null;
         }
 
-        if (! Cast::bool(config('telemetry.native.enabled'), true)) {
+        // Units do not nest, and the outermost one is the one that was
+        // asked for first — unless "first" happened in another process.
+        if ($this->activeInThisProcess()) {
             return null;
         }
 
         return FailSafe::guard(function () use ($unit, $span): ?NativeUnit {
-            $profile = Cast::bool(config('telemetry.native.profile'), true)
-                && Cast::bool(config('telemetry.instrument.profiling'), true)
-                && ($span === null || $span->sampled);
+            $profile = $this->profiles() && ($span === null || $span->sampled);
 
             $context = [
                 'unit' => $unit,
@@ -83,21 +123,26 @@ final class NativeProfiler implements ManagesRequestState
                 $context['max_depth'] = $depth;
             }
 
+            $elapsedBefore = $this->elapsedBeforeAdoption();
             $handle = $this->runtime->begin($context);
 
             if ($handle === 0) {
                 return null;
             }
 
+            $this->activePid = getmypid() ?: null;
+
             return $this->active = new NativeUnit(
                 runtime: $this->runtime,
                 handle: $handle,
+                elapsedBeforeAdoptionMs: $elapsedBefore,
                 keepProfileAboveMs: Cast::float(config('telemetry.profiling.min_duration_ms'), 500.0),
                 includeStacks: Cast::bool(config('telemetry.native.stacks'), false),
                 topFunctions: Cast::int(config('telemetry.profiling.top_functions'), 20),
                 maxStackNodes: Cast::int(config('telemetry.native.max_stack_nodes'), 2048),
                 onFinish: function (): void {
                     $this->active = null;
+                    $this->activePid = null;
                 },
             );
         });
@@ -127,9 +172,67 @@ final class NativeProfiler implements ManagesRequestState
      */
     public function flushRequestState(): void
     {
-        $active = $this->active;
+        $active = $this->activeInThisProcess() ? $this->active : null;
+
         $this->active = null;
+        $this->activePid = null;
 
         $active?->discard();
+    }
+
+    private function activeInThisProcess(): bool
+    {
+        if ($this->active === null) {
+            return false;
+        }
+
+        if ($this->activePid !== null && $this->activePid !== getmypid()) {
+            // Inherited across a fork. Drop it rather than finishing it: the
+            // handle belongs to the parent's unit, and the extension has
+            // already reset its own state for this process.
+            $this->active = null;
+            $this->activePid = null;
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * How long the unit this `begin()` is about to ADOPT has already been
+     * running.
+     *
+     * With `cbox_telemetry.auto=1` a unit opens at RINIT, before any PHP
+     * runs, and `begin()` adopts it — which is the whole point, because
+     * the samples worth having are the ones from autoloading, providers
+     * and config. Timing that unit from the adoption would hand the tail
+     * threshold the wrong number and throw away exactly those profiles: an
+     * 800 ms bootstrap followed by 10 ms of routing reads as a 10 ms unit.
+     */
+    private function elapsedBeforeAdoption(): float
+    {
+        $status = $this->runtime->status();
+
+        // Nothing to adopt: this begin() opens its own unit, which starts now.
+        if (Cast::int($status['unit_handle'] ?? null) === 0 || ! Cast::bool($status['unit_automatic'] ?? null, false)) {
+            return 0.0;
+        }
+
+        // The SAPI's own request start, which is per REQUEST under FPM and
+        // under Octane — LARAVEL_START is per process there, and would make
+        // the first adopted unit look as old as the worker.
+        $startedAt = Cast::float($_SERVER['REQUEST_TIME_FLOAT'] ?? null)
+            ?: (defined('LARAVEL_START') ? Cast::float(constant('LARAVEL_START')) : 0.0);
+
+        if ($startedAt <= 0) {
+            return 0.0;
+        }
+
+        $elapsed = microtime(true) * 1000 - $startedAt * 1000;
+
+        // Bounded the same way the bootstrap span is: a stale anchor must
+        // not turn every fast request into a retained profile.
+        return $elapsed > 0 && $elapsed < 60_000 ? $elapsed : 0.0;
     }
 }

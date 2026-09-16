@@ -32,6 +32,7 @@ final class NativeUnit
     public function __construct(
         private readonly NativeRuntime $runtime,
         private readonly int $handle,
+        private readonly float $elapsedBeforeAdoptionMs,
         private readonly float $keepProfileAboveMs,
         private readonly bool $includeStacks,
         private readonly int $topFunctions,
@@ -41,16 +42,27 @@ final class NativeUnit
         $this->startedAt = hrtime(true);
     }
 
+    /**
+     * Includes whatever the unit had already been running before this
+     * object adopted it — under `cbox_telemetry.auto` that is the entire
+     * framework bootstrap, and it is usually the part worth profiling.
+     */
     public function elapsedMs(): float
     {
-        return (hrtime(true) - $this->startedAt) / 1_000_000;
+        return $this->elapsedBeforeAdoptionMs + (hrtime(true) - $this->startedAt) / 1_000_000;
     }
 
     /**
      * End the unit. Call this BEFORE ending the span — the operation
      * aggregates and counters it returns are attached to that span.
+     *
+     * @param  bool  $sampled  the sampling decision IN FORCE NOW, which is
+     *                         not necessarily the one the unit opened under:
+     *                         a per-route `Sample::never()` drops every span
+     *                         of this trace, and a profile nobody can line up
+     *                         against a trace is not worth materialising
      */
-    public function finish(): ?NativeResult
+    public function finish(bool $sampled = true): ?NativeResult
     {
         if ($this->finished) {
             return null;
@@ -58,7 +70,7 @@ final class NativeUnit
 
         $this->release();
 
-        $keepProfile = $this->elapsedMs() >= $this->keepProfileAboveMs;
+        $keepProfile = $sampled && $this->elapsedMs() >= $this->keepProfileAboveMs;
 
         return NativeResult::fromArray(
             $this->runtime->finish($this->handle, $keepProfile, $keepProfile && $this->includeStacks),

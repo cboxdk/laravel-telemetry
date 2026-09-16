@@ -7,6 +7,7 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Native\CrashReporter;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Testing\FakeNativeRuntime;
+use Cbox\Telemetry\Testing\RejectingExporter;
 
 function crashRecord(array $overrides = []): array
 {
@@ -137,4 +138,18 @@ it('says so when the extension is not installed', function () {
     $this->artisan('telemetry:crashes')
         ->expectsOutputToContain('not loaded')
         ->assertSuccessful();
+});
+
+/**
+ * The drain already consumed them, so a rejected batch is a record that no
+ * longer exists anywhere. Under cron the exit code is the only thing anyone
+ * reads.
+ */
+it('fails the crash command when the batch was not accepted', function () {
+    Telemetry::addExporter(new RejectingExporter);
+    $this->native->crashes = [crashRecord()];
+
+    $this->artisan('telemetry:crashes')
+        ->expectsOutputToContain('that data is gone')
+        ->assertFailed();
 });

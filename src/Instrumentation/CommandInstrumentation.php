@@ -90,18 +90,26 @@ final class CommandInstrumentation implements ManagesRequestState
             return;
         }
 
-        FailSafe::guard(function () use ($span, $event) {
+        // Taken out here rather than inside the guard below: a throw the
+        // guard swallows must not leave the unit open, because the one-unit-
+        // at-a-time rule would then refuse every later command in this
+        // process (`schedule:run` runs many).
+        $unit = $this->units[spl_object_id($span)] ?? null;
+        unset($this->units[spl_object_id($span)]);
+
+        FailSafe::guard(function () use ($span, $event, $unit) {
             $span->setAttribute('laravel.command.exit_code', $event->exitCode);
             $span->setStatus($event->exitCode === 0 ? SpanStatus::Ok : SpanStatus::Error);
 
             // Before end() — see the ordering note in TraceRequest.
-            $unit = $this->units[spl_object_id($span)] ?? null;
-            unset($this->units[spl_object_id($span)]);
+            if ($unit !== null) {
+                $result = $unit->finish($this->telemetry()->tracer()->currentlySampled());
 
-            if ($unit !== null && ($result = $unit->finish()) !== null) {
-                NativeReporter::report($this->telemetry(), $result, $span, [
-                    'laravel.command' => $event->command ?? 'unknown',
-                ]);
+                if ($result !== null) {
+                    NativeReporter::report($this->telemetry(), $result, $span, [
+                        'laravel.command' => $event->command ?? 'unknown',
+                    ]);
+                }
             }
 
             $span->end();
@@ -116,6 +124,8 @@ final class CommandInstrumentation implements ManagesRequestState
                 ->counter($event->exitCode === 0 ? 'commands.completed' : 'commands.failed', 'Artisan command runs by outcome')
                 ->inc(1, $labels);
         });
+
+        $unit?->discard();
 
         if ($this->stack === []) {
             $this->telemetry()->flush();

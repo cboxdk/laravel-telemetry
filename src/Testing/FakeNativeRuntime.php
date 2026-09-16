@@ -37,12 +37,20 @@ final class FakeNativeRuntime implements NativeRuntime
     public array $status = [
         'version' => '0.1.0',
         'enabled' => true,
+        // The extension reports these separately for a reason: a unit opens
+        // whether or not a sampler exists, so anything deciding which
+        // profiler runs has to read profiler_enabled rather than infer it
+        // from having been handed a handle.
+        'profiler_enabled' => true,
         'profiler_status' => 'ready',
         'timer_backend' => 'posix',
         'timer_cpu_time' => true,
         'crash_recorder' => 'armed',
         'crash_path' => '/tmp/cbox-telemetry/501/crash-4711.bin',
         'auto' => false,
+        // No automatic unit waiting to be adopted.
+        'unit_handle' => 0,
+        'unit_automatic' => false,
         'limits' => ['period_us' => 1000, 'max_depth' => 64],
     ];
 
@@ -82,6 +90,7 @@ final class FakeNativeRuntime implements NativeRuntime
                 'profiler.samples' => 0,
                 'profiler.dropped' => 0,
                 'profiler.timer_overruns' => 0,
+                'profiler.deferred_samples' => 0,
                 'gc.runs' => 3,
                 'gc.collected' => 128,
                 'ops.overflow' => 0,
@@ -110,6 +119,9 @@ final class FakeNativeRuntime implements NativeRuntime
             'clock' => 'cpu',
             'dropped' => 2,
             'timer_overruns' => 14,
+            'deferred_samples' => 0,
+            'deferred_events' => 0,
+            'max_deferred' => 0,
             'frames' => [
                 ['function' => 'App\\Services\\Pricing::calculate', 'file' => '/app/src/Pricing.php', 'line' => 82],
                 ['function' => 'PDO::query', 'file' => null, 'line' => 0],

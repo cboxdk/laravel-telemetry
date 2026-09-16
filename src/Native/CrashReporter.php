@@ -38,7 +38,15 @@ final class CrashReporter
      */
     public function drain(?int $max = null): array
     {
-        if (! $this->runtime->available() || ! Cast::bool(config('telemetry.native.crashes'), true)) {
+        // Draining DELETES. With telemetry disabled the manager buffers
+        // nothing and exports nothing, so a drain would consume the one
+        // artefact a dead process left behind and hand it to a sink that
+        // throws it away. Leave the records on disk for a run that can
+        // actually report them.
+        if (! $this->telemetry->enabled()
+            || ! $this->runtime->available()
+            || ! Cast::bool(config('telemetry.native.crashes'), true)
+        ) {
             return [];
         }
 

@@ -21,6 +21,7 @@ use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -180,6 +181,24 @@ final class QueueInstrumentation implements ManagesRequestState
                 });
             }
 
+            // Every other listener here is an attempt OUTCOME, and Laravel
+            // has a path with no outcome at all: a job that releases itself
+            // and then throws is neither processed, nor failed, nor released
+            // by the worker (Worker::handleJobException only dispatches
+            // JobReleasedAfterException for a job it released itself). The
+            // native unit would stay open, and the one-unit-at-a-time rule
+            // would then refuse every job for the rest of the worker's life.
+            //
+            // JobAttempted fires in a finally for every attempt, so it is the
+            // one place that can guarantee the unit is closed. Spans and
+            // metrics are deliberately left alone here — an attempt with no
+            // outcome has no outcome to count.
+            if (class_exists(JobAttempted::class)) {
+                $events->listen(JobAttempted::class, function () {
+                    $this->closeAbandonedUnits();
+                });
+            }
+
             // The pid label is unique to this process — retire its series
             // when the worker stops, or every restart leaves a dead
             // queue.worker.memory.* series in the shared store forever.
@@ -285,9 +304,13 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
             }
 
-            // ext-excimer is the fallback for hosts without the extension.
+            // ext-excimer is the fallback for hosts without the extension —
+            // the test is whether the NATIVE sampler is running, not whether
+            // this job got a unit. A unit opens even where profiling is
+            // unavailable, and a job refused a unit for nesting is running
+            // inside one that IS sampling.
             if ($event->connectionName !== 'sync'
-                && ! isset($this->jobUnits[spl_object_id($span)])
+                && ! $this->native()->profiles()
                 && config('telemetry.instrument.profiling', true)
                 && $span->sampled
             ) {
@@ -450,11 +473,15 @@ final class QueueInstrumentation implements ManagesRequestState
                 $unit = $this->jobUnits[spl_object_id($span)] ?? null;
                 unset($this->jobUnits[spl_object_id($span)]);
 
-                if ($unit !== null && ($result = $unit->finish()) !== null) {
-                    NativeReporter::report($this->telemetry(), $result, $span, [
-                        'job.name' => $job,
-                        'queue' => $queue ?? 'default',
-                    ]);
+                if ($unit !== null) {
+                    $result = $unit->finish($this->telemetry()->tracer()->currentlySampled());
+
+                    if ($result !== null) {
+                        NativeReporter::report($this->telemetry(), $result, $span, [
+                            'job.name' => $job,
+                            'queue' => $queue ?? 'default',
+                        ]);
+                    }
                 }
 
                 $span->end();
@@ -532,6 +559,20 @@ final class QueueInstrumentation implements ManagesRequestState
         });
     }
 
+    /**
+     * Close any native unit whose attempt never reached a completion event,
+     * or whose completion threw before it got that far.
+     */
+    private function closeAbandonedUnits(): void
+    {
+        $units = $this->jobUnits;
+        $this->jobUnits = [];
+
+        foreach ($units as $unit) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+    }
+
     private function currentJobSpan(): ?Span
     {
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
@@ -560,10 +601,6 @@ final class QueueInstrumentation implements ManagesRequestState
         $this->jobUsage = [];
         $this->jobProfiles = [];
 
-        foreach ($this->jobUnits as $unit) {
-            FailSafe::guard(static fn () => $unit->discard());
-        }
-
-        $this->jobUnits = [];
+        $this->closeAbandonedUnits();
     }
 }

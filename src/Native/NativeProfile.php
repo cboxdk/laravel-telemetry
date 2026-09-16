@@ -34,6 +34,7 @@ final readonly class NativeProfile
         public string $clock,
         public int $dropped,
         public int $timerOverruns,
+        public int $deferredSamples,
         public bool $capped,
         public array $topFunctions,
         public ?array $stacks,
@@ -81,25 +82,71 @@ final readonly class NativeProfile
             clock: Cast::string($profile['clock'] ?? null, 'unknown'),
             dropped: Cast::int($profile['dropped'] ?? null),
             timerOverruns: Cast::int($profile['timer_overruns'] ?? null),
+            deferredSamples: Cast::int($profile['deferred_samples'] ?? null),
             capped: is_bool($capped) ? $capped : false,
             topFunctions: $top,
             stacks: $stacks,
             // The triples are frame ids; without the table they resolve
-            // against, a call tree is a list of integers.
-            frames: $stacks === null ? [] : $frames,
+            // against, a call tree is a list of integers. Only the frames
+            // the RETAINED triples name are kept: the table is sized by
+            // `profiler.max_frames` (4,096 by default), so shipping it
+            // whole would leave the event hundreds of kilobytes wide no
+            // matter how hard max_stack_nodes truncated the tree.
+            frames: $stacks === null ? [] : self::referencedFrames($frames, $stacks),
         );
     }
 
     /**
-     * How much of this profile was sampled directly rather than inferred —
-     * 1.0 when every tick landed, lower when the VM could not be interrupted
-     * safely or the kernel skipped ticks the period asked for.
+     * How much of this profile was observed where it says it was observed.
+     *
+     * The arithmetic follows the extension's accounting, which is easy to
+     * get wrong in the flattering direction. A sample carries the WEIGHT of
+     * every tick it accounts for, overruns included — so `sample_count` is
+     * ticks, not stack walks, and reading it as "samples we got" while
+     * adding the overruns as "samples we missed" both inflates the
+     * numerator and double-counts the denominator.
+     *
+     * Accounted ticks are `sample_count + dropped`. Of those:
+     *
+     * - `timer_overruns` were never delivered — nothing was observed, the
+     *   weight was folded into whichever stack was walked next;
+     * - `deferred_samples` were delivered late, so they are real
+     *   observations booked somewhere other than where they were taken;
+     * - `dropped` were observed but had nowhere to go (frame table, trie
+     *   or arena full).
+     *
+     * What is left is the share of this profile that means what it appears
+     * to mean.
      */
     public function confidence(): float
     {
-        $attempted = $this->sampleCount + $this->dropped + $this->timerOverruns;
+        $accounted = $this->sampleCount + $this->dropped;
 
-        return $attempted > 0 ? round($this->sampleCount / $attempted, 4) : 0.0;
+        if ($accounted <= 0) {
+            return 0.0;
+        }
+
+        $trustworthy = $accounted - $this->dropped - $this->timerOverruns - $this->deferredSamples;
+
+        return round(max(0.0, min(1.0, $trustworthy / $accounted)), 4);
+    }
+
+    /**
+     * @param  array<int, array{function: string, file?: string, line?: int}>  $frames
+     * @param  list<array{int, int, int}>  $stacks
+     * @return array<int, array{function: string, file?: string, line?: int}>
+     */
+    private static function referencedFrames(array $frames, array $stacks): array
+    {
+        $kept = [];
+
+        foreach ($stacks as [$parent, $frameId, $samples]) {
+            if (isset($frames[$frameId])) {
+                $kept[$frameId] = $frames[$frameId];
+            }
+        }
+
+        return $kept;
     }
 
     /**

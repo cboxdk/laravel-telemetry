@@ -156,8 +156,12 @@ final class ScheduleInstrumentation
             }
 
             // Before end() — see the ordering note in TraceRequest.
-            if ($running['unit'] !== null && ($result = $running['unit']->finish()) !== null) {
-                NativeReporter::report($this->telemetry(), $result, $span, ['schedule.task' => $running['name']]);
+            if ($running['unit'] !== null) {
+                $result = $running['unit']->finish($this->telemetry()->tracer()->currentlySampled());
+
+                if ($result !== null) {
+                    NativeReporter::report($this->telemetry(), $result, $span, ['schedule.task' => $running['name']]);
+                }
             }
 
             $span->end();
@@ -170,6 +174,16 @@ final class ScheduleInstrumentation
                 ->counter("schedule.tasks.{$outcome}", 'Scheduled task runs by outcome')
                 ->inc(1, $labels);
         });
+
+        // Whatever happened above — including a throw the guard swallowed
+        // before the unit was finished — the unit closes here. `schedule:run`
+        // runs its tasks in one process, so a unit left open would refuse
+        // every task after this one.
+        if ($running !== null && $running['unit'] !== null) {
+            $unit = $running['unit'];
+
+            FailSafe::guard(static fn () => $unit->discard());
+        }
 
         // Isolate each task: flush its telemetry and clear trace context
         // before the next task runs in the same process.

@@ -65,19 +65,41 @@ failed request would hold the one-unit rule shut for the remaining life of
 the worker — a bug that would look like "native telemetry stopped working
 on this one box".
 
-**4. Never two profilers at once.** Where both `cbox_telemetry` and
-`ext-excimer` are installed, the native profiler runs and excimer does not.
-Two statistical samplers running concurrently spend a meaningful share of
-their samples observing each other, and neither profile is then a
-description of the application. Excimer remains the fallback, unchanged,
-for hosts without the extension.
+**4. Never two profilers at once, and never zero by accident.** Where both
+`cbox_telemetry` and `ext-excimer` are installed, the native profiler runs
+and excimer does not: two statistical samplers running concurrently spend a
+meaningful share of their samples observing each other, and neither profile
+is then a description of the application.
 
-**5. The unit decides its own duration.** The tail threshold that keeps or
-discards a profile (`profiling.min_duration_ms`) is evaluated against the
-unit's own monotonic clock, at `finish()`, while the span is still open —
-not against `Span::durationMs()`, which has no value until the span ends.
-Ending the span first would answer the question correctly and have nothing
-left to attach the answer to.
+The test is whether the native *sampler* is running, not whether a call
+obtained a unit. A unit opens even where profiling is unavailable — the
+handle is real and `finish()` reports `profiling => false` — so reading a
+handle as "profiling is covered" silences an installed excimer on every host
+where the extension is loaded but its timer is not usable (macOS has no
+per-thread CPU timer; `cbox_telemetry.profiler.enabled=0`;
+`native.profile=false`). Conversely a site refused a unit for nesting is
+running *inside* one that is sampling, and must not start a second sampler
+either.
+
+**5. The unit decides its own duration, including the part that predates
+it.** The tail threshold that keeps or discards a profile
+(`profiling.min_duration_ms`) is evaluated against the unit's own monotonic
+clock, at `finish()`, while the span is still open — not against
+`Span::durationMs()`, which has no value until the span ends. Ending the
+span first would answer the question correctly and have nothing left to
+attach the answer to.
+
+An adopted automatic unit was already running before any of this code
+existed, so its elapsed time is measured from the SAPI's request start
+(`REQUEST_TIME_FLOAT`, per request under both FPM and Octane) rather than
+from the adoption. Otherwise an 800 ms bootstrap followed by 10 ms of
+routing reads as a 10 ms unit, and the threshold discards exactly the
+profiles automatic mode exists to collect.
+
+**6. Whether to keep a profile is asked at the end.** The sampling decision
+in force at `finish()` is the one that counts: a per-route `Sample::never()`
+drops every span of the trace, and a profile with no trace to line it up
+against is not worth materialising.
 
 ## Consequences
 
@@ -85,8 +107,14 @@ left to attach the answer to.
   measurements rather than getting its own. That is the accurate reading:
   the work happened inside the request.
 - An app that runs a custom worker command has to add it to
-  `exclude_commands` or that command will open one very long unit. The
-  extension's own `auto_max_ms` bounds the damage; it does not fix it.
+  `exclude_commands` or that command will open one very long unit, and
+  nothing bounds it: the extension gives a deadline only to *automatic*
+  units ("an explicit one has an owner who is going to call finish()"), and
+  adoption clears even that. `auto_max_ms` is not a safety net here.
+- The one-unit rule is per process, and a `fork()` copies the PHP object
+  that holds it. Ownership is therefore checked against the current pid, so
+  a child opens its own unit rather than inheriting a latch it can never
+  release.
 - `cbox_telemetry.auto=1` remains an FPM-only setting, and `telemetry:doctor`
   reports it rather than trying to infer whether it is right — the SAPI a
   php.ini serves is not visible from a console command.

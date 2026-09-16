@@ -155,8 +155,12 @@ final class TraceRequest
             }
 
             // ext-excimer is the fallback, not a second opinion: two samplers
-            // running at once mostly measure each other.
-            if ($unit === null && config('telemetry.instrument.profiling', true) && $span->sampled) {
+            // running at once mostly measure each other. The test is whether
+            // the NATIVE sampler is running, not whether this call got a
+            // unit — a unit opens even where profiling is unavailable, and
+            // reading a handle as "profiling is covered" silenced excimer on
+            // every host with the extension but no usable timer.
+            if (! $this->native->profiles() && config('telemetry.instrument.profiling', true) && $span->sampled) {
                 $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
                     Cast::float(config('telemetry.profiling.period'), 0.001),
                 ));
@@ -384,8 +388,15 @@ final class TraceRequest
             // duration to decide anything by either.
             $unit = $request->attributes->get(self::NATIVE_KEY);
 
-            if ($unit instanceof NativeUnit && ($result = $unit->finish()) !== null) {
-                NativeReporter::report($this->telemetry, $result, $span, ['http.route' => $route]);
+            if ($unit instanceof NativeUnit) {
+                // The decision in force NOW: a per-route Sample::never()
+                // drops every span of this trace, and a profile with no
+                // trace to line it up against is not worth materialising.
+                $result = $unit->finish($this->telemetry->tracer()->currentlySampled());
+
+                if ($result !== null) {
+                    NativeReporter::report($this->telemetry, $result, $span, ['http.route' => $route]);
+                }
             }
 
             $span->end();
@@ -422,6 +433,16 @@ final class TraceRequest
                     ->record($measured['cpuTimeMs'], $labels);
             }
         });
+
+        // Whatever happened above — including a throw the guard swallowed
+        // before the unit was finished — the native unit closes here. A
+        // no-op once it has been finished; the difference on an Octane or
+        // NativePHP worker is the one-unit-at-a-time rule staying usable.
+        $native = $request->attributes->get(self::NATIVE_KEY);
+
+        if ($native instanceof NativeUnit) {
+            FailSafe::guard(static fn () => $native->discard());
+        }
 
         $this->telemetry->flush();
         $this->telemetry->resetContext();

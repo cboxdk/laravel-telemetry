@@ -16,16 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Requests, jobs, commands and scheduled tasks are bracketed as native units
   of work. From each one: a CPU profile for the slow ones (the same
   `profiling.min_duration_ms` tail threshold, now carrying the sampling
-  period, clock and a `profile.confidence` figure — samples the VM refused
-  and ticks the kernel never delivered are reported rather than averaged
-  away), exact `pdo.connect`/`redis.connect`/`curl.exec` timing as span
-  attributes plus `runtime.operations` and `runtime.operation.duration`
-  metrics, and `php.gc.runs`/`php.gc.collected`.
+  period, clock and a `profile.confidence` figure — ticks the kernel never
+  delivered, samples the VM could only take late, and samples with nowhere
+  to go are reported rather than averaged away), exact
+  `pdo.connect`/`redis.connect`/`curl.exec` timing as span attributes plus
+  `runtime.operations` and `runtime.operation.duration` metrics, and
+  `php.gc.runs`/`php.gc.collected`.
 
   Crash records are drained by `telemetry:flush` (or the new
-  `telemetry:crashes`) and reported as FATAL `crash.recorded` events in the
-  trace the process died in — so a segfault lands on the waterfall for the
-  request that caused it, next to the operation that was open at the time.
+  `telemetry:crashes`) and reported as FATAL `crash.recorded` events
+  carrying the trace and span id the process died in — a correlated OTLP log
+  record, so the crash sits with that trace's logs next to the operation
+  that was open at the time. Schedule `telemetry:crashes` per host: the
+  records are files on the machine that crashed, and each uid has its own
+  sink.
 
   Units do not nest, and Laravel makes nesting easy to trigger by accident,
   so the outermost unit wins: a sync job inside a request opens nothing.
@@ -34,7 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and tasks inside them.
 
   Where both are installed, the native profiler replaces `ext-excimer` —
-  two samplers running at once mostly measure each other. Without either
+  two samplers running at once mostly measure each other. The test is
+  whether the native sampler is actually running, not whether a unit was
+  obtained: a unit opens even where profiling is unavailable, so excimer
+  still runs on a host that has the extension but no usable timer. Without either
   extension nothing changes, and `telemetry:doctor` now reports which is
   active, which operation hooks the extension actually installed, and what
   the crash recorder is doing. `Testing\FakeNativeRuntime` makes both paths

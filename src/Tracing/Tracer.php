@@ -69,6 +69,20 @@ final class Tracer
      * Re-decide with a rate (0–1), using the same lottery as the head
      * decision.
      */
+    /**
+     * The decision in force for the ACTIVE trace right now: a per-route
+     * override if one was made, otherwise the head decision — which is
+     * taken lazily, so a trace that has not started yet reads as sampled.
+     *
+     * This is the decision `finish()` applies when it buffers a span, and
+     * the one anything deciding whether to KEEP expensive per-trace work
+     * (a CPU profile, say) has to ask at the end rather than at the start.
+     */
+    public function currentlySampled(): bool
+    {
+        return $this->sampledOverride ?? $this->sampled ?? true;
+    }
+
     public function resampleAt(float $rate): void
     {
         $this->resample(match (true) {

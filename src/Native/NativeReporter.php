@@ -122,6 +122,9 @@ final class NativeReporter
             'profile.confidence' => $profile->confidence(),
             'profile.dropped' => $profile->dropped,
             'profile.timer_overruns' => $profile->timerOverruns,
+            // Delivered, but at a safe point later than the one they were
+            // taken at — real observations, booked next door.
+            'profile.deferred_samples' => $profile->deferredSamples,
             'profile.top_functions' => json_encode($profile->topFunctions, JSON_UNESCAPED_SLASHES) ?: '[]',
         ];
 

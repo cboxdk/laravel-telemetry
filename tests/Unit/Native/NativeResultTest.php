@@ -83,10 +83,43 @@ it('keeps only the requested number of top functions', function () {
 it('reports how much of a profile was actually sampled', function () {
     $profile = NativeResult::fromArray(FakeNativeRuntime::withProfile()->result)?->profile;
 
+    // Accounted ticks are sample_count + dropped; of those, the dropped
+    // and the never-delivered are not observations of anything.
     expect($profile?->sampleCount)->toBe(814)
         ->and($profile?->dropped)->toBe(2)
         ->and($profile?->timerOverruns)->toBe(14)
-        ->and($profile?->confidence())->toBe(round(814 / 830, 4));
+        ->and($profile?->confidence())->toBe(round(800 / 816, 4));
+});
+
+/**
+ * A sample carries the WEIGHT of every tick it accounts for, overruns
+ * included — `sample_count` is ticks, not stack walks. Reading it as
+ * "samples we got" and adding the overruns as "samples we missed" both
+ * inflates the numerator and double-counts the denominator, and reported
+ * 57% for a profile that observed 25% of its ticks.
+ */
+it('does not count an overrun tick as a sample of anything', function () {
+    $raw = FakeNativeRuntime::withProfile()->result;
+    $raw['profile']['sample_count'] = 100;
+    $raw['profile']['dropped'] = 0;
+    $raw['profile']['timer_overruns'] = 75;
+
+    expect(NativeResult::fromArray($raw)?->profile?->confidence())->toBe(0.25);
+});
+
+/**
+ * Deferred samples were delivered, but at a later safe point than the one
+ * they were taken at — real observations, booked next door. A profile that
+ * is nine-tenths deferred is not a 100% confident profile.
+ */
+it('counts a deferred sample as observed somewhere else', function () {
+    $raw = FakeNativeRuntime::withProfile()->result;
+    $raw['profile']['sample_count'] = 100;
+    $raw['profile']['dropped'] = 0;
+    $raw['profile']['timer_overruns'] = 0;
+    $raw['profile']['deferred_samples'] = 90;
+
+    expect(NativeResult::fromArray($raw)?->profile?->confidence())->toBe(0.1);
 });
 
 it('has no confidence in a profile with no samples at all', function () {
@@ -96,6 +129,22 @@ it('has no confidence in a profile with no samples at all', function () {
     $raw['profile']['timer_overruns'] = 0;
 
     expect(NativeResult::fromArray($raw)?->profile?->confidence())->toBe(0.0);
+});
+
+/**
+ * The frame table is sized by `profiler.max_frames` — 4,096 by default —
+ * so shipping it whole left the event hundreds of kilobytes wide however
+ * hard max_stack_nodes truncated the tree it was there to explain.
+ */
+it('keeps only the frames the retained call tree refers to', function () {
+    $raw = FakeNativeRuntime::withProfile()->result;
+    $raw['profile']['frames'][] = ['function' => 'Unreferenced::method', 'file' => null, 'line' => 0];
+    $raw['profile']['stacks'] = [[0, 1, 40]];
+
+    $profile = NativeResult::fromArray($raw)?->profile;
+
+    expect($profile?->frames)->toHaveCount(1)
+        ->and($profile?->frames[1]['function'])->toBe('PDO::query');
 });
 
 /**
