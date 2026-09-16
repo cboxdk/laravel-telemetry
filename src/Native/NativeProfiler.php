@@ -72,9 +72,9 @@ final class NativeProfiler implements ManagesRequestState
     public function profiles(): bool
     {
         if (! $this->runtime->available()
-            || ! Cast::bool(config('telemetry.native.enabled'), true)
-            || ! Cast::bool(config('telemetry.native.profile'), true)
-            || ! Cast::bool(config('telemetry.instrument.profiling'), true)
+            || ! Cast::flag(config('telemetry.native.enabled'), true)
+            || ! Cast::flag(config('telemetry.native.profile'), true)
+            || ! Cast::flag(config('telemetry.instrument.profiling'), true)
         ) {
             return false;
         }
@@ -100,7 +100,7 @@ final class NativeProfiler implements ManagesRequestState
      */
     public function begin(string $unit, ?Span $span = null): ?NativeUnit
     {
-        if (! $this->runtime->available() || ! Cast::bool(config('telemetry.native.enabled'), true)) {
+        if (! $this->runtime->available() || ! Cast::flag(config('telemetry.native.enabled'), true)) {
             return null;
         }
 
@@ -148,7 +148,7 @@ final class NativeProfiler implements ManagesRequestState
                 handle: $handle,
                 elapsedBeforeAdoptionMs: $elapsedBefore,
                 keepProfileAboveMs: Cast::float(config('telemetry.profiling.min_duration_ms'), 500.0),
-                includeStacks: Cast::bool(config('telemetry.native.stacks'), false),
+                includeStacks: Cast::flag(config('telemetry.native.stacks'), false),
                 topFunctions: Cast::int(config('telemetry.profiling.top_functions'), 20),
                 maxStackNodes: Cast::int(config('telemetry.native.max_stack_nodes'), 2048),
                 // Identity-checked: a unit object can outlive its hold on

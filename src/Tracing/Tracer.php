@@ -79,14 +79,22 @@ final class Tracer
      * whether to keep expensive per-trace work (a CPU profile, say): the
      * decision can change mid-request.
      *
-     * It is the policy, not a guarantee about any particular span. An ERROR
-     * span is still exported from an unsampled trace when
-     * `traces.always_sample_errors` is on, so a caller that cares about a
-     * failing span has to check its status as well.
+     * Pass the span whose fate you are actually asking about and the answer
+     * applies the SAME rule `finish()` applies to it, error escape included
+     * (`traces.always_sample_errors`) — one definition of "will this be
+     * exported", rather than a second one drifting in a caller.
      */
-    public function currentlySampled(): bool
+    public function currentlySampled(?Span $span = null): bool
     {
-        return $this->sampledOverride ?? $this->sampled ?? true;
+        $sampled = $span === null
+            ? $this->sampledOverride ?? $this->sampled ?? true
+            : $this->sampledOverride ?? $span->sampled;
+
+        if ($sampled) {
+            return true;
+        }
+
+        return $this->alwaysSampleErrors && $span?->status() === SpanStatus::Error;
     }
 
     public function resampleAt(float $rate): void

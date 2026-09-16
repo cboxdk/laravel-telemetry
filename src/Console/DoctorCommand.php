@@ -11,6 +11,7 @@ use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
+use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\TelemetryManager;
@@ -257,9 +258,12 @@ final class DoctorCommand extends Command
             return;
         }
 
-        $native = $this->laravel->make(NativeRuntime::class);
-
-        if ($native->available() && Cast::bool(config('telemetry.native.profile'), true)) {
+        // The same question the middleware asks, not "is the extension
+        // installed": the extension loads and opens units on a host whose
+        // sampler cannot run at all (macOS has no per-thread CPU timer), and
+        // reporting that as OK hid the fact that excimer was doing the work —
+        // or that nothing was.
+        if ($this->laravel->make(NativeProfiler::class)->profiles()) {
             $this->components->twoColumnDetail('CPU profiling', '<fg=green>OK — cbox_telemetry (native)</>');
 
             return;
@@ -282,7 +286,7 @@ final class DoctorCommand extends Command
      */
     private function checkNative(): void
     {
-        if (! Cast::bool(config('telemetry.native.enabled'), true)) {
+        if (! Cast::flag(config('telemetry.native.enabled'), true)) {
             $this->components->twoColumnDetail('Native runtime', 'disabled in config');
 
             return;
@@ -330,7 +334,7 @@ final class DoctorCommand extends Command
                 : "<fg=yellow>{$recorder}</>",
         );
 
-        if (! Cast::bool(config('telemetry.native.crashes'), true)) {
+        if (! Cast::flag(config('telemetry.native.crashes'), true)) {
             $this->components->warn('telemetry.native.crashes is off: records are written but nothing drains them.');
         }
 
@@ -388,7 +392,7 @@ final class DoctorCommand extends Command
         }
 
         $endpoint = Cast::string(config('telemetry.otlp.endpoint'));
-        $compressed = Cast::bool(config('telemetry.otlp.compression'), true);
+        $compressed = Cast::flag(config('telemetry.otlp.compression'), true);
 
         $transport = new OtlpTransport(
             endpoint: $endpoint,

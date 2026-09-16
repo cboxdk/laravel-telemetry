@@ -39,6 +39,8 @@ beforeEach(function () {
     $this->collector = new CollectingExporter;
     Telemetry::addExporter($this->collector);
 
+    config()->set('telemetry.native.enabled', true);
+
     $this->native = new FakeNativeRuntime;
     $this->app->instance(NativeRuntime::class, $this->native);
 });

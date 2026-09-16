@@ -58,6 +58,9 @@ final class FakeNativeRuntime implements NativeRuntime
 
     private int $open = 0;
 
+    /** @var array<string, scalar> the context the open unit was begun with */
+    private array $context = [];
+
     /**
      * @param  array<string, mixed>|null  $result
      */
@@ -158,6 +161,7 @@ final class FakeNativeRuntime implements NativeRuntime
         }
 
         $this->begun[] = $context;
+        $this->context = $context;
 
         return $this->open = $this->nextHandle++;
     }
@@ -173,9 +177,24 @@ final class FakeNativeRuntime implements NativeRuntime
 
         $result = $this->result;
 
-        if (! $includeProfile) {
+        // The measurements are the fixture; everything the CALLER decided is
+        // answered from what it actually asked for. A double that reported
+        // `unit => http` for a queue unit, or a profile for a unit begun with
+        // `profile => false`, lets an application's test assert behaviour the
+        // real extension would never produce.
+        $unit = is_string($this->context['unit'] ?? null) ? $this->context['unit'] : 'other';
+
+        $result['unit'] = in_array($unit, ['http', 'queue', 'command', 'schedule'], true) ? $unit : 'other';
+        $result['sampled'] = $sampled = (bool) ($this->context['sampled'] ?? true);
+        $result['profiling'] = $profiling = $sampled && (bool) ($this->context['profile'] ?? true);
+
+        if (! $includeProfile || ! $profiling) {
             $result['profile'] = null;
+        } elseif (is_array($result['profile'] ?? null) && ! $includeStacks) {
+            $result['profile']['stacks'] = null;
         }
+
+        $this->context = [];
 
         return $result;
     }

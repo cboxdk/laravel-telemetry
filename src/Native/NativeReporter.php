@@ -39,11 +39,11 @@ final class NativeReporter
         array $eventAttributes = [],
     ): void {
         FailSafe::guard(static function () use ($telemetry, $result, $span, $eventAttributes): void {
-            if (Cast::bool(config('telemetry.native.operations'), true)) {
+            if (Cast::flag(config('telemetry.native.operations'), true)) {
                 self::reportOperations($telemetry, $result, $span);
             }
 
-            if (Cast::bool(config('telemetry.native.counters'), true)) {
+            if (Cast::flag(config('telemetry.native.counters'), true)) {
                 self::reportCounters($telemetry, $result, $span);
             }
 
@@ -71,11 +71,13 @@ final class NativeReporter
                 ->record($aggregate['total_ms'], $labels);
         }
 
-        // Nesting deeper than the extension's fixed stack. The aggregates
-        // are still correct for everything that fit; saying so beats a
-        // silently short number.
+        // Nesting deeper than the extension's fixed operation stack. That
+        // stack exists ONLY so a crash record can name what was in flight —
+        // "not getting a slot costs that context, never the measurement", as
+        // the C puts it — so the aggregates above are complete either way,
+        // and this says the one thing that is actually degraded.
         if (($overflow = $result->counter('ops.overflow')) > 0) {
-            $span?->setAttribute('php.native.operations_dropped', $overflow);
+            $span?->setAttribute('php.native.operation_context_overflow', $overflow);
         }
     }
 

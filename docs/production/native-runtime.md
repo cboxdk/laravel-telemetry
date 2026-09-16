@@ -152,8 +152,9 @@ period at all, and will say so here rather than quietly inventing one.
 Profiling always runs and the result is usually thrown away. That is the
 cheap arrangement, not the wasteful one: the sampler's cost is roughly
 constant, a unit that turns out to be fast resets the native state without
-allocating anything into PHP, and deciding *afterwards* whether a unit was
-interesting requires no prediction.
+materialising the profile — the aggregates and counters are built either
+way, the frame table and call tree are not — and deciding *afterwards*
+whether a unit was interesting requires no prediction.
 
 ### The full call tree
 

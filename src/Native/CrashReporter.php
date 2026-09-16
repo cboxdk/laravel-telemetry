@@ -45,7 +45,7 @@ final class CrashReporter
         // actually report them.
         if (! $this->telemetry->enabled()
             || ! $this->runtime->available()
-            || ! Cast::bool(config('telemetry.native.crashes'), true)
+            || ! Cast::flag(config('telemetry.native.crashes'), true)
         ) {
             return [];
         }

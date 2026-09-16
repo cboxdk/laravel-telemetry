@@ -18,7 +18,9 @@ use Closure;
  *
  * Starting the profiler and throwing the result away is the cheap path:
  * the sampler's cost is roughly constant, and a unit that turns out to be
- * fast resets the native state without ever allocating a PHP array.
+ * fast resets the native state without ever materialising the profile —
+ * the aggregates and counters are built either way, the frame table and
+ * call tree are not.
  */
 final class NativeUnit
 {

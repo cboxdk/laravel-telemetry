@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Config switches written as `0` or `1` in `.env` were ignored.** Laravel's
+  `env()` converts `true`, `false`, `null` and `empty` to PHP values and leaves
+  everything else a string, so `TELEMETRY_OTLP_COMPRESSION=0` reached config as
+  the string `"0"` — which the strict boolean reader rejected as "not a bool"
+  and answered with the default. The switch then did the opposite of what the
+  `.env` file said, silently, and only for the numeric spelling. Config flags
+  are now read with `Cast::flag()`, which accepts what a `.env` file can
+  actually produce. Affects `otlp.compression` and every `telemetry.native.*`
+  switch.
+
 - **The shutdown flush added in 2.2.1 had no test that could fail without it.**
   `FatalErrorFlushTest` calls `flushOnShutdown()` directly, which never runs the
   callback that method registers — so the fix shipped unproven. A subprocess

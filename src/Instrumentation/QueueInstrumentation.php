@@ -488,10 +488,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 unset($this->jobUnits[spl_object_id($span)]);
 
                 if ($unit !== null) {
-                    $result = $unit->finish(
-                        $this->telemetry()->tracer()->currentlySampled()
-                            || $span->status() === SpanStatus::Error,
-                    );
+                    $result = $unit->finish($this->telemetry()->tracer()->currentlySampled($span));
 
                     if ($result !== null) {
                         NativeReporter::report($this->telemetry(), $result, $span, [

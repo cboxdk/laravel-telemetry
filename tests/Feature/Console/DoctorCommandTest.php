@@ -98,7 +98,11 @@ it('stays quiet when telemetry uses a dedicated redis connection', function () {
         ->assertSuccessful();
 });
 
-it('reports profiling status based on extension availability', function () {
+it('falls back to excimer when there is no native profiler', function () {
+    // Arranged, not assumed: this asserts the no-native path, and the person
+    // developing the extension is the likeliest one to have it loaded.
+    $this->app->instance(NativeRuntime::class, new FakeNativeRuntime(available: false));
+
     $expected = extension_loaded('excimer') ? 'OK — ext-excimer loaded' : 'off — no profiler extension installed';
 
     $this->artisan('telemetry:doctor')
@@ -107,6 +111,9 @@ it('reports profiling status based on extension availability', function () {
 });
 
 it('reports the native runtime as absent when the extension is not installed', function () {
+    config()->set('telemetry.native.enabled', true);
+    $this->app->instance(NativeRuntime::class, new FakeNativeRuntime(available: false));
+
     Artisan::call('telemetry:doctor');
 
     expect(Artisan::output())
@@ -115,11 +122,31 @@ it('reports the native runtime as absent when the extension is not installed', f
 });
 
 /**
+ * The extension loads and opens units on a host whose sampler cannot run at
+ * all. Reporting that as "OK — native" hid which profiler was doing the
+ * work, or that nothing was.
+ */
+it('does not call profiling OK when the extension has no sampler', function () {
+    config()->set('telemetry.native.enabled', true);
+
+    $native = new FakeNativeRuntime;
+    $native->status['profiler_enabled'] = false;
+
+    $this->app->instance(NativeRuntime::class, $native);
+
+    Artisan::call('telemetry:doctor');
+
+    expect(Artisan::output())->not->toContain('OK — cbox_telemetry (native)');
+});
+
+/**
  * The INI decides what exists, the config decides what is used, and those
  * can disagree in silence. Breaking that silence is what this command is
  * for: a hook asked for and not installed is normal, and worth saying.
  */
 it('reports what the native extension actually installed', function () {
+    config()->set('telemetry.native.enabled', true);
+
     $native = new FakeNativeRuntime;
     $native->status['hook_detail'] = [
         'pdo' => ['requested' => true, 'installed' => 2, 'unavailable' => 0, 'active' => true],
@@ -139,6 +166,7 @@ it('reports what the native extension actually installed', function () {
 });
 
 it('warns when crash records are written but nothing drains them', function () {
+    config()->set('telemetry.native.enabled', true);
     $this->app->instance(NativeRuntime::class, new FakeNativeRuntime);
     config()->set('telemetry.native.crashes', false);
 

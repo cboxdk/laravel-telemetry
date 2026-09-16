@@ -116,7 +116,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 headers: Cast::stringMap($config->get('telemetry.otlp.headers', [])),
                 timeout: Cast::float($config->get('telemetry.otlp.timeout'), 3.0),
                 connectTimeout: Cast::float($config->get('telemetry.otlp.connect_timeout'), 1.0),
-                compress: Cast::bool($config->get('telemetry.otlp.compression'), true),
+                compress: Cast::flag($config->get('telemetry.otlp.compression'), true),
             );
         });
 

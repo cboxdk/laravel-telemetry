@@ -392,10 +392,7 @@ final class TraceRequest
                 // The decision in force NOW: a per-route Sample::never()
                 // drops every span of this trace, and a profile with no
                 // trace to line it up against is not worth materialising.
-                $result = $unit->finish(
-                    $this->telemetry->tracer()->currentlySampled()
-                        || $span->status() === SpanStatus::Error,
-                );
+                $result = $unit->finish($this->telemetry->tracer()->currentlySampled($span));
 
                 if ($result !== null) {
                     NativeReporter::report($this->telemetry, $result, $span, ['http.route' => $route]);

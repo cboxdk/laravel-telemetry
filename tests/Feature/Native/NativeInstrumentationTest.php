@@ -35,6 +35,8 @@ beforeEach(function () {
     $this->collector = new CollectingExporter;
     Telemetry::addExporter($this->collector);
 
+    config()->set('telemetry.native.enabled', true);
+
     $this->native = new FakeNativeRuntime;
     $this->app->instance(NativeRuntime::class, $this->native);
     $this->app->forgetInstance(NativeProfiler::class);
@@ -229,11 +231,13 @@ it('opens a queue unit for a job running in a worker', function () {
         ->and($this->native->begun[0]['unit'])->toBe('queue')
         ->and($this->native->finished)->toHaveCount(1);
 
-    // The unit label is the extension's own, not the call site's guess.
+    // The unit label is the extension's own, reported back from the context
+    // this job opened its unit with.
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
     $sample = collect($families['runtime.operations']->samples)->first();
 
-    expect(array_keys($sample->labels))->toBe(['operation', 'unit']);
+    expect(array_keys($sample->labels))->toBe(['operation', 'unit'])
+        ->and($sample->labels['unit'])->toBe('queue');
 });
 
 it('opens a command unit, but not for a command that hosts its own units', function () {
@@ -476,4 +480,89 @@ it('keeps the profile of a failing request even when the trace is unsampled', fu
     $this->get('/failing-native')->assertStatus(500);
 
     expect($this->native->finished[0]['profile'])->toBeTrue();
+});
+
+/**
+ * `TELEMETRY_NATIVE_PROFILE=0` reaches config as the STRING "0", because
+ * Laravel's env() converts true/false/null/empty and nothing else. Read
+ * with a strict is_bool() check it fell back to the default, and every
+ * numeric switch did the opposite of what the .env file said.
+ */
+it('honours the numeric spelling of its config switches', function () {
+    $profiler = $this->app->make(NativeProfiler::class);
+
+    config()->set('telemetry.native.profile', '0');
+    expect($profiler->profiles())->toBeFalse();
+
+    config()->set('telemetry.native.profile', '1');
+    expect($profiler->profiles())->toBeTrue();
+
+    config()->set('telemetry.instrument.profiling', '0');
+    expect($profiler->profiles())->toBeFalse();
+
+    config()->set('telemetry.native.enabled', '0');
+    expect($profiler->begin('http'))->toBeNull();
+});
+
+/**
+ * The extension's operation stack exists only so a crash record can name
+ * what was in flight; overflowing it costs that context, never the
+ * aggregates. Reporting it as dropped measurements was a false alarm.
+ */
+it('reports a full operation stack as lost crash context, not lost measurements', function () {
+    $result = FakeNativeRuntime::plainResult();
+    $result['counters']['ops.overflow'] = 3;
+
+    $this->app->instance(NativeRuntime::class, new FakeNativeRuntime(result: $result));
+    $this->app->forgetInstance(NativeProfiler::class);
+
+    $this->get('/native/7')->assertOk();
+
+    $attributes = nativeServerSpans($this->collector)[0]->attributes();
+
+    expect($attributes['php.native.operation_context_overflow'])->toBe(3)
+        ->and($attributes)->not->toHaveKey('php.native.operations_dropped')
+        // The aggregates are complete either way.
+        ->and($attributes['pdo.connect.count'])->toBe(1);
+});
+
+/**
+ * The shipped double is the only way an application can test the
+ * with-extension path, so what it reports has to be what the extension
+ * would report — not a fixture that contradicts the context it was handed.
+ */
+it('answers from the context it was begun with, like the extension does', function () {
+    $native = FakeNativeRuntime::withProfile();
+
+    $handle = $native->begin(['unit' => 'queue', 'sampled' => false, 'profile' => false]);
+    $result = $native->finish($handle, includeProfile: true, includeStacks: true);
+
+    expect($result['unit'])->toBe('queue')
+        ->and($result['sampled'])->toBeFalse()
+        ->and($result['profiling'])->toBeFalse()
+        // A profile nobody could have collected is not returned.
+        ->and($result['profile'])->toBeNull();
+});
+
+it('returns a call tree from the fake only when one was asked for', function () {
+    $native = FakeNativeRuntime::withProfile();
+    $native->result['profile']['stacks'] = [[0, 0, 12]];
+
+    $handle = $native->begin(['unit' => 'http', 'sampled' => true, 'profile' => true]);
+    $result = $native->finish($handle, includeProfile: true, includeStacks: false);
+
+    expect($result['profile']['stacks'])->toBeNull();
+
+    $handle = $native->begin(['unit' => 'http', 'sampled' => true, 'profile' => true]);
+    $result = $native->finish($handle, includeProfile: true, includeStacks: true);
+
+    expect($result['profile']['stacks'])->toBe([[0, 0, 12]]);
+});
+
+it('labels an unknown unit type the way the extension does', function () {
+    $native = new FakeNativeRuntime;
+
+    $handle = $native->begin(['unit' => 'nonsense']);
+
+    expect($native->finish($handle)['unit'])->toBe('other');
 });

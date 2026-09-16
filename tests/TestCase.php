@@ -26,5 +26,11 @@ abstract class TestCase extends Orchestra
         $app['config']->set('telemetry.exporters', []);
         $app['config']->set('telemetry.providers.system.enabled', false);
         $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('a', 32)));
+
+        // The suite must say the same thing on a machine that has the
+        // cbox_telemetry extension installed as on one that does not — the
+        // developer working ON that extension is the likeliest person to have
+        // it loaded. Tests that want it bind their own runtime.
+        $app['config']->set('telemetry.native.enabled', false);
     }
 }
