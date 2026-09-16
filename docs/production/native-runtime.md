@@ -75,8 +75,10 @@ The tail threshold counts the adopted time too: a unit that spent 800 ms in
 the bootstrap and 10 ms in routing is an 810 ms unit, and keeps its profile
 under the default 500 ms. Timing it from the adoption would have thrown away
 precisely the profiles automatic mode exists to collect. The adopted time is
-measured from the SAPI's request start and bounded by the extension's own
-`auto_max_ms`, which is the same limit it applies to the unit itself.
+measured from the SAPI's request start, capped at the extension's own
+`auto_max_ms` — a bootstrap that blows through that deadline stops sampling
+but keeps what it collected (`profile.capped`), so it counts as at least
+that slow rather than as nothing.
 
 It is wrong everywhere a process serves more than one unit. `RINIT` fires
 once per *process* in a queue worker or an Octane server, so an automatic

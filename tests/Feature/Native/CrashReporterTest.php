@@ -171,3 +171,21 @@ it('never drains more crash records than the event buffer can hold', function ()
 
     expect($this->native->crashes)->toHaveCount(2);
 });
+
+/**
+ * Reporting a crash increments runtime.crashes, so the drain has to happen
+ * BEFORE the metric export — drained after it, the counter waited for the
+ * next run, and with --wipe it was deleted before it ever had one.
+ */
+it('exports the crash counter in the same run that drained it', function () {
+    $this->native->crashes = [crashRecord()];
+
+    $this->artisan('telemetry:flush --wipe')->assertSuccessful();
+
+    $exported = collect($this->collector->batches())
+        ->flatMap(fn ($batch) => $batch->metrics)
+        ->first(fn ($family) => $family->name() === 'runtime.crashes');
+
+    expect($exported)->not->toBeNull()
+        ->and($exported->samples[0]->value)->toBe(1.0);
+});

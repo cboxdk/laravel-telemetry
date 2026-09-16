@@ -250,13 +250,16 @@ final class NativeProfiler implements ManagesRequestState
 
         $elapsed = microtime(true) * 1000 - $startedAt * 1000;
 
-        // Bounded by the extension's OWN limit on how long an automatic unit
-        // may sample. A fixed minute was this package inventing a second,
-        // stricter deadline: on a host configured for a two-minute cap, a
-        // 61-second bootstrap — exactly the case worth profiling — read as
-        // zero and lost its profile to the tail threshold.
+        // Capped, not discarded. The extension's `auto_max_ms` stops an
+        // automatic unit SAMPLING; it keeps the unit and the samples it
+        // already took, and says so with `profiler.capped`. Treating a
+        // longer elapsed time as a bad anchor threw that away: a bootstrap
+        // that blew through the deadline — the slowest one there is, and the
+        // only reason anyone reads these profiles — reported zero and failed
+        // the retention threshold. The ceiling bounds a nonsense anchor
+        // without discarding a real one.
         $cap = Cast::float(Cast::stringKeyedArray($status['limits'] ?? null)['auto_max_ms'] ?? null, 60_000.0);
 
-        return $elapsed > 0 && $elapsed <= max(1_000.0, $cap) ? $elapsed : 0.0;
+        return $elapsed > 0 ? min($elapsed, max(1_000.0, $cap)) : 0.0;
     }
 }

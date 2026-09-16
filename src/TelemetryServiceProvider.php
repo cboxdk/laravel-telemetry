@@ -677,6 +677,12 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->singleton(QueueInstrumentation::class);
 
+        // Only when jobs are instrumented: with propagation alone there is no
+        // per-job state to flush.
+        if ($instrument) {
+            $this->registerPreJobReset();
+        }
+
         $this->callAfterResolving('queue', function (QueueManager $queue, Application $app) use ($propagate, $instrument) {
             $app->make(QueueInstrumentation::class)->register(
                 $queue,
@@ -685,18 +691,27 @@ class TelemetryServiceProvider extends ServiceProvider
                 $instrument,
             );
         });
+    }
 
-        if (! $instrument) {
-            return;
-        }
-
-        // Long-running workers: before each job, drop half-open state a
-        // prior job left behind (died mid-HTTP-call, mid-transaction) —
-        // the queue-worker twin of the Octane fresh-request reset. Sync
-        // jobs run inside the dispatcher's request, whose in-flight state
-        // must survive, so they never reset. Context reset is
-        // QueueInstrumentation's own job — only instrumentation state
-        // is flushed here.
+    /**
+     * BEFORE the instrumentation's own listeners, and deliberately so.
+     *
+     * `callAfterResolving` fires immediately when something has already
+     * resolved `queue` — another provider, a dispatch during boot — and this
+     * reset would then land AFTER the listener that opens a native unit,
+     * discarding every job's unit before the job body ran. On applications
+     * whose boot order happens to resolve the queue early, and only those.
+     *
+     * What it is for: long-running workers, where half-open state from a
+     * prior job (died mid-HTTP-call, mid-transaction) must not leak into the
+     * next one — the queue-worker twin of the Octane fresh-request reset.
+     * Sync jobs run inside the dispatcher's request, whose in-flight state
+     * must survive, so they never reset. Context reset is
+     * QueueInstrumentation's own job; only instrumentation state is flushed
+     * here.
+     */
+    private function registerPreJobReset(): void
+    {
         $this->app->make(Dispatcher::class)->listen(JobProcessing::class, function (JobProcessing $event): void {
             if ($event->connectionName === 'sync') {
                 return;

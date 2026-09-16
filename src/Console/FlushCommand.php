@@ -74,6 +74,12 @@ final class FlushCommand extends Command
             return $this->daemon($telemetry, $shipper);
         }
 
+        // Crash records from processes that died since the last run. BEFORE
+        // the metric export, because reporting one increments
+        // runtime.crashes — drained afterwards, that counter missed this
+        // export, and with --wipe it was deleted before it ever had one.
+        $this->reportCrashes();
+
         // Guarded like the daemon loop (below) — a failure here must
         // surface as a clean error + non-zero exit for cron/monitoring
         // to catch, never an uncaught exception dumped to the console.
@@ -86,11 +92,6 @@ final class FlushCommand extends Command
         }
 
         $healthy = $this->reportMetrics($report);
-
-        // Crash records from processes that died since the last run. Drained
-        // BEFORE the span flush below, so they leave with it rather than
-        // waiting a whole interval for the next one.
-        $this->reportCrashes();
 
         // Spans and events buffered by this process (the command's own
         // instrumentation). Rarely anything, but a rejection here is a
@@ -161,6 +162,8 @@ final class FlushCommand extends Command
             }
 
             if (microtime(true) - $lastMetricsFlush >= $metricsInterval) {
+                // Before the metric flush, so a crash counted now leaves
+                // with this export rather than the next one.
                 $this->reportCrashes();
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flushMetrics()), 'metrics');
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flush()), 'spans and events');

@@ -566,3 +566,31 @@ it('labels an unknown unit type the way the extension does', function () {
 
     expect($native->finish($handle)['unit'])->toBe('other');
 });
+
+/**
+ * The worker's pre-job reset flushes stateful instrumentation, and this
+ * profiler is one — so if it runs AFTER the job-start listener that opens
+ * the unit, every job's unit is discarded before the job body runs. Which
+ * listener lands first depends on whether anything resolved `queue` before
+ * telemetry booted, so the assertion is the behaviour: the unit is open for
+ * the duration of the job.
+ */
+it('keeps the unit open while the job runs', function () {
+    $job = Mockery::mock(Job::class);
+    $job->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $job->shouldReceive('getQueue')->andReturn('default');
+    $job->shouldReceive('attempts')->andReturn(1);
+    $job->shouldReceive('payload')->andReturn([]);
+
+    app('queue');
+    $events = app('events');
+
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    expect($this->native->begun)->toHaveCount(1)
+        ->and($this->native->finished)->toBe([]);
+
+    $events->dispatch(new JobProcessed('redis', $job));
+
+    expect($this->native->finished)->toHaveCount(1);
+});
