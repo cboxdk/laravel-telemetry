@@ -8,6 +8,7 @@ use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\ShipResult;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
+use Cbox\Telemetry\Native\CrashReporter;
 use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
@@ -86,6 +87,11 @@ final class FlushCommand extends Command
 
         $healthy = $this->reportMetrics($report);
 
+        // Crash records from processes that died since the last run. Drained
+        // BEFORE the span flush below, so they leave with it rather than
+        // waiting a whole interval for the next one.
+        $this->reportCrashes();
+
         // Spans and events buffered by this process (the command's own
         // instrumentation). Rarely anything, but a rejection here is a
         // rejection all the same.
@@ -155,6 +161,7 @@ final class FlushCommand extends Command
             }
 
             if (microtime(true) - $lastMetricsFlush >= $metricsInterval) {
+                $this->reportCrashes();
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flushMetrics()), 'metrics');
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flush()), 'spans and events');
 
@@ -345,6 +352,25 @@ final class FlushCommand extends Command
             fn (ExportOutcome $failure): string => $failure->exporter.':'.$failure->status->value.':'.($failure->reason ?? ''),
             $failures,
         ));
+    }
+
+    /**
+     * Crash records outlive the process that wrote them, so something else
+     * has to collect them. This is that something: scheduled, and somewhere
+     * a failure is visible.
+     */
+    private function reportCrashes(): void
+    {
+        $reported = $this->laravel->make(CrashReporter::class)->drain();
+
+        foreach ($reported as $record) {
+            $this->components->error(sprintf(
+                'Crash recorded: %s in pid %d (%s)',
+                is_scalar($record['crash.signal_name'] ?? null) ? (string) $record['crash.signal_name'] : 'UNKNOWN',
+                is_scalar($record['crash.pid'] ?? null) ? (int) $record['crash.pid'] : 0,
+                is_scalar($record['crash.unit'] ?? null) ? (string) $record['crash.unit'] : 'other',
+            ));
+        }
     }
 
     private function spoolShipper(): ?SpoolShipper

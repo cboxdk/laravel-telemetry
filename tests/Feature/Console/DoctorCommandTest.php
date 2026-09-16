@@ -1,9 +1,11 @@
 <?php
 
 declare(strict_types=1);
+use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\TelemetryManager;
+use Cbox\Telemetry\Testing\FakeNativeRuntime;
 use Cbox\Telemetry\Tests\Support\StubOtlpServer;
 use Illuminate\Support\Facades\Artisan;
 
@@ -97,11 +99,61 @@ it('stays quiet when telemetry uses a dedicated redis connection', function () {
 });
 
 it('reports profiling status based on extension availability', function () {
-    $expected = extension_loaded('excimer') ? 'OK — ext-excimer loaded' : 'off — ext-excimer not installed';
+    $expected = extension_loaded('excimer') ? 'OK — ext-excimer loaded' : 'off — no profiler extension installed';
 
     $this->artisan('telemetry:doctor')
         ->expectsOutputToContain($expected)
         ->assertSuccessful();
+});
+
+it('reports the native runtime as absent when the extension is not installed', function () {
+    Artisan::call('telemetry:doctor');
+
+    expect(Artisan::output())
+        ->toContain('Native runtime')
+        ->toContain('pie install cboxdk/telemetry-native');
+});
+
+/**
+ * The INI decides what exists, the config decides what is used, and those
+ * can disagree in silence. Breaking that silence is what this command is
+ * for: a hook asked for and not installed is normal, and worth saying.
+ */
+it('reports what the native extension actually installed', function () {
+    $native = new FakeNativeRuntime;
+    $native->status['hook_detail'] = [
+        'pdo' => ['requested' => true, 'installed' => 2, 'unavailable' => 0, 'active' => true],
+        'redis' => ['requested' => true, 'installed' => 0, 'unavailable' => 2, 'active' => false],
+    ];
+
+    $this->app->instance(NativeRuntime::class, $native);
+
+    Artisan::call('telemetry:doctor');
+    $output = Artisan::output();
+
+    expect($output)
+        ->toContain('OK — cbox_telemetry 0.1.0')
+        ->toContain('CPU time')
+        ->toContain('pdo (unavailable: redis)')
+        ->toContain('armed');
+});
+
+it('warns when crash records are written but nothing drains them', function () {
+    $this->app->instance(NativeRuntime::class, new FakeNativeRuntime);
+    config()->set('telemetry.native.crashes', false);
+
+    Artisan::call('telemetry:doctor');
+
+    expect(Artisan::output())->toContain('nothing drains them');
+});
+
+it('reports the native runtime as disabled when turned off in config', function () {
+    $this->app->instance(NativeRuntime::class, new FakeNativeRuntime);
+    config()->set('telemetry.native.enabled', false);
+
+    Artisan::call('telemetry:doctor');
+
+    expect(Artisan::output())->toContain('Native runtime')->toContain('disabled in config');
 });
 
 it('reports profiling as disabled when turned off in config', function () {

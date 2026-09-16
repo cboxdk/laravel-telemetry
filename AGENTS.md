@@ -21,6 +21,9 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
 - `src/Exporters/` — Prometheus renderer (scrape-time), OTLP http/json on raw curl
 - `src/Instrumentation/` — queue/query/command hooks; `Http/Middleware/TraceRequest` for requests
 - `src/Logging/TelemetryLogHandler.php` — Monolog → OTLP log records
+- `src/Native/` — the optional `cbox_telemetry` extension (cboxdk/telemetry-native):
+  runtime seam (`Contracts\NativeRuntime`), unit-of-work bracketing, result parsing,
+  reporting, crash drain. Units never nest — `NativeProfiler` enforces it
 - `src/Testing/TelemetryFake.php` — the `Telemetry::fake()` double
 
 ## Invariants — do not break these
@@ -43,7 +46,12 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
    no providers booted.
 7. **One naming vocabulary**: OTel semantic conventions
    (`[a-z][a-z0-9._]*`). Prometheus names are derived, never stored.
-8. OTLP JSON: hex ids, int64 as strings, integer enums, lowerCamelCase.
+8. **A native unit of work never nests.** `cbox_telemetry` abandons the
+   outer unit on a second `begin()`, so `Native\NativeProfiler` refuses one:
+   the outermost wins, and commands that host their own units (`queue:work`,
+   `schedule:run`, …) open none. Never run the native profiler and excimer
+   together. See `docs/decisions/0002-native-unit-of-work-ownership.md`.
+9. OTLP JSON: hex ids, int64 as strings, integer enums, lowerCamelCase.
    Histograms: non-cumulative bucket counts + overflow slot (Prometheus
    renderer accumulates at render time).
 

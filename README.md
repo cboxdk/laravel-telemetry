@@ -60,6 +60,10 @@ spec-stable HTTP JSON.
   plus token-gated source-map upload for symbolicated JS stack traces
 - ✅ Error tracking flow: the trace id ties Sentry/Flare issues, support
   cases and the trace waterfall together automatically
+- ✅ Optional native depth via
+  [`cboxdk/telemetry-native`](https://github.com/cboxdk/telemetry-native) —
+  CPU profiles with a confidence figure, exact `pdo.connect`/`curl.exec`
+  timing, and a crash record correlated to the trace the process died in
 - ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
   guidelines, `llms.txt` and an agent guide — your AI assistant follows the
   conventions out of the box

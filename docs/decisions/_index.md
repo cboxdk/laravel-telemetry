@@ -11,3 +11,4 @@ the package, the context that forced it, and what it costs. The invariants
 in `AGENTS.md` are the short form; these are the reasoning.
 
 - **[0001 — Metric state on single-process runtimes](0001-metric-state-on-single-process-runtimes.md)** — why invariant #3 is about *shared writers*, not about avoiding process memory, and why NativePHP targets get a SQLite store
+- **[0002 — Who owns a native unit of work](0002-native-unit-of-work-ownership.md)** — why the outermost unit wins, why workers and schedulers open none, and why two statistical profilers never run together

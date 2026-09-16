@@ -50,7 +50,8 @@
     "suggest": {
         "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans.",
         "ext-apcu": "Required when using the apcu metric store.",
-        "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export.",
+        "ext-cbox_telemetry": "Native runtime depth via cboxdk/telemetry-native (pie install cboxdk/telemetry-native): CPU profiles with a confidence figure, exact pdo.connect/curl.exec timing, GC counters, and crash records correlated to the trace the process died in.",
+        "ext-excimer": "CPU profiling for slow requests/jobs (telemetry.instrument.profiling) — a 'top functions by sample count' event, not a full pprof export. The fallback profiler: cbox_telemetry is used instead where both are installed.",
         "ext-pdo_sqlite": "Required when using the sqlite metric store or spool (NativePHP mobile/desktop).",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
         "geoip2/geoip2": "Resolve geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",

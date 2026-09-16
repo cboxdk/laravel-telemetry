@@ -13,4 +13,5 @@ weight: 6
 - **[Security](security.md)** — Keeping telemetry from leaking what it shouldn't
 - **[Error tracking & support flow](error-tracking.md)** — Correlate Sentry/Flare issues, support cases and traces via the trace id
 - **[Browser tracing (RUM)](browser-tracing.md)** — Optional frontend span ingest — end-to-end distributed tracing from the browser through your backend
+- **[Native runtime](native-runtime.md)** — The optional `cbox_telemetry` extension: CPU profiles, connection timing and crash records
 - **[Analytics](analytics.md)** — Observability-grade web analytics on the telemetry you already collect

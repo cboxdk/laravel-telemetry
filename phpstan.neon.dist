@@ -2,6 +2,10 @@ parameters:
     paths:
         - src
 
+    # The optional cbox_telemetry extension is not installed on CI.
+    scanFiles:
+        - stubs/cbox_telemetry.php
+
     level: 9
 
     treatPhpDocTypesAsCertain: false

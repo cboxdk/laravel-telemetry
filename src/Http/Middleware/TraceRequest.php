@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Http\Middleware;
 
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NativeReporter;
+use Cbox\Telemetry\Native\NativeUnit;
 use Cbox\Telemetry\Support\AnalyticsIdentity;
 use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\CampaignAttribution;
@@ -43,6 +46,8 @@ final class TraceRequest
 
     private const PROFILE_KEY = 'cbox.telemetry.profile';
 
+    private const NATIVE_KEY = 'cbox.telemetry.native';
+
     /** Memory-peak buckets: 4 MB … 1 GB. */
     private const MEMORY_BUCKETS = [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824];
 
@@ -66,7 +71,10 @@ final class TraceRequest
      *
      * @see Redactor::parameterIsCredential()
      */
-    public function __construct(private readonly TelemetryManager $telemetry) {}
+    public function __construct(
+        private readonly TelemetryManager $telemetry,
+        private readonly NativeProfiler $native,
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -135,7 +143,20 @@ final class TraceRequest
                 $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
             }
 
-            if (config('telemetry.instrument.profiling', true) && $span->sampled) {
+            // The native unit of work: CPU profile, connection/cURL timing,
+            // runtime counters, and the trace context a crash record is
+            // correlated by. Under cbox_telemetry.auto it is already open and
+            // this call adopts it — which is how the profile comes to cover
+            // the bootstrap a middleware could never see.
+            $unit = $this->native->begin('http', $span);
+
+            if ($unit !== null) {
+                $request->attributes->set(self::NATIVE_KEY, $unit);
+            }
+
+            // ext-excimer is the fallback, not a second opinion: two samplers
+            // running at once mostly measure each other.
+            if ($unit === null && config('telemetry.instrument.profiling', true) && $span->sampled) {
                 $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
                     Cast::float(config('telemetry.profiling.period'), 0.001),
                 ));
@@ -356,6 +377,15 @@ final class TraceRequest
                     'process.memory.rss_peak_bytes' => $measured['rssPeakBytes'],
                     'process.cpu.utilization' => $measured['cpuUtilization'],
                 ], static fn ($value) => $value !== null));
+            }
+
+            // Before end(): the operation aggregates and counters are
+            // attributes of THIS span, and a span that has ended has no
+            // duration to decide anything by either.
+            $unit = $request->attributes->get(self::NATIVE_KEY);
+
+            if ($unit instanceof NativeUnit && ($result = $unit->finish()) !== null) {
+                NativeReporter::report($this->telemetry, $result, $span, ['http.route' => $route]);
             }
 
             $span->end();
@@ -823,6 +853,7 @@ final class TraceRequest
         $this->telemetry->event('profile.captured', [
             'http.route' => Cast::string($labels['http.route'] ?? null),
             'duration_ms' => round($durationMs, 2),
+            'profile.source' => 'excimer',
             'profile.top_functions' => json_encode($top, JSON_UNESCAPED_SLASHES) ?: '[]',
         ]);
     }

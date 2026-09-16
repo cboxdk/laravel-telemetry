@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\Spool;
@@ -43,6 +44,7 @@ final class DoctorCommand extends Command
         $this->checkCacheCollision();
         $this->checkRedaction();
         $this->checkProfiling();
+        $this->checkNative();
         $healthy = $this->checkPrometheus() && $healthy;
         $healthy = $this->checkOtlp($telemetry) && $healthy;
         $healthy = $this->checkSpool($spool) && $healthy;
@@ -255,13 +257,123 @@ final class DoctorCommand extends Command
             return;
         }
 
+        $native = $this->laravel->make(NativeRuntime::class);
+
+        if ($native->available() && Cast::bool(config('telemetry.native.profile'), true)) {
+            $this->components->twoColumnDetail('CPU profiling', '<fg=green>OK — cbox_telemetry (native)</>');
+
+            return;
+        }
+
         if (extension_loaded('excimer')) {
             $this->components->twoColumnDetail('CPU profiling', '<fg=green>OK — ext-excimer loaded</>');
 
             return;
         }
 
-        $this->components->twoColumnDetail('CPU profiling', 'off — ext-excimer not installed (optional)');
+        $this->components->twoColumnDetail('CPU profiling', 'off — no profiler extension installed (optional)');
+    }
+
+    /**
+     * The native runtime layer: what the extension has actually installed,
+     * which is not the same question as what this package asked for. The INI
+     * decides what exists; the config decides what is used; those can
+     * disagree silently, and silence is what this command exists to break.
+     */
+    private function checkNative(): void
+    {
+        if (! Cast::bool(config('telemetry.native.enabled'), true)) {
+            $this->components->twoColumnDetail('Native runtime', 'disabled in config');
+
+            return;
+        }
+
+        $runtime = $this->laravel->make(NativeRuntime::class);
+
+        if (! $runtime->available()) {
+            $this->components->twoColumnDetail(
+                'Native runtime',
+                'off — cbox_telemetry not installed (optional: pie install cboxdk/telemetry-native)',
+            );
+
+            return;
+        }
+
+        $status = $runtime->status();
+
+        $this->components->twoColumnDetail(
+            'Native runtime',
+            '<fg=green>OK — cbox_telemetry '.Cast::string($runtime->version(), 'unknown').'</>',
+        );
+
+        // Wall-clock sampling is the macOS development fallback: it answers a
+        // different question than a CPU profile, and reading one as the other
+        // is how time spent waiting gets optimised as time spent computing.
+        $clock = Cast::bool($status['timer_cpu_time'] ?? null, false) ? 'CPU time' : 'wall clock';
+
+        $this->components->twoColumnDetail('  profiler', sprintf(
+            '%s — %s, %s, period %d µs',
+            Cast::string($status['profiler_status'] ?? null, 'unknown'),
+            Cast::string($status['timer_backend'] ?? null, 'unknown'),
+            $clock,
+            Cast::int(Cast::stringKeyedArray($status['limits'] ?? null)['period_us'] ?? null),
+        ));
+
+        $this->components->twoColumnDetail('  operation hooks', $this->nativeHooks($status));
+
+        $recorder = Cast::string($status['crash_recorder'] ?? null, 'unknown');
+
+        $this->components->twoColumnDetail(
+            '  crash recorder',
+            $recorder === 'armed'
+                ? '<fg=green>armed</> — '.Cast::string($status['crash_path'] ?? null, 'no sink yet')
+                : "<fg=yellow>{$recorder}</>",
+        );
+
+        if (! Cast::bool(config('telemetry.native.crashes'), true)) {
+            $this->components->warn('telemetry.native.crashes is off: records are written but nothing drains them.');
+        }
+
+        // Whether auto=1 is right depends on the SAPI this php.ini serves,
+        // which a console command cannot see. Report it and say what it
+        // means: under FPM it buys the bootstrap, in a worker it opens one
+        // unit per PROCESS and describes nothing.
+        if (Cast::bool($status['auto'] ?? null, false)) {
+            $this->components->twoColumnDetail(
+                '  automatic units',
+                'on — right for FPM (covers the bootstrap), wrong for workers and Octane',
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $status
+     */
+    private function nativeHooks(array $status): string
+    {
+        $detail = Cast::stringKeyedArray($status['hook_detail'] ?? null);
+
+        if ($detail === []) {
+            return Cast::string($status['hooks'] ?? null, 'none');
+        }
+
+        $active = [];
+        $missing = [];
+
+        foreach ($detail as $name => $group) {
+            $group = Cast::stringKeyedArray($group);
+
+            if (Cast::bool($group['active'] ?? null, false)) {
+                $active[] = $name;
+            } elseif (Cast::bool($group['requested'] ?? null, false)) {
+                // Asked for, not installed — the target class or function
+                // is not there (no ext-redis, say). Normal, worth saying.
+                $missing[] = $name;
+            }
+        }
+
+        return ($active === [] ? 'none active' : implode(', ', $active))
+            .($missing === [] ? '' : ' (unavailable: '.implode(', ', $missing).')');
     }
 
     private function checkOtlp(TelemetryManager $telemetry): bool

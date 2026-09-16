@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NativeReporter;
+use Cbox\Telemetry\Native\NativeUnit;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
@@ -52,6 +55,9 @@ final class QueueInstrumentation implements ManagesRequestState
     /** @var array<int, CpuProfiler> keyed by span object id */
     private array $jobProfiles = [];
 
+    /** @var array<int, NativeUnit> keyed by span object id */
+    private array $jobUnits = [];
+
     public function __construct(private readonly Container $container)
     {
         $this->completedAttempts = new \WeakMap;
@@ -63,6 +69,11 @@ final class QueueInstrumentation implements ManagesRequestState
     private function telemetry(): TelemetryManager
     {
         return $this->container->make(TelemetryManager::class);
+    }
+
+    private function native(): NativeProfiler
+    {
+        return $this->container->make(NativeProfiler::class);
     }
 
     /**
@@ -263,7 +274,23 @@ final class QueueInstrumentation implements ManagesRequestState
                 $this->jobUsage[spl_object_id($span)] = ResourceUsage::start();
             }
 
-            if ($event->connectionName !== 'sync' && config('telemetry.instrument.profiling', true) && $span->sampled) {
+            // Sync jobs run inside a request that is already a unit of work.
+            // Opening a second one would abandon the outer unit in the C, so
+            // the profiler refuses it — the guard here just skips the call.
+            if ($event->connectionName !== 'sync') {
+                $unit = $this->native()->begin('queue', $span);
+
+                if ($unit !== null) {
+                    $this->jobUnits[spl_object_id($span)] = $unit;
+                }
+            }
+
+            // ext-excimer is the fallback for hosts without the extension.
+            if ($event->connectionName !== 'sync'
+                && ! isset($this->jobUnits[spl_object_id($span)])
+                && config('telemetry.instrument.profiling', true)
+                && $span->sampled
+            ) {
                 $this->jobProfiles[spl_object_id($span)] = CpuProfiler::start(
                     Cast::float(config('telemetry.profiling.period'), 0.001),
                 );
@@ -419,6 +446,17 @@ final class QueueInstrumentation implements ManagesRequestState
                         ->record($measured['cpuTimeMs'], $labels);
                 }
 
+                // Before end() — see the ordering note in TraceRequest.
+                $unit = $this->jobUnits[spl_object_id($span)] ?? null;
+                unset($this->jobUnits[spl_object_id($span)]);
+
+                if ($unit !== null && ($result = $unit->finish()) !== null) {
+                    NativeReporter::report($this->telemetry(), $result, $span, [
+                        'job.name' => $job,
+                        'queue' => $queue ?? 'default',
+                    ]);
+                }
+
                 $span->end();
 
                 $profile = $this->jobProfiles[spl_object_id($span)] ?? null;
@@ -511,6 +549,7 @@ final class QueueInstrumentation implements ManagesRequestState
             'job.name' => $job,
             'queue' => $queue,
             'duration_ms' => round($durationMs, 2),
+            'profile.source' => 'excimer',
             'profile.top_functions' => json_encode($top, JSON_UNESCAPED_SLASHES) ?: '[]',
         ]);
     }
@@ -520,5 +559,11 @@ final class QueueInstrumentation implements ManagesRequestState
         $this->jobSpans = [];
         $this->jobUsage = [];
         $this->jobProfiles = [];
+
+        foreach ($this->jobUnits as $unit) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+
+        $this->jobUnits = [];
     }
 }
