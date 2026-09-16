@@ -1041,13 +1041,19 @@ class TelemetryServiceProvider extends ServiceProvider
 
             $telemetry->flush();
 
-            // And once more, after everything else shutting down has had its
-            // turn. An application that awaits its own outstanding HTTP work
-            // in a shutdown callback of its own registers that callback later
-            // than this one, so it runs later — and a call that completed
-            // there ended up buffered with nothing left to flush it. A
-            // function registered DURING shutdown is appended to the queue, so
-            // this runs after those callbacks rather than before them.
+            // And once more, after the callbacks already queued. An
+            // application that awaits its own outstanding HTTP work in a
+            // shutdown callback registers it later than this one, so it runs
+            // later — and a call that completed there had nothing left to
+            // flush it.
+            //
+            // What PHP actually promises, and it is narrower than "last":
+            // a function registered DURING shutdown is APPENDED to the current
+            // queue, so it runs after everything already in it. It does not
+            // reserve the final position. A callback that itself registers
+            // another one to do the awaiting still lands behind this, and an
+            // `exit()` anywhere earlier in the queue stops this from running
+            // at all. Both leave the call buffered, as they did before.
             register_shutdown_function(static function () use ($telemetry): void {
                 FailSafe::guard(static fn () => $telemetry->flush());
             });
