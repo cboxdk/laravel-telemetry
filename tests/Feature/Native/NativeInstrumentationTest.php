@@ -385,3 +385,95 @@ it('closes a unit for an attempt that never reported an outcome', function () {
 
     expect($this->native->begun)->toHaveCount(2);
 });
+
+/**
+ * SyncQueue dispatches JobAttempted too, in a finally. A backstop that
+ * swept everything open therefore closed the OUTER job's unit the moment
+ * that job dispatched a sync child — mid-flight, discarding measurements
+ * the outer job was still accumulating.
+ */
+it('leaves the outer job unit alone when a sync child finishes', function () {
+    $outer = Mockery::mock(Job::class);
+    $outer->shouldReceive('resolveName')->andReturn('App\Jobs\OuterJob');
+    $outer->shouldReceive('getQueue')->andReturn('default');
+    $outer->shouldReceive('attempts')->andReturn(1);
+    $outer->shouldReceive('payload')->andReturn([]);
+
+    $child = Mockery::mock(Job::class);
+    $child->shouldReceive('resolveName')->andReturn('App\Jobs\SyncChildJob');
+    $child->shouldReceive('getQueue')->andReturn('sync');
+    $child->shouldReceive('attempts')->andReturn(1);
+    $child->shouldReceive('payload')->andReturn([]);
+
+    app('queue');
+    $events = app('events');
+
+    $events->dispatch(new JobProcessing('redis', $outer));
+
+    // The sync child runs inside the outer job and closes itself.
+    $events->dispatch(new JobProcessing('sync', $child));
+    $events->dispatch(new JobProcessed('sync', $child));
+    $events->dispatch(new JobAttempted('sync', $child));
+
+    expect($this->native->finished)->toBe([]);
+
+    $events->dispatch(new JobProcessed('redis', $outer));
+    $events->dispatch(new JobAttempted('redis', $outer));
+
+    expect($this->native->finished)->toHaveCount(1);
+});
+
+/**
+ * A unit object can outlive its hold on the latch: a fork leaves copies in
+ * other owners' hands, and an Octane reset drops the profiler's reference
+ * while something else still holds the object. A stale discard() must not
+ * release a latch that now belongs to a live unit.
+ */
+it('lets no stale unit release a live unit latch', function () {
+    $profiler = $this->app->make(NativeProfiler::class);
+
+    $first = $profiler->begin('http');
+    $profiler->flushRequestState();
+
+    $second = $profiler->begin('queue');
+
+    // The reset already closed the first one; a second discard must be inert.
+    $first?->discard();
+
+    expect($second)->not->toBeNull()
+        ->and($profiler->begin('command'))->toBeNull()
+        ->and($second?->finish())->not->toBeNull();
+});
+
+/**
+ * With cbox_telemetry.enabled=0 the C returns from MINIT before it touches
+ * the profiler, so profiler_enabled keeps its INI default of true while
+ * nothing at all is running. Read alone, it silenced excimer on a host that
+ * had deliberately switched the extension off.
+ */
+it('reports no native profiler when the extension is switched off in php.ini', function () {
+    $native = new FakeNativeRuntime;
+    $native->status['enabled'] = false;
+
+    $this->app->instance(NativeRuntime::class, $native);
+    $this->app->forgetInstance(NativeProfiler::class);
+
+    expect($this->app->make(NativeProfiler::class)->profiles())->toBeFalse();
+});
+
+/**
+ * Error spans escape sampling (traces.always_sample_errors), and a failing
+ * slow request is the one whose profile is worth most.
+ */
+it('keeps the profile of a failing request even when the trace is unsampled', function () {
+    $this->app->instance(NativeRuntime::class, $this->native = FakeNativeRuntime::withProfile());
+    $this->app->forgetInstance(NativeProfiler::class);
+
+    config()->set('telemetry.profiling.min_duration_ms', 0);
+
+    Route::middleware(Sample::never())->get('/failing-native', fn () => response('boom', 500));
+
+    $this->get('/failing-native')->assertStatus(500);
+
+    expect($this->native->finished[0]['profile'])->toBeTrue();
+});

@@ -70,13 +70,19 @@ final class Tracer
      * decision.
      */
     /**
-     * The decision in force for the ACTIVE trace right now: a per-route
-     * override if one was made, otherwise the head decision — which is
-     * taken lazily, so a trace that has not started yet reads as sampled.
+     * The sampling POLICY in force for the active trace right now: a
+     * per-route override if one was made, otherwise the head decision —
+     * which is taken lazily, so a trace that has not started yet reads as
+     * sampled.
      *
-     * This is the decision `finish()` applies when it buffers a span, and
-     * the one anything deciding whether to KEEP expensive per-trace work
-     * (a CPU profile, say) has to ask at the end rather than at the start.
+     * Ask it at the END of a unit of work, not at the start, when deciding
+     * whether to keep expensive per-trace work (a CPU profile, say): the
+     * decision can change mid-request.
+     *
+     * It is the policy, not a guarantee about any particular span. An ERROR
+     * span is still exported from an unsampled trace when
+     * `traces.always_sample_errors` is on, so a caller that cares about a
+     * failing span has to check its status as well.
      */
     public function currentlySampled(): bool
     {

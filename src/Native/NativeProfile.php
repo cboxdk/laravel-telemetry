@@ -116,7 +116,12 @@ final readonly class NativeProfile
      *   or arena full).
      *
      * What is left is the share of this profile that means what it appears
-     * to mean.
+     * to mean — as a FLOOR, not an exact fraction. The counters can overlap:
+     * a stack walk that is dropped takes its whole weight with it, overrun
+     * ticks included, and the aggregates cannot say how much. Subtracting
+     * both therefore charges some ticks twice, which understates a profile
+     * rather than flattering it. That is the right direction for a number
+     * whose job is to stop someone acting on arithmetic.
      */
     public function confidence(): float
     {

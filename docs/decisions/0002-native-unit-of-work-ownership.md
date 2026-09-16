@@ -91,15 +91,25 @@ attach the answer to.
 
 An adopted automatic unit was already running before any of this code
 existed, so its elapsed time is measured from the SAPI's request start
-(`REQUEST_TIME_FLOAT`, per request under both FPM and Octane) rather than
-from the adoption. Otherwise an 800 ms bootstrap followed by 10 ms of
-routing reads as a 10 ms unit, and the threshold discards exactly the
-profiles automatic mode exists to collect.
+(`REQUEST_TIME_FLOAT`) rather than from the adoption, and bounded by the
+extension's own `auto_max_ms`. Otherwise an 800 ms bootstrap followed by
+10 ms of routing reads as a 10 ms unit, and the threshold discards exactly
+the profiles automatic mode exists to collect.
+
+That anchor is only consulted when the extension reports an automatic unit
+waiting to be adopted, which is why a long-running worker cannot inherit a
+process-age offset from it: `auto` does not belong in a worker, and with
+`auto=0` there is never a unit to adopt.
 
 **6. Whether to keep a profile is asked at the end.** The sampling decision
 in force at `finish()` is the one that counts: a per-route `Sample::never()`
 drops every span of the trace, and a profile with no trace to line it up
 against is not worth materialising.
+
+With one exception, because the package has one: an error span escapes
+sampling (`traces.always_sample_errors`). A failing slow request is the one
+whose profile is worth most, so a unit whose span ended in error keeps its
+profile whatever the sampling policy says.
 
 ## Consequences
 

@@ -157,7 +157,10 @@ final class ScheduleInstrumentation
 
             // Before end() — see the ordering note in TraceRequest.
             if ($running['unit'] !== null) {
-                $result = $running['unit']->finish($this->telemetry()->tracer()->currentlySampled());
+                $result = $running['unit']->finish(
+                    $this->telemetry()->tracer()->currentlySampled()
+                        || $span->status() === SpanStatus::Error,
+                );
 
                 if ($result !== null) {
                     NativeReporter::report($this->telemetry(), $result, $span, ['schedule.task' => $running['name']]);

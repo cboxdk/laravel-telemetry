@@ -27,7 +27,9 @@ final class NativeUnit
     private bool $finished = false;
 
     /**
-     * @param  Closure(): void  $onFinish  releases the one-unit-at-a-time latch
+     * @param  Closure(self): void  $onFinish  releases the one-unit-at-a-time
+     *                                         latch, but only if this unit is
+     *                                         the one still holding it
      */
     public function __construct(
         private readonly NativeRuntime $runtime,
@@ -100,6 +102,6 @@ final class NativeUnit
     {
         $this->finished = true;
 
-        ($this->onFinish)();
+        ($this->onFinish)($this);
     }
 }

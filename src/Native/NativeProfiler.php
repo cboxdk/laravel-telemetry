@@ -81,7 +81,18 @@ final class NativeProfiler implements ManagesRequestState
 
         // Decided at module startup (timer backend, INI, platform), so it is
         // read once per process rather than once per unit.
-        return $this->profilerEnabled ??= Cast::bool($this->runtime->status()['profiler_enabled'] ?? null, false);
+        //
+        // BOTH flags: with `cbox_telemetry.enabled=0` the C returns from
+        // MINIT before it touches the profiler, so `profiler_enabled` keeps
+        // its INI default of true while nothing whatsoever is running. Read
+        // alone it would report a sampler that does not exist and silence
+        // excimer on a host that had deliberately switched the extension off.
+        return $this->profilerEnabled ??= FailSafe::guard(function (): bool {
+            $status = $this->runtime->status();
+
+            return Cast::bool($status['enabled'] ?? null, false)
+                && Cast::bool($status['profiler_enabled'] ?? null, false);
+        }) ?? false;
     }
 
     /**
@@ -140,9 +151,17 @@ final class NativeProfiler implements ManagesRequestState
                 includeStacks: Cast::bool(config('telemetry.native.stacks'), false),
                 topFunctions: Cast::int(config('telemetry.profiling.top_functions'), 20),
                 maxStackNodes: Cast::int(config('telemetry.native.max_stack_nodes'), 2048),
-                onFinish: function (): void {
-                    $this->active = null;
-                    $this->activePid = null;
+                // Identity-checked: a unit object can outlive its hold on
+                // the latch — a fork leaves copies in other owners' hands,
+                // and an Octane reset drops the profiler's reference while
+                // something else still holds the object. Either way the
+                // stale unit's discard() must not release a latch that now
+                // belongs to a live one.
+                onFinish: function (NativeUnit $finished): void {
+                    if ($this->active === $finished) {
+                        $this->active = null;
+                        $this->activePid = null;
+                    }
                 },
             );
         });
@@ -231,8 +250,13 @@ final class NativeProfiler implements ManagesRequestState
 
         $elapsed = microtime(true) * 1000 - $startedAt * 1000;
 
-        // Bounded the same way the bootstrap span is: a stale anchor must
-        // not turn every fast request into a retained profile.
-        return $elapsed > 0 && $elapsed < 60_000 ? $elapsed : 0.0;
+        // Bounded by the extension's OWN limit on how long an automatic unit
+        // may sample. A fixed minute was this package inventing a second,
+        // stricter deadline: on a host configured for a two-minute cap, a
+        // 61-second bootstrap — exactly the case worth profiling — read as
+        // zero and lost its profile to the tail threshold.
+        $cap = Cast::float(Cast::stringKeyedArray($status['limits'] ?? null)['auto_max_ms'] ?? null, 60_000.0);
+
+        return $elapsed > 0 && $elapsed <= max(1_000.0, $cap) ? $elapsed : 0.0;
     }
 }

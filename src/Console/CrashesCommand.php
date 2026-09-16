@@ -48,7 +48,15 @@ final class CrashesCommand extends Command
             $this->components->warn("Crash recorder: {$recorder} — records are not being written.");
         }
 
-        $records = $reporter->drain(max(1, (int) $this->option('max')));
+        // Flush first, then drain no more than the event buffer can hold.
+        // Otherwise a drain big enough to fill the buffer trips the
+        // manager's own overflow flush, which swallows its report — and a
+        // rejection there is a consumed crash record nobody hears about.
+        $buffer = Cast::int(config('telemetry.events.max_buffer'), 5000);
+
+        FailSafe::guard(static fn () => $telemetry->flush());
+
+        $records = $reporter->drain(max(1, min((int) $this->option('max'), $buffer - 1)));
 
         if ($records === []) {
             $this->components->info('No crash records pending.');

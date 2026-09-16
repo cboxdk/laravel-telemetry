@@ -153,3 +153,19 @@ it('fails the crash command when the batch was not accepted', function () {
         ->expectsOutputToContain('that data is gone')
         ->assertFailed();
 });
+
+/**
+ * A drain big enough to fill the event buffer trips the manager's own
+ * overflow flush, which swallows its report — and a rejection there is a
+ * consumed crash record nobody hears about. The drain is bounded by what
+ * the buffer can hold, so the command's own flush is the one that reports.
+ */
+it('never drains more crash records than the event buffer can hold', function () {
+    config()->set('telemetry.events.max_buffer', 2);
+
+    $this->native->crashes = [crashRecord(), crashRecord(), crashRecord()];
+
+    $this->artisan('telemetry:crashes')->assertSuccessful();
+
+    expect($this->native->crashes)->toHaveCount(2);
+});

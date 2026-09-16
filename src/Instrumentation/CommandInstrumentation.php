@@ -103,7 +103,10 @@ final class CommandInstrumentation implements ManagesRequestState
 
             // Before end() — see the ordering note in TraceRequest.
             if ($unit !== null) {
-                $result = $unit->finish($this->telemetry()->tracer()->currentlySampled());
+                $result = $unit->finish(
+                    $this->telemetry()->tracer()->currentlySampled()
+                        || $span->status() === SpanStatus::Error,
+                );
 
                 if ($result !== null) {
                     NativeReporter::report($this->telemetry(), $result, $span, [

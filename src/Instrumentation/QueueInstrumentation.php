@@ -59,6 +59,14 @@ final class QueueInstrumentation implements ManagesRequestState
     /** @var array<int, NativeUnit> keyed by span object id */
     private array $jobUnits = [];
 
+    /**
+     * Which job object owns which open unit, so the backstop below closes
+     * the attempt it is told about and not somebody else's.
+     *
+     * @var array<int, int> job object id => span object id
+     */
+    private array $unitOwners = [];
+
     public function __construct(private readonly Container $container)
     {
         $this->completedAttempts = new \WeakMap;
@@ -194,8 +202,13 @@ final class QueueInstrumentation implements ManagesRequestState
             // metrics are deliberately left alone here — an attempt with no
             // outcome has no outcome to count.
             if (class_exists(JobAttempted::class)) {
-                $events->listen(JobAttempted::class, function () {
-                    $this->closeAbandonedUnits();
+                $events->listen(JobAttempted::class, function ($event) {
+                    // Scoped to the job it is telling us about. A sweep of
+                    // everything open would close the OUTER job's unit the
+                    // moment a job dispatched a sync child, because SyncQueue
+                    // dispatches this event too — mid-flight, discarding
+                    // measurements the outer job was still accumulating.
+                    $this->closeAbandonedUnit($event->job);
                 });
             }
 
@@ -301,6 +314,7 @@ final class QueueInstrumentation implements ManagesRequestState
 
                 if ($unit !== null) {
                     $this->jobUnits[spl_object_id($span)] = $unit;
+                    $this->unitOwners[spl_object_id($event->job)] = spl_object_id($span);
                 }
             }
 
@@ -474,7 +488,10 @@ final class QueueInstrumentation implements ManagesRequestState
                 unset($this->jobUnits[spl_object_id($span)]);
 
                 if ($unit !== null) {
-                    $result = $unit->finish($this->telemetry()->tracer()->currentlySampled());
+                    $result = $unit->finish(
+                        $this->telemetry()->tracer()->currentlySampled()
+                            || $span->status() === SpanStatus::Error,
+                    );
 
                     if ($result !== null) {
                         NativeReporter::report($this->telemetry(), $result, $span, [
@@ -560,13 +577,37 @@ final class QueueInstrumentation implements ManagesRequestState
     }
 
     /**
-     * Close any native unit whose attempt never reached a completion event,
-     * or whose completion threw before it got that far.
+     * Close the native unit of an attempt that never reached a completion
+     * event, or whose completion threw before it got that far.
+     */
+    private function closeAbandonedUnit(object $job): void
+    {
+        $owner = spl_object_id($job);
+        $spanId = $this->unitOwners[$owner] ?? null;
+        unset($this->unitOwners[$owner]);
+
+        if ($spanId === null) {
+            return;
+        }
+
+        $unit = $this->jobUnits[$spanId] ?? null;
+        unset($this->jobUnits[$spanId]);
+
+        if ($unit !== null) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+    }
+
+    /**
+     * Everything still open, for an Octane/NativePHP worker reset where the
+     * requests that opened them are gone.
      */
     private function closeAbandonedUnits(): void
     {
         $units = $this->jobUnits;
+
         $this->jobUnits = [];
+        $this->unitOwners = [];
 
         foreach ($units as $unit) {
             FailSafe::guard(static fn () => $unit->discard());

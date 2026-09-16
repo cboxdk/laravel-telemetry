@@ -74,7 +74,9 @@ middleware can see, and often most of it.
 The tail threshold counts the adopted time too: a unit that spent 800 ms in
 the bootstrap and 10 ms in routing is an 810 ms unit, and keeps its profile
 under the default 500 ms. Timing it from the adoption would have thrown away
-precisely the profiles automatic mode exists to collect.
+precisely the profiles automatic mode exists to collect. The adopted time is
+measured from the SAPI's request start and bounded by the extension's own
+`auto_max_ms`, which is the same limit it applies to the unit itself.
 
 It is wrong everywhere a process serves more than one unit. `RINIT` fires
 once per *process* in a queue worker or an Octane server, so an automatic
@@ -139,7 +141,10 @@ accounted for (`sample_count + dropped`):
 - `dropped` were observed but had nowhere to go (frame table, trie or arena
   full).
 
-So you can tell "98% of this was sampled where it says" from "most of this
+It is a floor rather than an exact fraction, because those counters can
+overlap — a dropped stack walk takes its whole weight with it, overruns
+included, and the aggregates cannot say how much. The error is always in
+the direction of understating a profile. So you can tell "98% of this was sampled where it says" from "most of this
 is arithmetic because the period is finer than the kernel can deliver". A
 `HZ=250` kernel — the Debian/Ubuntu generic default — cannot deliver a 1 ms
 period at all, and will say so here rather than quietly inventing one.
@@ -199,11 +204,14 @@ Schedule::command('telemetry:flush')->everyMinute()->onOneServer();
 Schedule::command('telemetry:crashes')->everyFiveMinutes();   // every host
 ```
 
-**Every uid has its own sink.** The extension gives each uid a private
-`0700` subdirectory of `crash.dir`, and a drain reads only the directory of
-the user running it. A scheduler running as `deploy` will not see the
-records written by an FPM pool running as `www-data` — run the drain as the
-same user, or give each pool its own `cbox_telemetry.crash.dir`.
+**Every uid has its own sink, and only that uid can drain it.** The
+extension appends the effective uid to `crash.dir` as a private `0700`
+subdirectory, and a drain reads only its own uid's directory — a different
+`crash.dir` does not change that, it only moves the base. So a scheduler
+running as `deploy` cannot collect the records of an FPM pool running as
+`www-data`, whatever the paths say. Run the drain **as the user that wrote
+the records**: a `sudo -u www-data php artisan telemetry:crashes` cron entry,
+or one drain per pool user.
 
 **Something has to run.** If you scrape Prometheus and never run either
 command, nothing drains the sink and `runtime.crashes` stays at zero while
