@@ -49,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A queue attempt that reported no outcome leaked its span for the life of
+  the worker.** `Worker::handleJobException` dispatches
+  `JobReleasedAfterException` only for a job it released itself, so a job that
+  calls `$this->release()` and *then* throws produces none of the four events
+  this package closes an attempt on. Its span stayed on the tracer's context
+  stack: later spans were parented to a job that had long finished, and the
+  shutdown path ended it as an error that lasted until the process died.
+
+  Closed on `JobAttempted`, which Laravel dispatches in a `finally` for every
+  attempt. The span is ENDED rather than discarded — the job ran and threw,
+  and that is the trace worth having — with `queue.job.outcome = abandoned`
+  and an error status. No `queue.jobs.*` counter moves for it: the framework
+  reported no outcome, and folding these into `released` would put attempts it
+  never called released into the series alerts are built on.
+
 - **Config switches written as `0` or `1` in `.env` were ignored.** Laravel's
   `env()` converts `true`, `false`, `null` and `empty` to PHP values and leaves
   everything else a string, so `TELEMETRY_OTLP_COMPRESSION=0` reached config as

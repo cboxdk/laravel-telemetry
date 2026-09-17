@@ -47,6 +47,13 @@ use Throwable;
  */
 final class QueueInstrumentation implements ManagesRequestState
 {
+    /**
+     * An attempt Laravel announced no outcome for: a job that released or
+     * deleted itself and then threw. Real work, a real span — and no
+     * outcome, which is why it never reaches a `queue.jobs.*` counter.
+     */
+    private const OUTCOME_ABANDONED = 'abandoned';
+
     /** @var list<Span> */
     private array $jobSpans = [];
 
@@ -60,12 +67,13 @@ final class QueueInstrumentation implements ManagesRequestState
     private array $jobUnits = [];
 
     /**
-     * Which job object owns which open unit, so the backstop below closes
-     * the attempt it is told about and not somebody else's.
+     * The attempts still open, so the backstop below closes the one it is
+     * told about and not somebody else's — and can tell an attempt that
+     * reported an outcome from one that never did.
      *
      * @var array<int, int> job object id => span object id
      */
-    private array $unitOwners = [];
+    private array $attemptSpans = [];
 
     public function __construct(private readonly Container $container)
     {
@@ -192,23 +200,22 @@ final class QueueInstrumentation implements ManagesRequestState
             // Every other listener here is an attempt OUTCOME, and Laravel
             // has a path with no outcome at all: a job that releases itself
             // and then throws is neither processed, nor failed, nor released
-            // by the worker (Worker::handleJobException only dispatches
-            // JobReleasedAfterException for a job it released itself). The
-            // native unit would stay open, and the one-unit-at-a-time rule
-            // would then refuse every job for the rest of the worker's life.
+            // by the worker — `Worker::handleJobException` only dispatches
+            // JobReleasedAfterException for a job IT released
+            // (`! $job->isDeleted() && ! $job->isReleased() && ! $job->hasFailed()`).
+            // Its span stayed on the stack and in this map for the life of
+            // the worker, mis-parenting later spans and ending at shutdown as
+            // an error that lasted until the process died.
             //
-            // JobAttempted fires in a finally for every attempt, so it is the
-            // one place that can guarantee the unit is closed. Spans and
-            // metrics are deliberately left alone here — an attempt with no
-            // outcome has no outcome to count.
+            // JobAttempted fires in a `finally` for every attempt, so it is
+            // the one place that can guarantee an attempt is closed.
             if (class_exists(JobAttempted::class)) {
                 $events->listen(JobAttempted::class, function ($event) {
                     // Scoped to the job it is telling us about. A sweep of
-                    // everything open would close the OUTER job's unit the
+                    // everything open would close the OUTER job's attempt the
                     // moment a job dispatched a sync child, because SyncQueue
-                    // dispatches this event too — mid-flight, discarding
-                    // measurements the outer job was still accumulating.
-                    $this->closeAbandonedUnit($event->job);
+                    // dispatches this event too — mid-flight.
+                    $this->closeAbandonedAttempt($event->job, $event->connectionName);
                 });
             }
 
@@ -297,6 +304,7 @@ final class QueueInstrumentation implements ManagesRequestState
             );
 
             $this->jobSpans[] = $span;
+            $this->attemptSpans[spl_object_id($event->job)] = spl_object_id($span);
 
             $this->telemetry()->publishTraceContext();
 
@@ -314,7 +322,6 @@ final class QueueInstrumentation implements ManagesRequestState
 
                 if ($unit !== null) {
                     $this->jobUnits[spl_object_id($span)] = $unit;
-                    $this->unitOwners[spl_object_id($event->job)] = spl_object_id($span);
                 }
             }
 
@@ -457,8 +464,19 @@ final class QueueInstrumentation implements ManagesRequestState
             $labels = ['job.name' => $job, 'queue' => $queue ?? 'default'];
 
             if ($span = array_pop($this->jobSpans)) {
+                if (($owner = array_search(spl_object_id($span), $this->attemptSpans, true)) !== false) {
+                    unset($this->attemptSpans[$owner]);
+                }
+
                 if ($span->status() === SpanStatus::Unset) {
                     $span->setStatus($outcome === 'processed' ? SpanStatus::Ok : SpanStatus::Error);
+                }
+
+                if ($outcome === self::OUTCOME_ABANDONED) {
+                    // Why this span has no outcome: the framework announced
+                    // none. Worth saying on the span, where it is one
+                    // occurrence, rather than in a metric label.
+                    $span->setAttribute('queue.job.outcome', self::OUTCOME_ABANDONED);
                 }
 
                 $usage = $this->jobUsage[spl_object_id($span)] ?? null;
@@ -512,9 +530,17 @@ final class QueueInstrumentation implements ManagesRequestState
                     ->record($span->durationMs(), $labels);
             }
 
-            $this->telemetry()
-                ->counter("queue.jobs.{$outcome}", 'Queue job attempts by outcome')
-                ->inc(1, $labels);
+            // No counter for an attempt Laravel reported no outcome for.
+            // Folding it into `released` would put attempts the framework
+            // never called released into the series alerts are built on, and
+            // inventing a new outcome would say this package knows something
+            // it does not. The span carries it; `exceptions.reported` already
+            // counts the throw that caused it.
+            if ($outcome !== self::OUTCOME_ABANDONED) {
+                $this->telemetry()
+                    ->counter("queue.jobs.{$outcome}", 'Queue job attempts by outcome')
+                    ->inc(1, $labels);
+            }
         });
 
         if (! $sync) {
@@ -574,24 +600,67 @@ final class QueueInstrumentation implements ManagesRequestState
     }
 
     /**
-     * Close the native unit of an attempt that never reached a completion
-     * event, or whose completion threw before it got that far.
+     * Close an attempt that never reached a completion event — or whose
+     * completion threw before it got that far.
+     *
+     * The span is ENDED rather than discarded: the job ran, it threw, and
+     * that attempt is exactly the trace someone goes looking for. What it
+     * does not get is an outcome counter, because the framework reported no
+     * outcome.
      */
-    private function closeAbandonedUnit(object $job): void
+    private function closeAbandonedAttempt(object $job, string $connectionName): void
     {
         $owner = spl_object_id($job);
-        $spanId = $this->unitOwners[$owner] ?? null;
-        unset($this->unitOwners[$owner]);
+
+        // Already closed by an outcome event — every ordinary attempt, since
+        // JobAttempted fires after JobProcessed/JobFailed, not instead.
+        if (! isset($this->attemptSpans[$owner])) {
+            return;
+        }
+
+        if (method_exists($job, 'resolveName') && method_exists($job, 'getQueue')) {
+            $this->completeJob(
+                job: $job->resolveName(),
+                queue: $job->getQueue(),
+                outcome: self::OUTCOME_ABANDONED,
+                sync: $connectionName === 'sync',
+                attempt: $job,
+            );
+        }
+
+        // Still here means completeJob declined: the attempt was marked
+        // complete by an outcome event whose teardown then threw and was
+        // swallowed. Leave nothing open regardless.
+        $spanId = $this->attemptSpans[$owner] ?? null;
 
         if ($spanId === null) {
             return;
         }
+
+        unset($this->attemptSpans[$owner]);
 
         $unit = $this->jobUnits[$spanId] ?? null;
         unset($this->jobUnits[$spanId]);
 
         if ($unit !== null) {
             FailSafe::guard(static fn () => $unit->discard());
+        }
+
+        foreach ($this->jobSpans as $span) {
+            if (spl_object_id($span) !== $spanId) {
+                continue;
+            }
+
+            $this->jobSpans = array_values(array_filter(
+                $this->jobSpans,
+                static fn (Span $open): bool => spl_object_id($open) !== $spanId,
+            ));
+
+            // Discarded, not ended: its teardown already failed once, so
+            // whatever it would report about itself is not to be trusted.
+            FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
+
+            break;
         }
     }
 
@@ -604,7 +673,7 @@ final class QueueInstrumentation implements ManagesRequestState
         $units = $this->jobUnits;
 
         $this->jobUnits = [];
-        $this->unitOwners = [];
+        $this->attemptSpans = [];
 
         foreach ($units as $unit) {
             FailSafe::guard(static fn () => $unit->discard());
