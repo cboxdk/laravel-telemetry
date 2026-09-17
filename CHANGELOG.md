@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-17
+
 ### Added
 
 - **Support for [`cboxdk/telemetry-native`](https://github.com/cboxdk/telemetry-native)**,
@@ -2044,7 +2046,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/cboxdk/laravel-telemetry/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.0.0...v2.1.0
