@@ -285,7 +285,7 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.redis_ignore_connections` | — | `null` → auto (metric-store + spool connections); set a list to override |
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `user.id` + `user.type` (model) + `user.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
-| `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via ext-excimer (PECL, not bundled); a silent no-op without the extension. See [Profiling](#profiling-ext-excimer) below |
+| `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via cboxdk/telemetry-native, or ext-excimer as a fallback; a silent no-op without either. See [Profiling](#profiling) below |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
 | `instrument.views` | `TELEMETRY_INSTRUMENT_VIEWS` | `true` — nested render spans per Blade/PHP view/partial/component (detail-marked); `view.render.count` tally on the root span |
 | `instrument.session` | `TELEMETRY_INSTRUMENT_SESSION` | `true` — `session.driver` + `session.hash` (truncated sha256, never the raw id) on request spans; journey queries via TraceQL |
@@ -324,23 +324,54 @@ Only valid v3 source maps within the size limit are stored. See
 self-report `queue.worker.memory.{php,rss}{queue} (By)` as a histogram after every job —
 no monitor required for worker leak tracking.
 
-## Profiling (ext-excimer)
+## Profiling
 
 | Key | Env | Default |
 |---|---|---|
-| `profiling.period` | `TELEMETRY_PROFILING_PERIOD` | `0.001` s sampling interval |
-| `profiling.min_duration_ms` | `TELEMETRY_PROFILING_MIN_DURATION_MS` | `500` — only slower requests/jobs keep their profile (tail-based, like `traces.details.slow_request_ms`) |
+| `profiling.period` | `TELEMETRY_PROFILING_PERIOD` | `0.001` s sampling interval (excimer only — the native profiler uses `native.period_us`) |
+| `profiling.min_duration_ms` | `TELEMETRY_PROFILING_MIN_DURATION_MS` | `500` — only slower requests/jobs keep their profile (tail-based, like `traces.details.slow_request_ms`). Shared by both profilers |
 | `profiling.top_functions` | `TELEMETRY_PROFILING_TOP_FUNCTIONS` | `20` functions kept per profile |
 
-Requires the PECL `excimer` extension (`pecl install excimer` or your
-distro's `php-excimer` package) — a statistical sampling profiler, not
-bundled, `extension_loaded()`-guarded everywhere. Without it,
-`instrument.profiling` is a silent no-op; `telemetry:doctor` reports
-whether it's active. Profiling always runs on a sampled trace (excimer's
-own sampling keeps the overhead low), but the result — a bounded "top
+Two profilers can back this, both optional and both
+`extension_loaded()`-guarded everywhere:
+
+- **[cboxdk/telemetry-native](../production/native-runtime.md)**
+  (`pie install cboxdk/telemetry-native`) — preferred where installed. Adds
+  connection/cURL timing, GC counters and crash records on top of the
+  profile, and reports how much of each profile was really sampled.
+- **ext-excimer** (`pecl install excimer`) — the fallback, profile only.
+
+Never both at once: two samplers running together mostly measure each
+other, so the native one wins when it is available and
+`native.profile` is on. Without either, `instrument.profiling` is a silent
+no-op; `telemetry:doctor` reports which is active.
+
+Profiling always runs on a sampled trace (the sampling itself keeps the
+overhead low and roughly constant), but the result — a bounded "top
 functions by sample count" `profile.captured` event — is only kept for
 requests/jobs slower than `min_duration_ms`. This is not a full pprof
 export; the package has no opinion on a profiling backend.
+
+## Native runtime
+
+| Key | Env | Default |
+|---|---|---|
+| `native.enabled` | `TELEMETRY_NATIVE` | `true` — master switch; off means no unit of work is ever opened |
+| `native.profile` | `TELEMETRY_NATIVE_PROFILE` | `true` — use the native profiler instead of excimer |
+| `native.period_us` | `TELEMETRY_NATIVE_PERIOD_US` | `null` — leaves the extension's INI period (1000 µs) alone |
+| `native.max_depth` | `TELEMETRY_NATIVE_MAX_DEPTH` | `null` — leaves the extension's INI depth (64 frames) alone |
+| `native.stacks` | `TELEMETRY_NATIVE_STACKS` | `false` — the full call tree alongside the top functions |
+| `native.max_stack_nodes` | `TELEMETRY_NATIVE_MAX_STACK_NODES` | `2048` |
+| `native.operations` | `TELEMETRY_NATIVE_OPERATIONS` | `true` — `pdo.connect.*`/`curl.exec.*` span attributes, `runtime.operations` + `runtime.operation.duration` metrics |
+| `native.counters` | `TELEMETRY_NATIVE_COUNTERS` | `true` — `php.gc.runs`/`php.gc.collected` |
+| `native.crashes` | `TELEMETRY_NATIVE_CRASHES` | `true` — drain crash records in `telemetry:flush`, report them as `crash.recorded` events |
+| `native.crash_max` | `TELEMETRY_NATIVE_CRASH_MAX` | `32` records per drain |
+| `native.crash_breadcrumbs` | `TELEMETRY_NATIVE_CRASH_BREADCRUMBS` | `32` breadcrumbs kept per record |
+| `native.exclude_commands` | — | `queue:work`, `queue:listen`, `horizon*`, `octane:*`, `schedule:run`, `schedule:work`, `reverb:*` — commands that host their own units of work, matched with `Str::is()` |
+
+See [Native runtime](../production/native-runtime.md) for what each signal
+looks like, why units must not nest, and when `cbox_telemetry.auto` is the
+right setting.
 
 ## Built-in providers
 

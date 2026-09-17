@@ -7,7 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Support for [`cboxdk/telemetry-native`](https://github.com/cboxdk/telemetry-native)**,
+  the optional `cbox_telemetry` extension — the three things PHP cannot
+  measure about itself, with this package still owning every semantic.
+
+  Requests, jobs, commands and scheduled tasks are bracketed as native units
+  of work. From each one: a CPU profile for the slow ones (the same
+  `profiling.min_duration_ms` tail threshold, now carrying the sampling
+  period, clock and a `profile.confidence` figure — ticks the kernel never
+  delivered, samples the VM could only take late, and samples with nowhere
+  to go are reported rather than averaged away), exact
+  `pdo.connect`/`redis.connect`/`curl.exec` timing as span attributes plus
+  `runtime.operations` and `runtime.operation.duration` metrics, and
+  `php.gc.runs`/`php.gc.collected`.
+
+  Crash records are drained by `telemetry:flush` (or the new
+  `telemetry:crashes`) and reported as FATAL `crash.recorded` events
+  carrying the trace and span id the process died in — a correlated OTLP log
+  record, so the crash sits with that trace's logs next to the operation
+  that was open at the time. Schedule `telemetry:crashes` per host: the
+  records are files on the machine that crashed, and each uid has its own
+  sink.
+
+  Units do not nest, and Laravel makes nesting easy to trigger by accident,
+  so the outermost unit wins: a sync job inside a request opens nothing.
+  Commands that host their own units (`queue:work`, `horizon*`, `octane:*`,
+  `schedule:run`, …) open none themselves, leaving the boundary to the jobs
+  and tasks inside them.
+
+  Where both are installed, the native profiler replaces `ext-excimer` —
+  two samplers running at once mostly measure each other. The test is
+  whether the native sampler is actually running, not whether a unit was
+  obtained: a unit opens even where profiling is unavailable, so excimer
+  still runs on a host that has the extension but no usable timer. Without either
+  extension nothing changes, and `telemetry:doctor` now reports which is
+  active, which operation hooks the extension actually installed, and what
+  the crash recorder is doing. `Testing\FakeNativeRuntime` makes both paths
+  testable on a machine without the extension.
+
 ### Fixed
+
+- **A queue attempt that reported no outcome leaked its span for the life of
+  the worker.** `Worker::handleJobException` dispatches
+  `JobReleasedAfterException` only for a job it released itself, so a job that
+  calls `$this->release()` and *then* throws produces none of the four events
+  this package closes an attempt on. Its span stayed on the tracer's context
+  stack: later spans were parented to a job that had long finished, and the
+  shutdown path ended it as an error that lasted until the process died.
+
+  Closed on `JobAttempted`, which Laravel dispatches in a `finally` for every
+  attempt. The span is ENDED rather than discarded — the job ran and threw,
+  and that is the trace worth having — with `queue.job.outcome = abandoned`
+  and an error status. No `queue.jobs.*` counter moves for it: the framework
+  reported no outcome, and folding these into `released` would put attempts it
+  never called released into the series alerts are built on.
+
+- **Config switches written as `0` or `1` in `.env` were ignored.** Laravel's
+  `env()` converts `true`, `false`, `null` and `empty` to PHP values and leaves
+  everything else a string, so `TELEMETRY_OTLP_COMPRESSION=0` reached config as
+  the string `"0"` — which the strict boolean reader rejected as "not a bool"
+  and answered with the default. The switch then did the opposite of what the
+  `.env` file said, silently, and only for the numeric spelling. Config flags
+  are now read with `Cast::flag()`, which accepts what a `.env` file can
+  actually produce. Affects `otlp.compression` and every `telemetry.native.*`
+  switch.
 
 - **The shutdown flush added in 2.2.1 had no test that could fail without it.**
   `FatalErrorFlushTest` calls `flushOnShutdown()` directly, which never runs the

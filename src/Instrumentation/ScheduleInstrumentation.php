@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NativeReporter;
+use Cbox\Telemetry\Native\NativeUnit;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
@@ -30,7 +33,7 @@ use Illuminate\Contracts\Events\Dispatcher;
  */
 final class ScheduleInstrumentation
 {
-    /** @var array<int, array{span: Span, usage: ResourceUsage|null, name: string}> keyed by task object id */
+    /** @var array<int, array{span: Span, usage: ResourceUsage|null, name: string, unit: NativeUnit|null}> keyed by task object id */
     private array $running = [];
 
     public function __construct(private readonly Container $container) {}
@@ -41,6 +44,11 @@ final class ScheduleInstrumentation
     private function telemetry(): TelemetryManager
     {
         return $this->container->make(TelemetryManager::class);
+    }
+
+    private function native(): NativeProfiler
+    {
+        return $this->container->make(NativeProfiler::class);
     }
 
     public function register(Dispatcher $events): void
@@ -81,6 +89,11 @@ final class ScheduleInstrumentation
                 'span' => $span,
                 'usage' => config('telemetry.instrument.resources', true) ? ResourceUsage::start() : null,
                 'name' => $name,
+                // schedule:run is in telemetry.native.exclude_commands
+                // precisely so the task, not the scheduler, is the unit.
+                // A task that shells out to its own artisan process burns
+                // no CPU here and simply reports no profile.
+                'unit' => $this->native()->begin('schedule', $span),
             ];
         });
     }
@@ -142,6 +155,15 @@ final class ScheduleInstrumentation
                 ], static fn ($value) => $value !== null));
             }
 
+            // Before end() — see the ordering note in TraceRequest.
+            if ($running['unit'] !== null) {
+                $result = $running['unit']->finish($this->telemetry()->tracer()->currentlySampled($span));
+
+                if ($result !== null) {
+                    NativeReporter::report($this->telemetry(), $result, $span, ['schedule.task' => $running['name']]);
+                }
+            }
+
             $span->end();
 
             $this->telemetry()
@@ -152,6 +174,16 @@ final class ScheduleInstrumentation
                 ->counter("schedule.tasks.{$outcome}", 'Scheduled task runs by outcome')
                 ->inc(1, $labels);
         });
+
+        // Whatever happened above — including a throw the guard swallowed
+        // before the unit was finished — the unit closes here. `schedule:run`
+        // runs its tasks in one process, so a unit left open would refuse
+        // every task after this one.
+        if ($running !== null && $running['unit'] !== null) {
+            $unit = $running['unit'];
+
+            FailSafe::guard(static fn () => $unit->discard());
+        }
 
         // Isolate each task: flush its telemetry and clear trace context
         // before the next task runs in the same process.

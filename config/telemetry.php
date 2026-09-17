@@ -805,6 +805,82 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Native Runtime (cboxdk/telemetry-native)
+    |--------------------------------------------------------------------------
+    |
+    | The optional `cbox_telemetry` extension measures what PHP cannot
+    | measure about itself: which call stacks burned the CPU, how long
+    | opening a connection actually took, and what the process was doing
+    | when it died on a fatal signal. A silent no-op without it.
+    |
+    |     pie install cboxdk/telemetry-native
+    |
+    | It owns no semantics and never touches the network — naming,
+    | sampling policy, redaction and export all stay here.
+    |
+    */
+
+    'native' => [
+        // Master switch. Off means no unit of work is ever opened, whether
+        // the extension is loaded or not.
+        'enabled' => env('TELEMETRY_NATIVE', true),
+
+        // Use the native profiler for request/job CPU profiles. It replaces
+        // ext-excimer where both are installed: two samplers running at once
+        // measure each other. Also gated by instrument.profiling, and the
+        // tail threshold is the shared profiling.min_duration_ms.
+        'profile' => env('TELEMETRY_NATIVE_PROFILE', true),
+
+        // Sampling period in microseconds and stack depth per sample. Null
+        // leaves the extension's own INI values (1000 µs / 64 frames) alone.
+        //
+        // Asking for less than the kernel can deliver buys nothing: Linux
+        // evaluates POSIX CPU timers on the scheduler tick, so on a HZ=250
+        // kernel anything under 4 ms is reported back as skipped ticks in
+        // profile.timer_overruns.
+        'period_us' => env('TELEMETRY_NATIVE_PERIOD_US'),
+        'max_depth' => env('TELEMETRY_NATIVE_MAX_DEPTH'),
+
+        // The full call tree alongside the top functions, as flat
+        // (parent, frame, samples) triples plus the frame table they refer
+        // to. Off by default: it is one to two orders of magnitude more
+        // data per slow request than the top-function list.
+        'stacks' => env('TELEMETRY_NATIVE_STACKS', false),
+        'max_stack_nodes' => env('TELEMETRY_NATIVE_MAX_STACK_NODES', 2048),
+
+        // Native operation timing (pdo.connect, redis.connect, curl.exec)
+        // as span attributes, plus the runtime.operations counter and
+        // runtime.operation.duration histogram.
+        'operations' => env('TELEMETRY_NATIVE_OPERATIONS', true),
+
+        // php.gc.runs / php.gc.collected on the unit span and as counters.
+        'counters' => env('TELEMETRY_NATIVE_COUNTERS', true),
+
+        // Drain crash records in telemetry:flush and report them as
+        // FATAL-severity crash.recorded events, correlated to the trace the
+        // process died in. Draining consumes, so exactly one collector
+        // should run — telemetry:crashes is the manual one.
+        'crashes' => env('TELEMETRY_NATIVE_CRASHES', true),
+        'crash_max' => env('TELEMETRY_NATIVE_CRASH_MAX', 32),
+        'crash_breadcrumbs' => env('TELEMETRY_NATIVE_CRASH_BREADCRUMBS', 32),
+
+        // Commands that own their process and host their own units of work.
+        // A native unit here would span hours and swallow every job or task
+        // inside it, so these open none and leave the boundary to what runs
+        // within them. Matched with Str::is(), so `*` works.
+        'exclude_commands' => [
+            'queue:work',
+            'queue:listen',
+            'horizon*',
+            'octane:*',
+            'schedule:run',
+            'schedule:work',
+            'reverb:*',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Built-in Providers
     |--------------------------------------------------------------------------
     */

@@ -8,6 +8,7 @@ use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\ShipResult;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
+use Cbox\Telemetry\Native\CrashReporter;
 use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
@@ -72,6 +73,12 @@ final class FlushCommand extends Command
         if ($this->option('daemon')) {
             return $this->daemon($telemetry, $shipper);
         }
+
+        // Crash records from processes that died since the last run. BEFORE
+        // the metric export, because reporting one increments
+        // runtime.crashes — drained afterwards, that counter missed this
+        // export, and with --wipe it was deleted before it ever had one.
+        $this->reportCrashes();
 
         // Guarded like the daemon loop (below) — a failure here must
         // surface as a clean error + non-zero exit for cron/monitoring
@@ -155,6 +162,9 @@ final class FlushCommand extends Command
             }
 
             if (microtime(true) - $lastMetricsFlush >= $metricsInterval) {
+                // Before the metric flush, so a crash counted now leaves
+                // with this export rather than the next one.
+                $this->reportCrashes();
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flushMetrics()), 'metrics');
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flush()), 'spans and events');
 
@@ -345,6 +355,25 @@ final class FlushCommand extends Command
             fn (ExportOutcome $failure): string => $failure->exporter.':'.$failure->status->value.':'.($failure->reason ?? ''),
             $failures,
         ));
+    }
+
+    /**
+     * Crash records outlive the process that wrote them, so something else
+     * has to collect them. This is that something: scheduled, and somewhere
+     * a failure is visible.
+     */
+    private function reportCrashes(): void
+    {
+        $reported = $this->laravel->make(CrashReporter::class)->drain();
+
+        foreach ($reported as $record) {
+            $this->components->error(sprintf(
+                'Crash recorded: %s in pid %d (%s)',
+                is_scalar($record['crash.signal_name'] ?? null) ? (string) $record['crash.signal_name'] : 'UNKNOWN',
+                is_scalar($record['crash.pid'] ?? null) ? (int) $record['crash.pid'] : 0,
+                is_scalar($record['crash.unit'] ?? null) ? (string) $record['crash.unit'] : 'other',
+            ));
+        }
     }
 
     private function spoolShipper(): ?SpoolShipper

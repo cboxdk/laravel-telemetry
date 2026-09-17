@@ -34,6 +34,40 @@ final class Cast
     }
 
     /**
+     * A CONFIG flag, which is not the same thing as a bool.
+     *
+     * Laravel's `env()` converts `true`, `false`, `null` and `empty` to their
+     * PHP values and leaves everything else a string — so `FEATURE=0` reaches
+     * config as the string `"0"`, which `bool()` rejects as "not a bool" and
+     * answers with the DEFAULT. Every such switch then did the opposite of
+     * what the `.env` file said, silently and only for the numeric spelling.
+     *
+     * Use this for anything a user can write in `.env`; use `bool()` for a
+     * value that is genuinely supposed to be a boolean already (a framework
+     * interface typed `mixed`, an extension's status array).
+     */
+    public static function flag(mixed $value, bool $default = false): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return (bool) $value;
+        }
+
+        if (! is_string($value)) {
+            return $default;
+        }
+
+        return match (strtolower(trim($value))) {
+            '1', 'true', 'on', 'yes' => true,
+            '0', 'false', 'off', 'no', '' => false,
+            default => $default,
+        };
+    }
+
+    /**
      * @return array<array-key, mixed>
      */
     public static function array(mixed $value): array

@@ -60,3 +60,29 @@ it('narrows scalar maps, keeping string keys with scalar or null values', functi
         ->toBe(['a' => 'x', 'b' => 1, 'c' => null])
         ->and(Cast::scalarMap('nope'))->toBe([]);
 });
+
+/**
+ * Laravel's env() converts `true`, `false`, `null` and `empty` and leaves
+ * everything else a string — so `FEATURE=0` reaches config as "0", which
+ * bool() rejects as "not a bool" and answers with the DEFAULT. Every switch
+ * read that way did the opposite of what the .env file said.
+ */
+it('reads a config flag the way a .env file writes one', function () {
+    expect(Cast::flag('0', true))->toBeFalse()
+        ->and(Cast::flag('1', false))->toBeTrue()
+        ->and(Cast::flag(0, true))->toBeFalse()
+        ->and(Cast::flag(1, false))->toBeTrue()
+        ->and(Cast::flag('false', true))->toBeFalse()
+        ->and(Cast::flag('TRUE', false))->toBeTrue()
+        ->and(Cast::flag(' on ', false))->toBeTrue()
+        ->and(Cast::flag('off', true))->toBeFalse()
+        ->and(Cast::flag('', true))->toBeFalse()
+        ->and(Cast::flag(false, true))->toBeFalse()
+        ->and(Cast::flag(true, false))->toBeTrue();
+});
+
+it('falls back to the default for a config flag it cannot read', function () {
+    expect(Cast::flag(null, true))->toBeTrue()
+        ->and(Cast::flag('maybe', true))->toBeTrue()
+        ->and(Cast::flag(['on'], false))->toBeFalse();
+});

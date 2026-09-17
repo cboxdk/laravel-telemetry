@@ -8,7 +8,9 @@
 Key facts: metric names are lowercase dot-namespaced OTel style; push and
 pull instruments are distinct API shapes; telemetry never throws into the
 app; Telemetry::fake() provides in-memory test assertions; packages
-integrate via the TelemetryProvider contract guarded by class_exists.
+integrate via the TelemetryProvider contract guarded by class_exists; the
+optional cbox_telemetry extension (cboxdk/telemetry-native) adds CPU
+profiles, connection timing and crash records without owning any semantic.
 
 ## Getting started
 
@@ -40,6 +42,7 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 ## Decisions
 
 - [0001 Metric state on single-process runtimes](docs/decisions/0001-metric-state-on-single-process-runtimes.md): invariant #3 restated in terms of shared writers; why NativePHP mobile/desktop get a SQLite store and why `array` stays unsupported there
+- [0002 Who owns a native unit of work](docs/decisions/0002-native-unit-of-work-ownership.md): units never nest, so the outermost wins and workers/schedulers open none; never two profilers at once; the unit times itself
 
 ## Reference
 
@@ -53,5 +56,6 @@ integrate via the TelemetryProvider contract guarded by class_exists.
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality
 - [OTLP](docs/production/otlp.md): direct export, scheduling, latency budget
 - [Grafana stack](docs/production/grafana-stack.md): recommended backend routing (Tempo/Mimir/Loki), correlation, query starters
+- [Native runtime](docs/production/native-runtime.md): the optional cbox_telemetry extension (cboxdk/telemetry-native) — native units of work per request/job/command/task, CPU profiles with a confidence figure, pdo.connect/curl.exec timing, GC counters, crash records correlated to the trace the process died in; units never nest and workers/schedulers open none
 - [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (methodology + first-party numbers)
 - [Security](docs/production/security.md): endpoint protection, data leakage

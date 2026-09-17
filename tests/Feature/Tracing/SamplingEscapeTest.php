@@ -122,3 +122,43 @@ it('propagates the overridden sampling decision downstream', function () {
 
     expect($tracer->currentTraceParent()->sampled)->toBeFalse();
 });
+
+/**
+ * `currentlySampled()` answers "will this be exported", for anything
+ * deciding at the END of a unit of work whether to keep expensive per-trace
+ * work — a native CPU profile, say. It has to apply the same rule finish()
+ * applies, including the error escape and the setting that governs it, or a
+ * second definition drifts away from the first.
+ */
+it('answers the export question for a span, error escape included', function () {
+    $tracer = new Tracer(sampleRate: 1.0, alwaysSampleErrors: true);
+
+    $span = $tracer->startSpan('failing');
+    $span->setStatus(SpanStatus::Error);
+
+    $tracer->resample(false);
+
+    expect($tracer->currentlySampled($span))->toBeTrue()
+        // Without a span there is no error to escape with.
+        ->and($tracer->currentlySampled())->toBeFalse();
+});
+
+it('does not rescue a failing span when errors do not escape sampling', function () {
+    $tracer = new Tracer(sampleRate: 1.0, alwaysSampleErrors: false);
+
+    $span = $tracer->startSpan('failing');
+    $span->setStatus(SpanStatus::Error);
+
+    $tracer->resample(false);
+
+    expect($tracer->currentlySampled($span))->toBeFalse();
+});
+
+it('reports a healthy span as sampled while the trace is sampled', function () {
+    $tracer = new Tracer(sampleRate: 1.0);
+
+    $span = $tracer->startSpan('fine');
+
+    expect($tracer->currentlySampled($span))->toBeTrue()
+        ->and($tracer->currentlySampled())->toBeTrue();
+});

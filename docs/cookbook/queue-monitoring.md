@@ -10,6 +10,17 @@ Job spans, `queue.job.duration`, `queue.jobs.processed` and
 `queue.jobs.failed` come free with `instrument.jobs`. This recipe adds the
 rest of a production queue dashboard.
 
+One attempt shape has a span but no counter, deliberately. A job that
+releases or deletes itself and *then* throws is, to Laravel, an attempt with
+no outcome: `Worker::handleJobException` announces a release only for a job
+it released itself, so none of processed/failed/released/timed-out is
+dispatched. Its span is still exported — it is the attempt someone goes
+looking for — carrying `queue.job.outcome = abandoned` and an error status,
+and it moves no `queue.jobs.*` series, because folding it into `released`
+would put attempts the framework never called released into the numbers your
+alerts are built on. The throw itself is already counted by
+`exceptions.reported`.
+
 ## Queue depth (pull — evaluated at scrape)
 
 ```php

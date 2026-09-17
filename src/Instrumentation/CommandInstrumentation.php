@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NativeReporter;
+use Cbox\Telemetry\Native\NativeUnit;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
@@ -23,6 +26,9 @@ final class CommandInstrumentation implements ManagesRequestState
     /** @var list<Span> */
     private array $stack = [];
 
+    /** @var array<int, NativeUnit> keyed by span object id */
+    private array $units = [];
+
     public function __construct(private readonly Container $container) {}
 
     /**
@@ -31,6 +37,11 @@ final class CommandInstrumentation implements ManagesRequestState
     private function telemetry(): TelemetryManager
     {
         return $this->container->make(TelemetryManager::class);
+    }
+
+    private function native(): NativeProfiler
+    {
+        return $this->container->make(NativeProfiler::class);
     }
 
     public function register(Dispatcher $events): void
@@ -49,10 +60,25 @@ final class CommandInstrumentation implements ManagesRequestState
         }
 
         FailSafe::guard(function () use ($event) {
-            $this->stack[] = $this->telemetry()->tracer()->startSpan(
-                'artisan '.($event->command ?? 'unknown'),
-                attributes: ['laravel.command' => $event->command ?? 'unknown'],
+            $command = $event->command ?? 'unknown';
+
+            $span = $this->telemetry()->tracer()->startSpan(
+                'artisan '.$command,
+                attributes: ['laravel.command' => $command],
             );
+
+            $this->stack[] = $span;
+
+            // A worker or an application server is not a unit of work — it
+            // is the thing units of work happen inside. Those commands open
+            // nothing, so the jobs and tasks within them can.
+            if (! $this->native()->hostsItsOwnUnits($command)) {
+                $unit = $this->native()->begin('command', $span);
+
+                if ($unit !== null) {
+                    $this->units[spl_object_id($span)] = $unit;
+                }
+            }
         });
     }
 
@@ -64,9 +90,28 @@ final class CommandInstrumentation implements ManagesRequestState
             return;
         }
 
-        FailSafe::guard(function () use ($span, $event) {
+        // Taken out here rather than inside the guard below: a throw the
+        // guard swallows must not leave the unit open, because the one-unit-
+        // at-a-time rule would then refuse every later command in this
+        // process (`schedule:run` runs many).
+        $unit = $this->units[spl_object_id($span)] ?? null;
+        unset($this->units[spl_object_id($span)]);
+
+        FailSafe::guard(function () use ($span, $event, $unit) {
             $span->setAttribute('laravel.command.exit_code', $event->exitCode);
             $span->setStatus($event->exitCode === 0 ? SpanStatus::Ok : SpanStatus::Error);
+
+            // Before end() — see the ordering note in TraceRequest.
+            if ($unit !== null) {
+                $result = $unit->finish($this->telemetry()->tracer()->currentlySampled($span));
+
+                if ($result !== null) {
+                    NativeReporter::report($this->telemetry(), $result, $span, [
+                        'laravel.command' => $event->command ?? 'unknown',
+                    ]);
+                }
+            }
+
             $span->end();
 
             $labels = ['command' => $event->command ?? 'unknown'];
@@ -79,6 +124,8 @@ final class CommandInstrumentation implements ManagesRequestState
                 ->counter($event->exitCode === 0 ? 'commands.completed' : 'commands.failed', 'Artisan command runs by outcome')
                 ->inc(1, $labels);
         });
+
+        $unit?->discard();
 
         if ($this->stack === []) {
             $this->telemetry()->flush();
@@ -98,6 +145,11 @@ final class CommandInstrumentation implements ManagesRequestState
             FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
         }
 
+        foreach ($this->units as $unit) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+
         $this->stack = [];
+        $this->units = [];
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry;
 
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Console\CrashesCommand;
 use Cbox\Telemetry\Console\DashboardsCommand;
 use Cbox\Telemetry\Console\DeployCommand;
 use Cbox\Telemetry\Console\DoctorCommand;
@@ -13,6 +14,7 @@ use Cbox\Telemetry\Console\MonitorCommand;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
@@ -58,6 +60,9 @@ use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Metrics\Stores\NullMetricStore;
 use Cbox\Telemetry\Metrics\Stores\RedisMetricStore;
 use Cbox\Telemetry\Metrics\Stores\SqliteMetricStore;
+use Cbox\Telemetry\Native\ExtensionRuntime;
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NullRuntime;
 use Cbox\Telemetry\Providers\SystemMetricsProvider;
 use Cbox\Telemetry\Support\Baggage;
 use Cbox\Telemetry\Support\Cast;
@@ -111,7 +116,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 headers: Cast::stringMap($config->get('telemetry.otlp.headers', [])),
                 timeout: Cast::float($config->get('telemetry.otlp.timeout'), 3.0),
                 connectTimeout: Cast::float($config->get('telemetry.otlp.connect_timeout'), 1.0),
-                compress: Cast::bool($config->get('telemetry.otlp.compression'), true),
+                compress: Cast::flag($config->get('telemetry.otlp.compression'), true),
             );
         });
 
@@ -206,6 +211,21 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->alias(TelemetryManager::class, 'telemetry');
 
+        // The optional cbox_telemetry extension. Bound even when it is
+        // absent — as the null implementation, so every call site is the
+        // same code with and without it, and "without it" stays testable.
+        $this->app->singleton(NativeRuntime::class, function (Application $app): NativeRuntime {
+            if (! $app->make('config')->get('telemetry.native.enabled', true)) {
+                return new NullRuntime;
+            }
+
+            $runtime = new ExtensionRuntime;
+
+            return $runtime->available() ? $runtime : new NullRuntime;
+        });
+
+        $this->app->singleton(NativeProfiler::class);
+
         $this->app->singleton(PrometheusRenderer::class);
 
         // Resolvable by telemetry-ui to symbolicate browser stacks.
@@ -245,7 +265,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 __DIR__.'/../resources/js/browser.js' => public_path('vendor/telemetry/browser.js'),
             ], 'telemetry-assets');
 
-            $this->commands([FlushCommand::class,
+            $this->commands([FlushCommand::class, CrashesCommand::class,
                 DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
         }
 
@@ -657,6 +677,12 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->singleton(QueueInstrumentation::class);
 
+        // Only when jobs are instrumented: with propagation alone there is no
+        // per-job state to flush.
+        if ($instrument) {
+            $this->registerPreJobReset();
+        }
+
         $this->callAfterResolving('queue', function (QueueManager $queue, Application $app) use ($propagate, $instrument) {
             $app->make(QueueInstrumentation::class)->register(
                 $queue,
@@ -665,18 +691,27 @@ class TelemetryServiceProvider extends ServiceProvider
                 $instrument,
             );
         });
+    }
 
-        if (! $instrument) {
-            return;
-        }
-
-        // Long-running workers: before each job, drop half-open state a
-        // prior job left behind (died mid-HTTP-call, mid-transaction) —
-        // the queue-worker twin of the Octane fresh-request reset. Sync
-        // jobs run inside the dispatcher's request, whose in-flight state
-        // must survive, so they never reset. Context reset is
-        // QueueInstrumentation's own job — only instrumentation state
-        // is flushed here.
+    /**
+     * BEFORE the instrumentation's own listeners, and deliberately so.
+     *
+     * `callAfterResolving` fires immediately when something has already
+     * resolved `queue` — another provider, a dispatch during boot — and this
+     * reset would then land AFTER the listener that opens a native unit,
+     * discarding every job's unit before the job body ran. On applications
+     * whose boot order happens to resolve the queue early, and only those.
+     *
+     * What it is for: long-running workers, where half-open state from a
+     * prior job (died mid-HTTP-call, mid-transaction) must not leak into the
+     * next one — the queue-worker twin of the Octane fresh-request reset.
+     * Sync jobs run inside the dispatcher's request, whose in-flight state
+     * must survive, so they never reset. Context reset is
+     * QueueInstrumentation's own job; only instrumentation state is flushed
+     * here.
+     */
+    private function registerPreJobReset(): void
+    {
         $this->app->make(Dispatcher::class)->listen(JobProcessing::class, function (JobProcessing $event): void {
             if ($event->connectionName === 'sync') {
                 return;
@@ -1175,6 +1210,10 @@ class TelemetryServiceProvider extends ServiceProvider
             NotificationInstrumentation::class,
             TransactionInstrumentation::class,
             CommandInstrumentation::class,
+            // Not instrumentation, but the same hazard: an Octane request
+            // that died with a native unit open would hold the one-unit-at-
+            // a-time latch shut for the rest of the worker's life.
+            NativeProfiler::class,
         ];
     }
 }

@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Native\NativeProfiler;
+use Cbox\Telemetry\Native\NativeReporter;
+use Cbox\Telemetry\Native\NativeUnit;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
@@ -18,6 +21,7 @@ use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -43,6 +47,13 @@ use Throwable;
  */
 final class QueueInstrumentation implements ManagesRequestState
 {
+    /**
+     * An attempt Laravel announced no outcome for: a job that released or
+     * deleted itself and then threw. Real work, a real span — and no
+     * outcome, which is why it never reaches a `queue.jobs.*` counter.
+     */
+    private const OUTCOME_ABANDONED = 'abandoned';
+
     /** @var list<Span> */
     private array $jobSpans = [];
 
@@ -51,6 +62,18 @@ final class QueueInstrumentation implements ManagesRequestState
 
     /** @var array<int, CpuProfiler> keyed by span object id */
     private array $jobProfiles = [];
+
+    /** @var array<int, NativeUnit> keyed by span object id */
+    private array $jobUnits = [];
+
+    /**
+     * The attempts still open, so the backstop below closes the one it is
+     * told about and not somebody else's — and can tell an attempt that
+     * reported an outcome from one that never did.
+     *
+     * @var array<int, int> job object id => span object id
+     */
+    private array $attemptSpans = [];
 
     public function __construct(private readonly Container $container)
     {
@@ -63,6 +86,11 @@ final class QueueInstrumentation implements ManagesRequestState
     private function telemetry(): TelemetryManager
     {
         return $this->container->make(TelemetryManager::class);
+    }
+
+    private function native(): NativeProfiler
+    {
+        return $this->container->make(NativeProfiler::class);
     }
 
     /**
@@ -169,6 +197,28 @@ final class QueueInstrumentation implements ManagesRequestState
                 });
             }
 
+            // Every other listener here is an attempt OUTCOME, and Laravel
+            // has a path with no outcome at all: a job that releases itself
+            // and then throws is neither processed, nor failed, nor released
+            // by the worker — `Worker::handleJobException` only dispatches
+            // JobReleasedAfterException for a job IT released
+            // (`! $job->isDeleted() && ! $job->isReleased() && ! $job->hasFailed()`).
+            // Its span stayed on the stack and in this map for the life of
+            // the worker, mis-parenting later spans and ending at shutdown as
+            // an error that lasted until the process died.
+            //
+            // JobAttempted fires in a `finally` for every attempt, so it is
+            // the one place that can guarantee an attempt is closed.
+            if (class_exists(JobAttempted::class)) {
+                $events->listen(JobAttempted::class, function ($event) {
+                    // Scoped to the job it is telling us about. A sweep of
+                    // everything open would close the OUTER job's attempt the
+                    // moment a job dispatched a sync child, because SyncQueue
+                    // dispatches this event too — mid-flight.
+                    $this->closeAbandonedAttempt($event->job, $event->connectionName);
+                });
+            }
+
             // The pid label is unique to this process — retire its series
             // when the worker stops, or every restart leaves a dead
             // queue.worker.memory.* series in the shared store forever.
@@ -254,6 +304,7 @@ final class QueueInstrumentation implements ManagesRequestState
             );
 
             $this->jobSpans[] = $span;
+            $this->attemptSpans[spl_object_id($event->job)] = spl_object_id($span);
 
             $this->telemetry()->publishTraceContext();
 
@@ -263,7 +314,27 @@ final class QueueInstrumentation implements ManagesRequestState
                 $this->jobUsage[spl_object_id($span)] = ResourceUsage::start();
             }
 
-            if ($event->connectionName !== 'sync' && config('telemetry.instrument.profiling', true) && $span->sampled) {
+            // Sync jobs run inside a request that is already a unit of work.
+            // Opening a second one would abandon the outer unit in the C, so
+            // the profiler refuses it — the guard here just skips the call.
+            if ($event->connectionName !== 'sync') {
+                $unit = $this->native()->begin('queue', $span);
+
+                if ($unit !== null) {
+                    $this->jobUnits[spl_object_id($span)] = $unit;
+                }
+            }
+
+            // ext-excimer is the fallback for hosts without the extension —
+            // the test is whether the NATIVE sampler is running, not whether
+            // this job got a unit. A unit opens even where profiling is
+            // unavailable, and a job refused a unit for nesting is running
+            // inside one that IS sampling.
+            if ($event->connectionName !== 'sync'
+                && ! $this->native()->profiles()
+                && config('telemetry.instrument.profiling', true)
+                && $span->sampled
+            ) {
                 $this->jobProfiles[spl_object_id($span)] = CpuProfiler::start(
                     Cast::float(config('telemetry.profiling.period'), 0.001),
                 );
@@ -393,8 +464,19 @@ final class QueueInstrumentation implements ManagesRequestState
             $labels = ['job.name' => $job, 'queue' => $queue ?? 'default'];
 
             if ($span = array_pop($this->jobSpans)) {
+                if (($owner = array_search(spl_object_id($span), $this->attemptSpans, true)) !== false) {
+                    unset($this->attemptSpans[$owner]);
+                }
+
                 if ($span->status() === SpanStatus::Unset) {
                     $span->setStatus($outcome === 'processed' ? SpanStatus::Ok : SpanStatus::Error);
+                }
+
+                if ($outcome === self::OUTCOME_ABANDONED) {
+                    // Why this span has no outcome: the framework announced
+                    // none. Worth saying on the span, where it is one
+                    // occurrence, rather than in a metric label.
+                    $span->setAttribute('queue.job.outcome', self::OUTCOME_ABANDONED);
                 }
 
                 $usage = $this->jobUsage[spl_object_id($span)] ?? null;
@@ -419,6 +501,21 @@ final class QueueInstrumentation implements ManagesRequestState
                         ->record($measured['cpuTimeMs'], $labels);
                 }
 
+                // Before end() — see the ordering note in TraceRequest.
+                $unit = $this->jobUnits[spl_object_id($span)] ?? null;
+                unset($this->jobUnits[spl_object_id($span)]);
+
+                if ($unit !== null) {
+                    $result = $unit->finish($this->telemetry()->tracer()->currentlySampled($span));
+
+                    if ($result !== null) {
+                        NativeReporter::report($this->telemetry(), $result, $span, [
+                            'job.name' => $job,
+                            'queue' => $queue ?? 'default',
+                        ]);
+                    }
+                }
+
                 $span->end();
 
                 $profile = $this->jobProfiles[spl_object_id($span)] ?? null;
@@ -433,9 +530,17 @@ final class QueueInstrumentation implements ManagesRequestState
                     ->record($span->durationMs(), $labels);
             }
 
-            $this->telemetry()
-                ->counter("queue.jobs.{$outcome}", 'Queue job attempts by outcome')
-                ->inc(1, $labels);
+            // No counter for an attempt Laravel reported no outcome for.
+            // Folding it into `released` would put attempts the framework
+            // never called released into the series alerts are built on, and
+            // inventing a new outcome would say this package knows something
+            // it does not. The span carries it; `exceptions.reported` already
+            // counts the throw that caused it.
+            if ($outcome !== self::OUTCOME_ABANDONED) {
+                $this->telemetry()
+                    ->counter("queue.jobs.{$outcome}", 'Queue job attempts by outcome')
+                    ->inc(1, $labels);
+            }
         });
 
         if (! $sync) {
@@ -494,6 +599,87 @@ final class QueueInstrumentation implements ManagesRequestState
         });
     }
 
+    /**
+     * Close an attempt that never reached a completion event — or whose
+     * completion threw before it got that far.
+     *
+     * The span is ENDED rather than discarded: the job ran, it threw, and
+     * that attempt is exactly the trace someone goes looking for. What it
+     * does not get is an outcome counter, because the framework reported no
+     * outcome.
+     */
+    private function closeAbandonedAttempt(object $job, string $connectionName): void
+    {
+        $owner = spl_object_id($job);
+
+        // Already closed by an outcome event — every ordinary attempt, since
+        // JobAttempted fires after JobProcessed/JobFailed, not instead.
+        if (! isset($this->attemptSpans[$owner])) {
+            return;
+        }
+
+        if (method_exists($job, 'resolveName') && method_exists($job, 'getQueue')) {
+            $this->completeJob(
+                job: $job->resolveName(),
+                queue: $job->getQueue(),
+                outcome: self::OUTCOME_ABANDONED,
+                sync: $connectionName === 'sync',
+                attempt: $job,
+            );
+        }
+
+        // Still here means completeJob declined: the attempt was marked
+        // complete by an outcome event whose teardown then threw and was
+        // swallowed. Leave nothing open regardless.
+        $spanId = $this->attemptSpans[$owner] ?? null;
+
+        if ($spanId === null) {
+            return;
+        }
+
+        unset($this->attemptSpans[$owner]);
+
+        $unit = $this->jobUnits[$spanId] ?? null;
+        unset($this->jobUnits[$spanId]);
+
+        if ($unit !== null) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+
+        foreach ($this->jobSpans as $span) {
+            if (spl_object_id($span) !== $spanId) {
+                continue;
+            }
+
+            $this->jobSpans = array_values(array_filter(
+                $this->jobSpans,
+                static fn (Span $open): bool => spl_object_id($open) !== $spanId,
+            ));
+
+            // Discarded, not ended: its teardown already failed once, so
+            // whatever it would report about itself is not to be trusted.
+            FailSafe::guard(fn () => $this->telemetry()->tracer()->discardSpan($span));
+
+            break;
+        }
+    }
+
+    /**
+     * Everything still open, for an Octane/NativePHP worker reset where the
+     * requests that opened them are gone.
+     */
+    private function closeAbandonedUnits(): void
+    {
+        $units = $this->jobUnits;
+
+        $this->jobUnits = [];
+        $this->attemptSpans = [];
+
+        foreach ($units as $unit) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+    }
+
     private function currentJobSpan(): ?Span
     {
         return $this->jobSpans === [] ? null : $this->jobSpans[array_key_last($this->jobSpans)];
@@ -511,6 +697,7 @@ final class QueueInstrumentation implements ManagesRequestState
             'job.name' => $job,
             'queue' => $queue,
             'duration_ms' => round($durationMs, 2),
+            'profile.source' => 'excimer',
             'profile.top_functions' => json_encode($top, JSON_UNESCAPED_SLASHES) ?: '[]',
         ]);
     }
@@ -520,5 +707,7 @@ final class QueueInstrumentation implements ManagesRequestState
         $this->jobSpans = [];
         $this->jobUsage = [];
         $this->jobProfiles = [];
+
+        $this->closeAbandonedUnits();
     }
 }

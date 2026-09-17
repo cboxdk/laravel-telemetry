@@ -69,6 +69,34 @@ final class Tracer
      * Re-decide with a rate (0–1), using the same lottery as the head
      * decision.
      */
+    /**
+     * The sampling POLICY in force for the active trace right now: a
+     * per-route override if one was made, otherwise the head decision —
+     * which is taken lazily, so a trace that has not started yet reads as
+     * sampled.
+     *
+     * Ask it at the END of a unit of work, not at the start, when deciding
+     * whether to keep expensive per-trace work (a CPU profile, say): the
+     * decision can change mid-request.
+     *
+     * Pass the span whose fate you are actually asking about and the answer
+     * applies the SAME rule `finish()` applies to it, error escape included
+     * (`traces.always_sample_errors`) — one definition of "will this be
+     * exported", rather than a second one drifting in a caller.
+     */
+    public function currentlySampled(?Span $span = null): bool
+    {
+        $sampled = $span === null
+            ? $this->sampledOverride ?? $this->sampled ?? true
+            : $this->sampledOverride ?? $span->sampled;
+
+        if ($sampled) {
+            return true;
+        }
+
+        return $this->alwaysSampleErrors && $span?->status() === SpanStatus::Error;
+    }
+
     public function resampleAt(float $rate): void
     {
         $this->resample(match (true) {
