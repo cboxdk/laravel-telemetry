@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:481b0c26-ed5b-2c9c-8eb0-338bf83ad4b4",
+    "serialNumber": "urn:uuid:ab500b5d-8078-e124-3401-128be7860a89",
     "version": 1,
     "metadata": {
         "component": {
@@ -21,10 +21,10 @@
     "components": [
         {
             "type": "library",
-            "bom-ref": "pkg:composer/brick/math@0.18.0",
+            "bom-ref": "pkg:composer/brick/math@0.19.1",
             "name": "brick/math",
-            "version": "0.18.0",
-            "purl": "pkg:composer/brick/math@0.18.0",
+            "version": "0.19.1",
+            "purl": "pkg:composer/brick/math@0.19.1",
             "licenses": [
                 {
                     "license": {
@@ -216,10 +216,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/laravel/framework@v13.31.0",
+            "bom-ref": "pkg:composer/laravel/framework@v13.32.0",
             "name": "laravel/framework",
-            "version": "v13.31.0",
-            "purl": "pkg:composer/laravel/framework@v13.31.0",
+            "version": "v13.32.0",
+            "purl": "pkg:composer/laravel/framework@v13.32.0",
             "licenses": [
                 {
                     "license": {
@@ -381,10 +381,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/nesbot/carbon@3.13.2",
+            "bom-ref": "pkg:composer/nesbot/carbon@3.14.0",
             "name": "nesbot/carbon",
-            "version": "3.13.2",
-            "purl": "pkg:composer/nesbot/carbon@3.13.2",
+            "version": "3.14.0",
+            "purl": "pkg:composer/nesbot/carbon@3.14.0",
             "licenses": [
                 {
                     "license": {
@@ -626,10 +626,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/ramsey/uuid@4.9.3",
+            "bom-ref": "pkg:composer/ramsey/uuid@4.9.4",
             "name": "ramsey/uuid",
-            "version": "4.9.3",
-            "purl": "pkg:composer/ramsey/uuid@4.9.3",
+            "version": "4.9.4",
+            "purl": "pkg:composer/ramsey/uuid@4.9.4",
             "licenses": [
                 {
                     "license": {
@@ -656,10 +656,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/console@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/console@v7.4.19",
             "name": "symfony/console",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/console@v7.4.18",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/console@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -746,10 +746,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/finder@v7.4.17",
+            "bom-ref": "pkg:composer/symfony/finder@v7.4.19",
             "name": "symfony/finder",
-            "version": "v7.4.17",
-            "purl": "pkg:composer/symfony/finder@v7.4.17",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/finder@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -761,10 +761,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-foundation@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/http-foundation@v7.4.19",
             "name": "symfony/http-foundation",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/http-foundation@v7.4.18",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/http-foundation@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -776,10 +776,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-kernel@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/http-kernel@v7.4.19",
             "name": "symfony/http-kernel",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/http-kernel@v7.4.18",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/http-kernel@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -791,10 +791,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/mailer@v7.4.17",
+            "bom-ref": "pkg:composer/symfony/mailer@v7.4.19",
             "name": "symfony/mailer",
-            "version": "v7.4.17",
-            "purl": "pkg:composer/symfony/mailer@v7.4.17",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/mailer@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -806,10 +806,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/mime@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/mime@v7.4.19",
             "name": "symfony/mime",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/mime@v7.4.18",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/mime@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -986,10 +986,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/process@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/process@v7.4.19",
             "name": "symfony/process",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/process@v7.4.18",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/process@v7.4.19",
             "licenses": [
                 {
                     "license": {
@@ -1031,10 +1031,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/string@v7.4.15",
+            "bom-ref": "pkg:composer/symfony/string@v7.4.19",
             "name": "symfony/string",
-            "version": "v7.4.15",
-            "purl": "pkg:composer/symfony/string@v7.4.15",
+            "version": "v7.4.19",
+            "purl": "pkg:composer/symfony/string@v7.4.19",
             "licenses": [
                 {
                     "license": {
