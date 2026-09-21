@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Metric inspection in `Telemetry::fake()`** — `recordedMetrics()`, the
+  metric counterpart to `recordedSpans()`/`recordedEvents()`.
+
+  The label assertions only ever answered *does this series exist?*, which
+  is the wrong question when a label value is itself under test: code that
+  attributes a counter across several branches produces a valid value on
+  every one of them, so a test that checks one branch — or checks
+  membership of the vocabulary — passes while the rest are dead.
+
+  `$fake->recordedMetrics('transit.pairs')` returns every recorded series
+  (`RecordedSample`: name, type, labels, value, histogram count/sum) as a
+  filterable, iterable `RecordedMetrics` set with
+  `labelValues()`, `labelSets()`, `labelCardinality()`, `seriesCount()`,
+  `total()`, `forMetric()`, `ofType()`, `withLabels()` and `filter()`.
+
+  Assertions chain: `assertLabelValues($label, $values)` pins the *full*
+  observed set of one label, and `assertCardinalityBelow()`,
+  `assertLabelCardinalityBelow()` and `assertSeriesCount()` put a budget on
+  cardinality — a blown budget names the label that blew it.
+  `$fake->metricLabelValues()`/`assertMetricLabelValues()` are the
+  one-metric shorthands.
+
+### Fixed
+
+- `Telemetry::fake()`'s metric assertions now see metrics published by a
+  registered `TelemetryProvider`: they collect through `collect()` (which
+  boots pending providers) instead of reading the store directly.
+
 ## [2.3.0] - 2026-09-17
 
 ### Added

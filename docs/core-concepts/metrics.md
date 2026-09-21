@@ -55,7 +55,9 @@ buckets when rendered for Prometheus.
 
 **Cardinality**: every labelset costs `buckets + 2` store fields. Keep
 label values bounded — route patterns, not URLs; status codes, not user
-ids.
+ids. Put a budget on it in tests:
+`$fake->recordedMetrics('http.requests')->assertCardinalityBelow(200)` —
+see [Testing](../getting-started/testing.md#inspecting-metrics).
 
 ## The store
 

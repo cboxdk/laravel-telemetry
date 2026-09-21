@@ -18,7 +18,7 @@ profiles, connection timing and crash records without owning any semantic.
 - [Installation](docs/getting-started/installation.md): composer require, store choice (redis/apcu/array), exporter setup, scheduler
 - [Quickstart](docs/quickstart.md): counters, gauges, histograms, spans, events
 - [API reference](docs/getting-started/api-reference.md): the whole facade on one page — read this first
-- [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions
+- [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions, plus recordedMetrics() — every recorded series, its observed label values and a cardinality budget
 - [AI assistants](docs/getting-started/ai-assistants.md): ship-ready guidance for Claude Code, Cursor, Copilot and Laravel Boost
 
 ## Core concepts

@@ -40,6 +40,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - Always use `$fake = Telemetry::fake();` in tests — never hit Redis or real exporters.
 - Assert with `$fake->assertCounterIncremented('orders.created', ['tenant' => 'acme'])`, `assertSpanRecorded('name', fn ($span) => ...)`, `assertHistogramRecorded()`, `assertEventEmitted()`, plus the negative variants (`assertCounterNotIncremented`, `assertSpanNotRecorded`, `assertEventNotEmitted`).
 - Read values with `$fake->counterValue()`, `gaugeValue()`, `histogramCount()`, `recordedSpans()`, `recordedEvents()`.
+- When a *label value* is the thing under test, `assertCounterIncremented($name, $labels)` is too weak — one matching series satisfies it. Use `$fake->recordedMetrics('transit.pairs')->assertLabelValues('stage', [...])` to pin the full observed set, plus `assertCardinalityBelow()`/`assertLabelCardinalityBelow()` to budget cardinality and `labelValues()`/`labelCardinality()`/`samples()` to inspect what was actually recorded.
 
 ### Publishing telemetry from a package
 

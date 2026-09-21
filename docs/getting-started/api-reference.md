@@ -130,6 +130,18 @@ $fake->gaugeValue('queue.depth');
 $fake->histogramCount('checkout.duration');
 $fake->recordedSpans('billing.recalculate');
 $fake->recordedEvents();
+
+// Every recorded series — labels and cardinality, not just presence.
+$fake->recordedMetrics('orders.created')
+    ->assertLabelValues('tenant', ['acme', 'globex'])   // exactly these
+    ->assertCardinalityBelow(50)
+    ->assertLabelCardinalityBelow('tenant', 10)
+    ->assertSeriesCount(2);
+
+$fake->recordedMetrics()->forMetric('orders.created')->labelValues('tenant');
+$fake->recordedMetrics()->labelCardinality();           // ['tenant' => 2]
+$fake->metricLabelValues('orders.created', 'tenant');
+$fake->assertMetricLabelValues('orders.created', 'tenant', ['acme', 'globex']);
 ```
 
 ## Artisan
