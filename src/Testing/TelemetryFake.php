@@ -32,8 +32,6 @@ use PHPUnit\Framework\Assert;
  */
 final class TelemetryFake extends TelemetryManager
 {
-    private readonly ArrayMetricStore $store;
-
     private readonly CollectingExporter $collector;
 
     /**
@@ -52,7 +50,6 @@ final class TelemetryFake extends TelemetryManager
             resource: ['service.name' => 'testing'],
         );
 
-        $this->store = $store;
         $this->collector = new CollectingExporter;
 
         $this->addExporter($this->collector);
@@ -151,6 +148,47 @@ final class TelemetryFake extends TelemetryManager
         $sample = $this->matchSample($this->samples($name, MetricType::Histogram), $labels);
 
         return $sample instanceof HistogramSample ? $sample->count : 0;
+    }
+
+    /**
+     * Every metric series recorded so far — the metric counterpart to
+     * `recordedSpans()`/`recordedEvents()`.
+     *
+     * The label-matching assertions above answer "does this series
+     * exist?"; this answers "what did the code actually record?", which
+     * is the only way to pin a label whose value is itself under test:
+     *
+     * ```php
+     * $fake->recordedMetrics('transit.pairs')
+     *     ->assertLabelValues('stage', ['cache', 'provider'])
+     *     ->assertCardinalityBelow(50);
+     * ```
+     */
+    public function recordedMetrics(?string $name = null): RecordedMetrics
+    {
+        $metrics = RecordedMetrics::fromFamilies($this->collect());
+
+        return $name === null ? $metrics : $metrics->forMetric($name);
+    }
+
+    /**
+     * The distinct values one label was recorded with, sorted.
+     *
+     * @return list<string>
+     */
+    public function metricLabelValues(string $name, string $label): array
+    {
+        return $this->recordedMetrics($name)->labelValues($label);
+    }
+
+    /**
+     * One metric observed exactly these values for one label.
+     *
+     * @param  array<array-key, scalar|null>  $expected
+     */
+    public function assertMetricLabelValues(string $name, string $label, array $expected): void
+    {
+        $this->recordedMetrics($name)->assertLabelValues($label, $expected);
     }
 
     /*
@@ -266,19 +304,12 @@ final class TelemetryFake extends TelemetryManager
      */
     private function samples(string $name, MetricType $type): array
     {
-        foreach ($this->store->collect() as $family) {
+        // collect() is store families followed by the observable gauges,
+        // with any registered provider booted first — so a provider's
+        // metrics assert like any other.
+        foreach ($this->collect() as $family) {
             if ($family->name() === $name && $family->type() === $type) {
                 return $family->samples;
-            }
-        }
-
-        // Observable gauges live in the registry, not the store.
-        if ($type === MetricType::Gauge) {
-            foreach ($this->registry()->observe() as $family) {
-                if ($family->name() === $name) {
-                    /** @var list<Sample> */
-                    return $family->samples;
-                }
             }
         }
 
