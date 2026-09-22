@@ -47,6 +47,12 @@ final class Tracer
      */
     private ?bool $sampledOverride = null;
 
+    /**
+     * The active unit of work is not traced at all (an ignored request
+     * path). Stronger than an unsampled trace — see suppress().
+     */
+    private bool $suppressed = false;
+
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
@@ -86,6 +92,10 @@ final class Tracer
      */
     public function currentlySampled(?Span $span = null): bool
     {
+        if ($this->suppressed) {
+            return false;
+        }
+
         $sampled = $span === null
             ? $this->sampledOverride ?? $this->sampled ?? true
             : $this->sampledOverride ?? $span->sampled;
@@ -95,6 +105,38 @@ final class Tracer
         }
 
         return $this->alwaysSampleErrors && $span?->status() === SpanStatus::Error;
+    }
+
+    /**
+     * Take the active unit of work out of tracing entirely — for requests
+     * the host asked not to instrument (`instrument.http_ignore_paths`).
+     *
+     * Stronger than resample(false), on purpose:
+     *
+     * - Spans still open as CONTEXT, so work inside the unit (a query, an
+     *   outgoing HTTP call, a mail) finds a parent and never starts a trace
+     *   root of its own. Nothing is buffered, not even an error span — the
+     *   `always_sample_errors` escape would otherwise export a failing child
+     *   whose parent was never recorded: an orphan, which is the noise this
+     *   exists to remove.
+     * - No trace id is exposed (traceId() is null) and nothing propagates
+     *   (currentTraceParent() is null). Exception records and log lines
+     *   written during the unit carry no trace reference to a trace that
+     *   does not exist, and a job dispatched or a service called from it
+     *   starts its own trace instead of inheriting an unsampled one.
+     *
+     * Cleared by resetContext(), which every unit of work ends with.
+     */
+    public function suppress(): void
+    {
+        $this->suppressed = true;
+        $this->sampled = false;
+        $this->sampledOverride = false;
+    }
+
+    public function suppressed(): bool
+    {
+        return $this->suppressed;
     }
 
     public function resampleAt(float $rate): void
@@ -386,6 +428,10 @@ final class Tracer
 
     public function traceId(): ?string
     {
+        if ($this->suppressed) {
+            return null;
+        }
+
         return $this->currentSpan()->traceId ?? $this->traceId;
     }
 
@@ -394,6 +440,10 @@ final class Tracer
      */
     public function currentTraceParent(): ?TraceParent
     {
+        if ($this->suppressed) {
+            return null;
+        }
+
         if ($current = $this->currentSpan()) {
             return new TraceParent(
                 $current->traceId,
@@ -445,6 +495,7 @@ final class Tracer
         $this->traceId = null;
         $this->sampled = null;
         $this->sampledOverride = null;
+        $this->suppressed = false;
         $this->contextAttributes = [];
         $this->traceStats = [];
     }
@@ -493,6 +544,11 @@ final class Tracer
 
         if ($index !== false) {
             array_splice($this->stack, (int) $index, 1);
+        }
+
+        // A suppressed unit exports nothing — no error escape either.
+        if ($this->suppressed) {
+            return;
         }
 
         $sampled = $this->sampledOverride ?? $span->sampled;

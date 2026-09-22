@@ -58,6 +58,11 @@ Telemetry::traceparent();          // ?string — W3C header value
 Telemetry::continueTrace($header); // continue a remote trace
 Telemetry::resetContext();         // forget the active trace
 
+// Requests left uninstrumented (merged with instrument.http_ignore_paths)
+Telemetry::ignorePaths(['telemetry-ui', 'telemetry-ui/*']); // Str::is globs, no leading slash
+Telemetry::ignoredPaths();         // list<string> — config + registered
+Telemetry::ignoresPath('health');  // bool
+
 // Outbound propagation
 Http::withTraceparent()->post($url, $payload);
 ```

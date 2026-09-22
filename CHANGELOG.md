@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ignored request paths** — `instrument.http_ignore_paths`
+  (`TELEMETRY_HTTP_IGNORE_PATHS`, comma-separated) and
+  `Telemetry::ignorePaths([...])` for packages, merged. `Str::is()` globs
+  on the path without its leading slash (`health`, `horizon*`,
+  `telemetry-ui/*`).
+
+  A dashboard mounted in the host app (cboxdk/laravel-telemetry-ui) was
+  traced like any other traffic, so its own panel requests became the
+  host's top routes. `Sample::never()` didn't help: it drops the spans but
+  keeps the request metrics and the page view, and failing spans still
+  escape it.
+
+  A matching request gets no server span, no `http.server.*` metrics, no
+  `analytics.page_view` and no `X-Trace-Id`. The tracer is suppressed for
+  the request, so spans inside it (queries, outgoing HTTP, mail) are
+  context only and never exported, error spans included. They don't start
+  orphan traces, and no trace context propagates to jobs or downstream
+  services. Exceptions are still recorded as `exception` records and
+  counted in `exceptions.reported`, without a trace id. Also adds
+  `Telemetry::ignoredPaths()`, `Telemetry::ignoresPath()` and
+  `Tracer::suppress()`.
+
 ## [2.4.0] - 2026-09-21
 
 ### Added

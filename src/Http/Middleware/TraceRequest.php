@@ -48,6 +48,8 @@ final class TraceRequest
 
     private const NATIVE_KEY = 'cbox.telemetry.native';
 
+    private const IGNORED_KEY = 'cbox.telemetry.ignored';
+
     /** Memory-peak buckets: 4 MB … 1 GB. */
     private const MEMORY_BUCKETS = [4194304, 8388608, 16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824];
 
@@ -79,6 +81,22 @@ final class TraceRequest
     public function handle(Request $request, Closure $next): Response
     {
         if (! $this->telemetry->enabled()) {
+            return $next($request);
+        }
+
+        // An ignored path (instrument.http_ignore_paths / Telemetry::
+        // ignorePaths) — decided once, here, before anything is started. No
+        // server span, no incoming trace continued, no native unit adopted,
+        // no X-Trace-Id; and the tracer is suppressed rather than merely left
+        // without a root, because the HTTP client, mail and notification
+        // instrumentations open spans with or without a parent — each would
+        // otherwise become a trace root of its own. Exception records still
+        // get written (the reportable hook doesn't go through here), just
+        // without a trace id to a trace that doesn't exist.
+        if (FailSafe::guard(fn (): bool => $this->telemetry->ignoresPath($request->path())) === true) {
+            $request->attributes->set(self::IGNORED_KEY, true);
+            $this->telemetry->tracer()->suppress();
+
             return $next($request);
         }
 
@@ -194,6 +212,17 @@ final class TraceRequest
 
     public function terminate(Request $request, Response $response): void
     {
+        if ($request->attributes->get(self::IGNORED_KEY) === true) {
+            // Nothing of the request's own to finish — only what it wrote
+            // (exception records, metrics from other instrumentation) to
+            // ship, and the suppression to lift before the next request on
+            // a long-lived worker.
+            $this->telemetry->flush();
+            $this->telemetry->resetContext();
+
+            return;
+        }
+
         $span = $request->attributes->get(self::SPAN_KEY);
 
         if (! $span instanceof Span) {

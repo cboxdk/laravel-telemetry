@@ -480,6 +480,20 @@ return [
         // HTTP server spans + http.server.* metrics via global middleware.
         'requests' => env('TELEMETRY_INSTRUMENT_REQUESTS', true),
 
+        // Request paths left completely uninstrumented: no server span, no
+        // http.server.* metrics, no analytics page view — and no trace for
+        // anything that runs inside the request (its query, cache, outgoing
+        // HTTP and mail spans are context only, never exported, not even on
+        // error). Exceptions reported there are still recorded, without a
+        // trace id. Str::is() globs on the path WITHOUT its leading slash:
+        // 'health', 'horizon*', 'telemetry-ui/*' ('/' is the site root).
+        //
+        // Packages add their own with Telemetry::ignorePaths([...]); both
+        // lists apply. Env: comma-separated, e.g. "health,up,horizon*".
+        'http_ignore_paths' => env('TELEMETRY_HTTP_IGNORE_PATHS') === null
+            ? []
+            : array_values(array_filter(array_map('trim', explode(',', (string) env('TELEMETRY_HTTP_IGNORE_PATHS'))))),
+
         // Add the domain as a server.address label on http.server.*
         // metrics. Routes with a domain pattern report the PATTERN
         // ("{tenant}.app.example"), keeping wildcard-tenant cardinality

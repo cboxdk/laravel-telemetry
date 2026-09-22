@@ -271,6 +271,69 @@ Route::post('/checkout', ...)->middleware(Sample::always());
 Route::get('/feed', ...)->middleware(Sample::rate(0.01));
 ```
 
+## Ignoring request paths
+
+Sampling still *measures* a request — `Sample::never()` drops its spans,
+but the `http.server.*` metrics, the analytics page view and any failing
+span (via the error escape) remain. For traffic you don't want in your
+telemetry at all — an observability dashboard reading its own backend, a
+load-balancer probe — list the paths instead:
+
+```php
+// config/telemetry.php — or TELEMETRY_HTTP_IGNORE_PATHS="health,telemetry-ui,telemetry-ui/*"
+'instrument' => [
+    'http_ignore_paths' => ['health', 'telemetry-ui', 'telemetry-ui/*'],
+],
+```
+
+A package that mounts its own routes registers them itself, from a service
+provider's `boot()` — data only, nothing is resolved or matched until a
+request arrives:
+
+```php
+if (class_exists(\Cbox\Telemetry\Facades\Telemetry::class)) {
+    \Cbox\Telemetry\Facades\Telemetry::ignorePaths(['telemetry-ui', 'telemetry-ui/*']);
+}
+```
+
+Both lists apply (`Telemetry::ignoredPaths()` returns the merged set).
+Patterns are `Str::is()` globs matched against the request path **without
+its leading slash**: `health` is exact, `telemetry-ui/*` covers everything
+below the prefix but not the prefix itself, `horizon*` covers both, and `/`
+is the site root. The check runs once, first thing in the request
+middleware.
+
+What an ignored request gets:
+
+- **No server span, no `http.server.request.duration` / `.memory.peak` /
+  `.cpu.time`, no `analytics.page_view`**, no `X-Trace-Id` response header,
+  and no incoming `traceparent`/`baggage` is continued.
+- **No trace for anything inside it.** The tracer is *suppressed* for the
+  request rather than left without a root: the HTTP client, mail and
+  notification instrumentations open spans with or without a parent, and
+  each would otherwise become a trace root of its own — a dashboard's
+  Tempo/Loki calls turning up as hundreds of orphan traces. Spans still
+  open as context, so nothing starts a root; none is exported, not even an
+  error span (the `always_sample_errors` escape would publish a child whose
+  parent was never recorded). `Telemetry::currentSpan()`, `traceId()` and
+  `traceparent()` return null, so nothing propagates: a job dispatched or a
+  service called from the request starts its own trace.
+- **Exceptions are still reported.** `report()` — and so an unhandled
+  exception — still writes the `exception` record and increments
+  `exceptions.reported`: errors in an ignored path must not vanish. The
+  record carries no trace or span id, because there is no trace to link to.
+- **Fleet metrics from other instrumentation still count** when they are
+  independent of the request span — an outgoing HTTP call still records its
+  client-duration histogram, a cache hit still counts. Those are real load
+  on the backend, whoever caused it. Instrumentation that only records
+  inside a request span (query spans and `db.queries`, Redis, views) records
+  nothing.
+
+The suppression is lifted when the request terminates (and by the Octane
+reset), so the next request on a long-lived worker is traced normally.
+Browser RUM (`@telemetryBrowser`) reports from the page itself — leave the
+snippet off pages you ignore.
+
 ## Tail detail retention
 
 MANY details when it hurts, a lean skeleton when all is well:
