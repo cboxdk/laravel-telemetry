@@ -14,6 +14,7 @@ use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ClientGeo;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\FrameworkBoot;
 use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceUsage;
@@ -84,6 +85,10 @@ final class TraceRequest
             return $next($request);
         }
 
+        // Claimed before anything can return early: the process's first
+        // request consumed the boot whether or not it records it.
+        $bootstrapMs = FrameworkBoot::claim();
+
         // An ignored path (instrument.http_ignore_paths / Telemetry::
         // ignorePaths) — decided once, here, before anything is started. No
         // server span, no incoming trace continued, no native unit adopted,
@@ -100,7 +105,7 @@ final class TraceRequest
             return $next($request);
         }
 
-        FailSafe::guard(function () use ($request) {
+        FailSafe::guard(function () use ($request, $bootstrapMs) {
             if (config('telemetry.traces.continue_incoming')) {
                 $this->telemetry->continueTrace(
                     $request->headers->get('traceparent'),
@@ -148,13 +153,9 @@ final class TraceRequest
 
             // The framework-boot phase, visible in the waterfall — from
             // LARAVEL_START (public/index.php) until this middleware ran.
-            if (defined('LARAVEL_START')) {
-                $bootstrapMs = microtime(true) * 1000 - LARAVEL_START * 1000;
-
-                if ($bootstrapMs > 0 && $bootstrapMs < 60_000) {
-                    $this->telemetry->tracer()->recordSpan('laravel.bootstrap', $bootstrapMs);
-                    $span->setAttribute('laravel.bootstrap_ms', round($bootstrapMs, 2));
-                }
+            if ($bootstrapMs !== null) {
+                $this->telemetry->tracer()->recordSpan('laravel.bootstrap', $bootstrapMs);
+                $span->setAttribute('laravel.bootstrap_ms', round($bootstrapMs, 2));
             }
 
             if (config('telemetry.instrument.resources', true)) {
