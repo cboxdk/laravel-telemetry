@@ -31,6 +31,7 @@ use Cbox\Telemetry\Http\Controllers\SourcemapController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
 use Cbox\Telemetry\Http\Middleware\FlushBrowserIngest;
 use Cbox\Telemetry\Http\Middleware\TraceRequest;
+use Cbox\Telemetry\Http\RequestPhases;
 use Cbox\Telemetry\Instrumentation\AuthInstrumentation;
 use Cbox\Telemetry\Instrumentation\BroadcastingInstrumentation;
 use Cbox\Telemetry\Instrumentation\BusInstrumentation;
@@ -87,11 +88,14 @@ use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Foundation\Events\Terminating;
+use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
+use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -690,6 +694,18 @@ class TelemetryServiceProvider extends ServiceProvider
             }
         });
 
+        // Phase boundaries the middleware can't see from where it sits.
+        // Resolved here, not per event: Octane runs each request in a
+        // cloned container, and a recorder first resolved inside one would
+        // not be the instance these listeners hold.
+        $this->app->singleton(RequestPhases::class);
+        $phases = $this->app->make(RequestPhases::class);
+        $events = $this->app->make(Dispatcher::class);
+
+        $events->listen(RouteMatched::class, static fn () => FailSafe::guard(static fn () => $phases->routeMatched()));
+        $events->listen(RequestHandled::class, static fn () => FailSafe::guard(static fn () => $phases->handled()));
+        $events->listen(Terminating::class, static fn () => FailSafe::guard(static fn () => $phases->terminating()));
+
         // The login POST authenticates AFTER the span starts, and logout
         // empties the guard BEFORE terminate — remember the identity so
         // both request types still get user attribution.
@@ -1266,6 +1282,7 @@ class TelemetryServiceProvider extends ServiceProvider
             // that died with a native unit open would hold the one-unit-at-
             // a-time latch shut for the rest of the worker's life.
             NativeProfiler::class,
+            RequestPhases::class,
         ];
     }
 }

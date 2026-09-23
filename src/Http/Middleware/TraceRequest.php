@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Http\Middleware;
 
+use Cbox\Telemetry\Http\RequestPhases;
 use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Native\NativeReporter;
 use Cbox\Telemetry\Native\NativeUnit;
@@ -77,6 +78,7 @@ final class TraceRequest
     public function __construct(
         private readonly TelemetryManager $telemetry,
         private readonly NativeProfiler $native,
+        private readonly RequestPhases $phases,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -157,6 +159,8 @@ final class TraceRequest
                 $this->telemetry->tracer()->recordSpan('laravel.bootstrap', $bootstrapMs);
                 $span->setAttribute('laravel.bootstrap_ms', round($bootstrapMs, 2));
             }
+
+            $this->phases->start($span, $this->telemetry->tracer());
 
             if (config('telemetry.instrument.resources', true)) {
                 $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
@@ -429,6 +433,12 @@ final class TraceRequest
                 }
             }
 
+            // The last phase closes here, and with it the answer to how
+            // long the CLIENT waited — this terminate() runs after the
+            // response went out, behind the session save and every
+            // defer() callback.
+            $respondedMs = $this->phases->finish();
+
             $span->end();
 
             $profile = $request->attributes->get(self::PROFILE_KEY);
@@ -449,9 +459,15 @@ final class TraceRequest
             // the millisecond ladder it replaces. The unit is fixed by the
             // spec; the buckets are only advisory, so there is no reason to
             // lose resolution to gain conformance.
+            //
+            // Measured to the response being sent, not to the span's end:
+            // work after the send (defer(), terminable middleware) isn't
+            // latency anyone waited for, and counting it made a request
+            // that answered in 80 ms and deferred 2 s of work read as a
+            // 2 s request. The span still covers it, as laravel.terminate.
             $this->telemetry
                 ->histogram('http.server.request.duration', buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10], description: 'HTTP server request duration', unit: 's')
-                ->record($span->durationMs() / 1000, $labels);
+                ->record(($respondedMs ?? $span->durationMs()) / 1000, $labels);
 
             if ($measured !== null) {
                 $this->telemetry
@@ -473,6 +489,10 @@ final class TraceRequest
         if ($native instanceof NativeUnit) {
             FailSafe::guard(static fn () => $native->discard());
         }
+
+        // Same reason: a throw before finish() leaves the phases pointing
+        // at this request's span, where a later one would record into it.
+        $this->phases->flushRequestState();
 
         $this->telemetry->flush();
         $this->telemetry->resetContext();
