@@ -25,7 +25,7 @@ profiles, connection timing and crash records without owning any semantic.
 
 - [Architecture](docs/core-concepts/architecture.md): signal flow, push vs pull, export timing, failure policy
 - [Metrics](docs/core-concepts/metrics.md): counters, gauges, histograms, the shared store, cardinality
-- [Traces](docs/core-concepts/traces.md): spans, W3C context propagation, sampling, buffering
+- [Traces](docs/core-concepts/traces.md): spans, W3C context propagation, sampling, ignored request paths (instrument.http_ignore_paths / Telemetry::ignorePaths; the package's own scrape/ingest routes excluded by default, the host's /up deliberately not), buffering
 - [Events](docs/core-concepts/events.md): structured events vs span events vs metrics
 - [Logs](docs/core-concepts/logs.md): the telemetry log channel, severity mapping, trace correlation
 - [Naming](docs/core-concepts/naming.md): OTel semantic conventions, rules

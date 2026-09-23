@@ -29,6 +29,7 @@ use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Str;
 use Throwable;
 use WeakMap;
 
@@ -74,6 +75,12 @@ class TelemetryManager
 
     /** @var array{id: string, type: string, guard: string|null}|null */
     private ?array $rememberedUser = null;
+
+    /** @var list<string> request-path patterns registered via ignorePaths() */
+    private array $ignoredPaths = [];
+
+    /** @var array{0: mixed, 1: mixed, 2: list<string>}|null the config values last normalized, and the merged list */
+    private ?array $ignoredPathsCache = null;
 
     /**
      * @param  array<string, scalar>  $resource
@@ -170,9 +177,15 @@ class TelemetryManager
         return $this->tracer->span($name, $callback, $attributes, $kind);
     }
 
+    /**
+     * The innermost open span, or null — also null inside a request whose
+     * path is ignored (`instrument.http_ignore_paths`): spans there are
+     * context only, never exported, so there is nothing to annotate and no
+     * trace id worth stamping on an exception record or a log line.
+     */
     public function currentSpan(): ?Span
     {
-        return $this->tracer->currentSpan();
+        return $this->tracer->suppressed() ? null : $this->tracer->currentSpan();
     }
 
     public function traceId(): ?string
@@ -599,6 +612,113 @@ class TelemetryManager
     }
 
     /**
+     * Skip HTTP request instrumentation for these paths — no server span,
+     * no http.server.* metrics, no analytics page view, and no trace for
+     * anything that runs inside the request. For packages that mount their
+     * own routes (a dashboard, a health probe) and would otherwise drown
+     * the host's real traffic:
+     *
+     *     Telemetry::ignorePaths(['telemetry-ui', 'telemetry-ui/*']);
+     *
+     * Patterns are Str::is() globs matched against the request path
+     * WITHOUT its leading slash ("health", "horizon*", "api/internal/*");
+     * "/" matches the site root. Merged with `instrument.http_ignore_paths`
+     * from config. Data only: call it from a service provider's boot(),
+     * nothing is resolved or matched until a request arrives.
+     *
+     * @param  string|list<string>  $patterns
+     */
+    public function ignorePaths(string|array $patterns): void
+    {
+        foreach ((array) $patterns as $pattern) {
+            $normalized = self::normalizePathPattern($pattern);
+
+            if ($normalized !== null && ! in_array($normalized, $this->ignoredPaths, true)) {
+                $this->ignoredPaths[] = $normalized;
+            }
+        }
+
+        $this->ignoredPathsCache = null;
+    }
+
+    /**
+     * Every ignored-path pattern in force: config first, then this
+     * package's own routes (the scrape endpoints, the browser ingest and
+     * its asset, the source map upload — unless
+     * `instrument.http_ignore_own_routes` is off), then the ones
+     * registered with ignorePaths().
+     *
+     * @return list<string>
+     */
+    public function ignoredPaths(): array
+    {
+        $configured = config('telemetry.instrument.http_ignore_paths', []);
+
+        // Written by the service provider as it registers each of the
+        // package's own routes, from that route's configured path.
+        $own = config('telemetry.instrument.http_ignore_own_routes', true)
+            ? config('telemetry.instrument.http_own_route_paths', [])
+            : [];
+
+        // Normalized once per distinct pair of config values, not once per
+        // request.
+        if ($this->ignoredPathsCache !== null
+            && $this->ignoredPathsCache[0] === $configured
+            && $this->ignoredPathsCache[1] === $own) {
+            return $this->ignoredPathsCache[2];
+        }
+
+        $patterns = [];
+
+        foreach ([$configured, $own] as $source) {
+            foreach (is_array($source) ? $source : [$source] as $pattern) {
+                $normalized = is_string($pattern) ? self::normalizePathPattern($pattern) : null;
+
+                if ($normalized !== null) {
+                    $patterns[] = $normalized;
+                }
+            }
+        }
+
+        $merged = array_values(array_unique([...$patterns, ...$this->ignoredPaths]));
+
+        $this->ignoredPathsCache = [$configured, $own, $merged];
+
+        return $merged;
+    }
+
+    /**
+     * Whether requests to this path are left uninstrumented.
+     *
+     * @param  string  $path  as Request::path() returns it — no leading slash, "/" for the root
+     */
+    public function ignoresPath(string $path): bool
+    {
+        $patterns = $this->ignoredPaths();
+
+        if ($patterns === []) {
+            return false;
+        }
+
+        $path = $path === '/' ? '/' : trim($path, '/');
+
+        return Str::is($patterns, $path === '' ? '/' : $path);
+    }
+
+    private static function normalizePathPattern(string $pattern): ?string
+    {
+        $pattern = trim($pattern);
+
+        if ($pattern === '') {
+            return null;
+        }
+
+        $trimmed = trim($pattern, '/');
+
+        return $trimmed === '' ? '/' : $trimmed;
+    }
+
+    /**
      * Opt in to richer user attribution on request spans (PII is off by
      * default — only user.id/type/guard ship out of the box). The
      * resolver receives the user AND the guard that authenticated, so
@@ -746,7 +866,7 @@ class TelemetryManager
      */
     public function event(string $name, array $attributes = []): void
     {
-        $span = $this->tracer->currentSpan();
+        $span = $this->currentSpan();
 
         $this->recordEvent(new TelemetryEvent(
             name: $name,

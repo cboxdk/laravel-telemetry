@@ -266,6 +266,8 @@ Only valid v3 source maps within the size limit are stored. See
 | Key | Env | Default |
 |---|---|---|
 | `instrument.requests` | `TELEMETRY_INSTRUMENT_REQUESTS` | `true` |
+| `instrument.http_ignore_paths` | `TELEMETRY_HTTP_IGNORE_PATHS` (comma-separated) | `[]` — request paths left completely uninstrumented: no server span, no `http.server.*` metrics, no analytics page view, and nothing inside the request is traced. Exceptions are still recorded (without a trace id). `Str::is()` globs on the path without its leading slash (`health`, `horizon*`, `telemetry-ui/*`; `/` is the root). Merged with `Telemetry::ignorePaths()`. See [Ignoring request paths](../core-concepts/traces.md#ignoring-request-paths) |
+| `instrument.http_ignore_own_routes` | `TELEMETRY_HTTP_IGNORE_OWN_ROUTES` | `true` — this package's own routes (Prometheus scrape endpoints, browser span ingest, RUM asset, source map upload) are left uninstrumented, at whatever path each is configured with. A 15s scrape is ~5,700 requests a day measuring nothing about the app; Prometheus already times its own scrapes. Set `false` to instrument them like any other route |
 | `instrument.host_label` | `TELEMETRY_INSTRUMENT_HOST_LABEL` | `true` — `server.address` label on `http.server.*` metrics; routes with a domain pattern report the pattern (`{tenant}.app.example`), keeping wildcard cardinality bounded |
 | `instrument.request_headers` | — | `accept, accept-language, content-type, origin, referer, x-forwarded-for, x-requested-with` — span attrs `http.request.header.*`; credentials/session headers are denylisted and never captured |
 | `instrument.response_headers` | — | `content-type, cache-control` — span attrs `http.response.header.*` |

@@ -480,6 +480,36 @@ return [
         // HTTP server spans + http.server.* metrics via global middleware.
         'requests' => env('TELEMETRY_INSTRUMENT_REQUESTS', true),
 
+        // Request paths left completely uninstrumented: no server span, no
+        // http.server.* metrics, no analytics page view — and no trace for
+        // anything that runs inside the request (its query, cache, outgoing
+        // HTTP and mail spans are context only, never exported, not even on
+        // error). Exceptions reported there are still recorded, without a
+        // trace id. Str::is() globs on the path WITHOUT its leading slash:
+        // 'health', 'horizon*', 'telemetry-ui/*' ('/' is the site root).
+        //
+        // Packages add their own with Telemetry::ignorePaths([...]); both
+        // lists apply. Env: comma-separated, e.g. "health,up,horizon*".
+        //
+        // A health probe is the usual first candidate — Laravel's /up
+        // answers an uptime check every few seconds and tells you nothing
+        // about your app. It is NOT excluded by default: it is your route,
+        // and silently dropping traffic an installation already records is
+        // worse than the noise. Add 'up' here when you want it gone.
+        'http_ignore_paths' => env('TELEMETRY_HTTP_IGNORE_PATHS') === null
+            ? []
+            : array_values(array_filter(array_map('trim', explode(',', (string) env('TELEMETRY_HTTP_IGNORE_PATHS'))))),
+
+        // This package's OWN routes — the Prometheus scrape endpoints, the
+        // browser span ingest, the RUM asset, the source map upload — are
+        // ignored like any other ignored path. A 15-second scrape is ~5,700
+        // requests a day measuring nothing about the app, and the ingest
+        // route fires once per real page view: telemetry reporting itself
+        // as traffic. Prometheus already times its own scrapes
+        // (scrape_duration_seconds), from the side that can act on it.
+        // Follows whatever path each route is configured with.
+        'http_ignore_own_routes' => env('TELEMETRY_HTTP_IGNORE_OWN_ROUTES', true),
+
         // Add the domain as a server.address label on http.server.*
         // metrics. Routes with a domain pattern report the PATTERN
         // ("{tenant}.app.example"), keeping wildcard-tenant cardinality
