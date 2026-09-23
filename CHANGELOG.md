@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Telemetry::ignoredPaths()`, `Telemetry::ignoresPath()` and
   `Tracer::suppress()`.
 
+- **The package now ignores its own routes** (`instrument.http_ignore_own_routes`,
+  on by default). The Prometheus scrape endpoints, the browser span ingest,
+  its RUM asset and the source map upload were instrumented as ordinary app
+  traffic: a 15-second scrape is ~5,700 requests a day that measure nothing
+  about the app and land near the top of the host's own route tables, and
+  the ingest route fires once per real page view — telemetry reporting
+  itself as traffic. Prometheus already records `scrape_duration_seconds`
+  per target, from the side that can act on it.
+
+  The exclusion is registered from the path each route is actually
+  configured with, so moving an endpoint moves it too, and it is read when
+  a request arrives rather than resolved during boot. Set the flag to
+  `false` to measure them like any other route.
+
+  Laravel's `/up` is deliberately **not** excluded: it is the host's route,
+  and silently dropping traffic an installation already records is worse
+  than the noise. `http_ignore_paths` stays `[]` by default — the config
+  file now says so, and where to add `up` if you want it gone.
+
 ## [2.4.0] - 2026-09-21
 
 ### Added

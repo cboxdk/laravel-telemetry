@@ -79,7 +79,7 @@ class TelemetryManager
     /** @var list<string> request-path patterns registered via ignorePaths() */
     private array $ignoredPaths = [];
 
-    /** @var array{0: mixed, 1: list<string>}|null the config value last normalized, and the merged list */
+    /** @var array{0: mixed, 1: mixed, 2: list<string>}|null the config values last normalized, and the merged list */
     private ?array $ignoredPathsCache = null;
 
     /**
@@ -642,7 +642,10 @@ class TelemetryManager
     }
 
     /**
-     * Every ignored-path pattern in force: config first, then the ones
+     * Every ignored-path pattern in force: config first, then this
+     * package's own routes (the scrape endpoints, the browser ingest and
+     * its asset, the source map upload — unless
+     * `instrument.http_ignore_own_routes` is off), then the ones
      * registered with ignorePaths().
      *
      * @return list<string>
@@ -651,24 +654,35 @@ class TelemetryManager
     {
         $configured = config('telemetry.instrument.http_ignore_paths', []);
 
-        // Normalized once per distinct config value, not once per request.
-        if ($this->ignoredPathsCache !== null && $this->ignoredPathsCache[0] === $configured) {
-            return $this->ignoredPathsCache[1];
+        // Written by the service provider as it registers each of the
+        // package's own routes, from that route's configured path.
+        $own = config('telemetry.instrument.http_ignore_own_routes', true)
+            ? config('telemetry.instrument.http_own_route_paths', [])
+            : [];
+
+        // Normalized once per distinct pair of config values, not once per
+        // request.
+        if ($this->ignoredPathsCache !== null
+            && $this->ignoredPathsCache[0] === $configured
+            && $this->ignoredPathsCache[1] === $own) {
+            return $this->ignoredPathsCache[2];
         }
 
         $patterns = [];
 
-        foreach (is_array($configured) ? $configured : [$configured] as $pattern) {
-            $normalized = is_string($pattern) ? self::normalizePathPattern($pattern) : null;
+        foreach ([$configured, $own] as $source) {
+            foreach (is_array($source) ? $source : [$source] as $pattern) {
+                $normalized = is_string($pattern) ? self::normalizePathPattern($pattern) : null;
 
-            if ($normalized !== null) {
-                $patterns[] = $normalized;
+                if ($normalized !== null) {
+                    $patterns[] = $normalized;
+                }
             }
         }
 
         $merged = array_values(array_unique([...$patterns, ...$this->ignoredPaths]));
 
-        $this->ignoredPathsCache = [$configured, $merged];
+        $this->ignoredPathsCache = [$configured, $own, $merged];
 
         return $merged;
     }

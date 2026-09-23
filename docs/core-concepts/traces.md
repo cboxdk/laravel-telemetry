@@ -303,6 +303,33 @@ below the prefix but not the prefix itself, `horizon*` covers both, and `/`
 is the site root. The check runs once, first thing in the request
 middleware.
 
+### This package ignores its own routes
+
+The same advice applies to the package giving it, so it takes it: the
+Prometheus scrape endpoints, the browser span ingest, the RUM asset and the
+source map upload are ignored out of the box. A 15-second scrape is ~5,700
+requests a day that measure nothing about your app, and it would sit near
+the top of your own route tables; the ingest route fires once per real page
+view, so telemetry would report itself as traffic.
+
+Nothing is lost by it. Prometheus already records `scrape_duration_seconds`
+per target, from the side that can act on it.
+
+The exclusion follows whatever path each route is configured with, so
+moving an endpoint moves it too. To measure them like any other route:
+
+```php
+'instrument' => [
+    'http_ignore_own_routes' => false, // TELEMETRY_HTTP_IGNORE_OWN_ROUTES=false
+],
+```
+
+**Your own routes stay yours.** Laravel's `/up` is the usual next
+candidate — an uptime check hits it every few seconds — but it is not
+excluded by default: silently dropping traffic an installation already
+records is worse than the noise. Add `'up'` to `http_ignore_paths` when you
+want it gone.
+
 What an ignored request gets:
 
 - **No server span, no `http.server.request.duration` / `.memory.peak` /

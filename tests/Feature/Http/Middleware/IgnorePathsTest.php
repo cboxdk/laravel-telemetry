@@ -105,7 +105,9 @@ it('lets packages register paths programmatically, merged with config', function
     Telemetry::ignorePaths(['telemetry-ui', 'telemetry-ui/*']);
     Telemetry::ignorePaths('telemetry-ui'); // registering twice is harmless
 
-    expect(Telemetry::ignoredPaths())->toBe(['health', 'telemetry-ui', 'telemetry-ui/*']);
+    // telemetry/metrics is in there without anyone asking: the package
+    // ignores its own routes (instrument.http_ignore_own_routes).
+    expect(Telemetry::ignoredPaths())->toBe(['health', 'telemetry/metrics', 'telemetry-ui', 'telemetry-ui/*']);
 
     $this->get('/health')->assertOk();
     $this->get('/telemetry-ui/api/v2/panels/errors')->assertOk();
@@ -242,4 +244,29 @@ it('still reports a 500 from a non-ignored request as an error span', function (
 
     expect($server->status())->toBe(SpanStatus::Error)
         ->and(ignoredPathEvents($this->collector, 'exception')[0]->traceId)->toBe($server->traceId);
+});
+
+it('ignores its own routes, so the scrape endpoint never becomes a top route', function () {
+    // Default config: nothing in http_ignore_paths, yet the package's own
+    // scrape must not show up as app traffic.
+    expect(config('telemetry.instrument.http_ignore_paths'))->toBe([]);
+
+    $this->get('/telemetry/metrics')->assertOk()->assertHeaderMissing('X-Trace-Id');
+    $this->get('/dashboard')->assertOk();
+
+    $servers = array_values(array_filter(ignoredPathSpans($this->collector), fn (Span $span) => $span->kind === SpanKind::Server));
+
+    expect($servers)->toHaveCount(1)
+        ->and($servers[0]->name)->toBe('GET /dashboard')
+        ->and(ignoredPathRequestRoutes())->toBe(['/dashboard']);
+});
+
+it('instruments its own routes again when told to', function () {
+    // The escape hatch, read per request: an operator who does want their
+    // scrape traffic in the metrics turns the self-exclusion off.
+    config()->set('telemetry.instrument.http_ignore_own_routes', false);
+
+    $this->get('/telemetry/metrics')->assertOk()->assertHeader('X-Trace-Id');
+
+    expect(ignoredPathRequestRoutes())->toBe(['/telemetry/metrics']);
 });

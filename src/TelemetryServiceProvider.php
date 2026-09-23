@@ -279,6 +279,11 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
+        // Derived state, rebuilt from the routes actually registered below
+        // — a config:cache taken before an endpoint moved must not leave
+        // the old path ignored for whatever mounts there next.
+        $this->app->make('config')->set('telemetry.instrument.http_own_route_paths', []);
+
         $this->registerPrometheusRoutes();
         $this->registerSpanIngestRoute();
         $this->registerSourcemapRoute();
@@ -555,9 +560,13 @@ class TelemetryServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make(Router::class);
 
-        $router->post(Cast::string($config['path'] ?? null, 'telemetry/sourcemaps'), SourcemapController::class)
+        $path = Cast::string($config['path'] ?? null, 'telemetry/sourcemaps');
+
+        $router->post($path, SourcemapController::class)
             ->middleware(Cast::stringList($config['middleware'] ?? []))
             ->name('telemetry.sourcemaps');
+
+        $this->ignoreOwnRoute($path);
     }
 
     /**
@@ -594,14 +603,21 @@ class TelemetryServiceProvider extends ServiceProvider
         /** @var Router $router */
         $router = $this->app->make(Router::class);
 
-        $router->post(Cast::string($config['path'] ?? null, 'telemetry/spans'), SpanIngestController::class)
+        $path = Cast::string($config['path'] ?? null, 'telemetry/spans');
+
+        $router->post($path, SpanIngestController::class)
             ->middleware([...Cast::stringList($config['middleware'] ?? []), FlushBrowserIngest::class])
             ->defaults('telemetryIngest', $config)
             ->name('telemetry.ingest.spans');
 
         // The zero-build RUM script served for @telemetryBrowser.
-        $router->get(Cast::string($config['asset_path'] ?? null, 'telemetry/browser.js'), BrowserAssetController::class)
+        $assetPath = Cast::string($config['asset_path'] ?? null, 'telemetry/browser.js');
+
+        $router->get($assetPath, BrowserAssetController::class)
             ->name('telemetry.ingest.asset');
+
+        $this->ignoreOwnRoute($path);
+        $this->ignoreOwnRoute($assetPath);
     }
 
     private function registerPrometheusRoutes(): void
@@ -617,10 +633,46 @@ class TelemetryServiceProvider extends ServiceProvider
         $endpoints = $this->app->make('config')->get('telemetry.prometheus.endpoints', []);
 
         foreach ($endpoints as $name => $endpoint) {
-            $router->get($endpoint['path'] ?? 'telemetry/metrics', PrometheusController::class)
+            $path = $endpoint['path'] ?? 'telemetry/metrics';
+
+            $router->get($path, PrometheusController::class)
                 ->middleware($endpoint['middleware'] ?? [])
                 ->defaults('telemetryEndpoint', $name)
                 ->name("telemetry.prometheus.{$name}");
+
+            $this->ignoreOwnRoute($path);
+        }
+    }
+
+    /**
+     * Take one of the package's own routes out of request instrumentation
+     * — the advice it gives every other package, applied to itself.
+     *
+     * A 15-second Prometheus scrape is ~5,700 requests a day that say
+     * nothing about the app, and it lands in the host's own top routes;
+     * the browser ingest fires once per real page view, so telemetry shows
+     * up as the traffic it is measuring. Prometheus already times its own
+     * scrapes (scrape_duration_seconds) from the side that can act on it.
+     *
+     * Recorded as the path the route was actually configured with, not a
+     * hardcoded string, so moving an endpoint moves its exclusion too.
+     *
+     * The paths go to config rather than straight to the manager on
+     * purpose: reaching for the manager here would build it during boot,
+     * before a later provider (or a test) can rebind the registry or store
+     * it is constructed with. The manager reads them when a request
+     * arrives, honouring instrument.http_ignore_own_routes at that point.
+     */
+    private function ignoreOwnRoute(string $path): void
+    {
+        $config = $this->app->make('config');
+
+        $paths = Cast::stringList($config->get('telemetry.instrument.http_own_route_paths', []));
+
+        if (! in_array($path, $paths, true)) {
+            $paths[] = $path;
+
+            $config->set('telemetry.instrument.http_own_route_paths', $paths);
         }
     }
 
