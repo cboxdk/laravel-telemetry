@@ -214,3 +214,38 @@ it('includes observable gauges and provider-registered metrics', function () {
 it('describes an empty result without inventing a metric name', function () {
     (new TelemetryFake)->recordedMetrics('never.recorded')->assertLabelValues('stage', ['cache']);
 })->throws(AssertionFailedError::class, 'No metric observed label [stage] values []');
+
+it('refuses to pin a label that some series do not carry at all', function () {
+    $fake = new TelemetryFake;
+
+    $fake->counter('transit.pairs')->inc(1, ['stage' => 'cache']);
+    // A second call site forgot the label. "Exactly these stages" would
+    // otherwise pass while a whole dimension of the counter is unlabelled.
+    $fake->counter('transit.pairs')->inc(1, []);
+
+    $fake->recordedMetrics('transit.pairs')->assertLabelValues('stage', ['cache']);
+})->throws(AssertionFailedError::class, 'has 1 of 2 series with no [stage] label at all');
+
+it('still pins a label when the set is scoped to the series that carry it', function () {
+    $fake = new TelemetryFake;
+
+    $fake->counter('transit.pairs')->inc(1, ['stage' => 'cache']);
+    $fake->counter('transit.pairs')->inc(1, []);
+
+    $fake->recordedMetrics('transit.pairs')
+        ->filter(fn ($sample) => $sample->label('stage') !== null)
+        ->assertLabelValues('stage', ['cache']);
+});
+
+it('refuses a cardinality budget on a metric that recorded nothing', function () {
+    // The worst possible reason to pass: the instrumentation never ran.
+    (new TelemetryFake)->recordedMetrics('never.recorded')->assertCardinalityBelow(50);
+})->throws(AssertionFailedError::class, 'recorded no series at all');
+
+it('refuses a label cardinality budget on a metric that recorded nothing', function () {
+    (new TelemetryFake)->recordedMetrics('never.recorded')->assertLabelCardinalityBelow('tenant', 10);
+})->throws(AssertionFailedError::class, 'recorded no series at all');
+
+it('still lets a test assert that nothing was recorded', function () {
+    (new TelemetryFake)->recordedMetrics('never.recorded')->assertSeriesCount(0);
+});

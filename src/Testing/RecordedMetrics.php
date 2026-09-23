@@ -237,10 +237,32 @@ final readonly class RecordedMetrics implements Countable, IteratorAggregate
      * a single branch; `assertCounterIncremented($name, $labels)` cannot,
      * because one matching series is enough to satisfy it.
      *
+     * Every series in the set must carry the label. "Exactly these stage
+     * values" is a lie by omission if some series have no `stage` at all,
+     * and a metric whose series disagree about their label keys is a
+     * modelling problem of its own — so that fails here rather than
+     * passing quietly. Scope the set with `withLabels()` or `filter()`
+     * when a label really is optional.
+     *
      * @param  array<array-key, scalar|null>  $expected
      */
     public function assertLabelValues(string $key, array $expected): self
     {
+        $missingKey = $this->filter(
+            fn (RecordedSample $sample): bool => $sample->label($key) === null,
+        )->samples();
+
+        if ($missingKey !== []) {
+            Assert::fail(
+                $this->subject().' has '.count($missingKey).' of '.$this->seriesCount().
+                " series with no [{$key}] label at all, so its observed values cannot be pinned: ".
+                implode('; ', array_map(
+                    fn (RecordedSample $sample): string => $sample->describe(),
+                    array_slice($missingKey, 0, 3),
+                )).'. Scope the set with withLabels() or filter() if the label is optional.',
+            );
+        }
+
         $wanted = [];
 
         foreach ($expected as $value) {
@@ -290,6 +312,8 @@ final readonly class RecordedMetrics implements Countable, IteratorAggregate
      */
     public function assertCardinalityBelow(int $limit): self
     {
+        $this->assertSomethingWasRecorded('a cardinality budget');
+
         Assert::assertLessThan(
             $limit,
             $this->seriesCount(),
@@ -306,6 +330,8 @@ final readonly class RecordedMetrics implements Countable, IteratorAggregate
      */
     public function assertLabelCardinalityBelow(string $key, int $limit): self
     {
+        $this->assertSomethingWasRecorded("a cardinality budget on label [{$key}]");
+
         $observed = count($this->labelValues($key));
 
         Assert::assertLessThan(
@@ -323,6 +349,23 @@ final readonly class RecordedMetrics implements Countable, IteratorAggregate
     | Internals
     |--------------------------------------------------------------------------
     */
+
+    /**
+     * A budget on an empty set passes for the worst possible reason: the
+     * code under test recorded nothing at all. That is the silent pass
+     * this whole object exists to remove, so it fails instead. Assert the
+     * absence itself with `assertSeriesCount(0)` or
+     * `assertCounterNotIncremented()` when that is what you mean.
+     */
+    private function assertSomethingWasRecorded(string $what): void
+    {
+        Assert::assertNotSame(
+            [],
+            $this->samples,
+            $this->subject()." recorded no series at all, so {$what} proves nothing. ".
+            'Assert the absence with assertSeriesCount(0) if that is what you mean.',
+        );
+    }
 
     private function subject(): string
     {
