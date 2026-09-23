@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Request phases.** The request span now splits into `laravel.routing`,
+  `laravel.handler`, `laravel.send` and `laravel.terminate`, with a
+  matching `<phase>_ms` tally on the request span. The waterfall shows
+  whether time went to route middleware and the controller, to sending
+  the response, or to work after it. See
+  [Request phases](docs/core-concepts/traces.md#request-phases).
+
 ### Fixed
+
+- **`http.server.request.duration` no longer counts work after the
+  response.** Laravel runs terminable middleware and `defer()` callbacks
+  after the response has been sent, and the metric used to measure until
+  they finished. A request that answered in 80 ms and deferred 2 s of work
+  was recorded as a 2 s request. The metric now stops when the response is
+  sent. **Latency dashboards and alerts will drop** for apps that defer
+  work or do heavy session writes. The request span still covers the
+  post-response work, now as `laravel.terminate`.
 
 - **`laravel.bootstrap` no longer reports a worker's age as boot time.**
   The span measured from `LARAVEL_START` on every request, but that
