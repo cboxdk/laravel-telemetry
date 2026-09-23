@@ -73,7 +73,10 @@ $fake->recordedMetrics('transit.pairs')
 
 `assertLabelValues()` is exact — every expected value must have been
 observed and nothing else may appear, so a stage that never fired fails
-the test by name.
+the test by name. It also requires every series in the set to carry the
+label: "exactly these stage values" is a lie by omission if some series
+have no `stage` at all. When a label really is optional, scope the set
+first with `withLabels()` or `filter()`.
 
 Filters return a new set; assertions return the set, so both chain:
 
@@ -116,6 +119,11 @@ $fake->recordedMetrics('http.requests')
 Metric [http.requests] recorded 4013 series, which is not below the budget
 of 200. Distinct values per label: user (4012), method (3), status (2).
 ```
+
+A budget on a metric that recorded **nothing** would pass for the worst
+possible reason — the instrumentation never ran — so it fails instead.
+Assert an absence deliberately with `assertSeriesCount(0)` or
+`assertCounterNotIncremented()`.
 
 ## Span resource attributes
 

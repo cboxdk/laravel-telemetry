@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than the noise. `http_ignore_paths` stays `[]` by default — the config
   file now says so, and where to add `up` if you want it gone.
 
+### Fixed
+
+- **Two ways a metric-inspection assertion could pass for the wrong
+  reason** (`Testing\RecordedMetrics`, added in 2.4.0). Both are the silent
+  pass the object exists to remove, so both now fail:
+
+  - `assertCardinalityBelow()` and `assertLabelCardinalityBelow()` passed on
+    a metric that recorded **nothing at all** — a budget of 50 on 0 series
+    holds, which is exactly what a test whose instrumentation never ran
+    looks like. Assert an absence deliberately with `assertSeriesCount(0)`
+    or `assertCounterNotIncremented()`.
+  - `assertLabelValues()` ignored series that do not carry the label,
+    so "exactly these stage values" passed while other series had no
+    `stage` at all. It now fails, naming how many series are unlabelled and
+    showing the first few; scope the set with `withLabels()` or `filter()`
+    when a label really is optional.
+
 ## [2.4.0] - 2026-09-21
 
 ### Added
