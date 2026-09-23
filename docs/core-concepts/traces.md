@@ -399,6 +399,30 @@ first. A long-lived runtime that defines `LARAVEL_START` once per worker
 its first request. Octane doesn't define `LARAVEL_START`, so its requests
 have no bootstrap span.
 
+## Request phases
+
+The request span splits into phases, taken from framework events, so the
+waterfall shows where the time went without a profiler:
+
+| Span | From → to | Covers |
+|---|---|---|
+| `laravel.routing` | middleware → `RouteMatched` | Route lookup |
+| `laravel.handler` | → `RequestHandled` | Route middleware, controller, views |
+| `laravel.send` | → `Terminating` | Sending the response, streamed bodies included |
+| `laravel.terminate` | → request span ends | Session save, `defer()` callbacks, terminable middleware |
+
+Each one is a detail span (tail mode trims it from healthy fast traces)
+plus a tally on the request span that is always kept:
+`laravel.routing_ms`, `laravel.handler_ms`, `laravel.send_ms` and
+`laravel.terminate_ms`. A boundary that never fires folds its phase into
+the next: a 404 matches no route, so it has no `laravel.routing` and its
+`laravel.handler` starts at the middleware.
+
+Laravel runs `terminate()` after the response has gone out. The request
+span covers that work, so spans from `defer()` callbacks stay in the
+request's trace. `http.server.request.duration` doesn't: it stops when
+the response is sent, because nobody waits for work after that.
+
 ## Half-open client spans
 
 A client span is opened on one framework event and closed on another —
