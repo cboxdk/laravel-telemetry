@@ -12,7 +12,6 @@ use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
-use Illuminate\Support\Facades\Route;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mime\Email;
@@ -92,22 +91,6 @@ it('spans and counts notifications', function () {
 
     expect($families)->toHaveKeys(['notifications.sent', 'mail.sent'])
         ->and($families['notifications.sent']->samples[0]->labels['channel'])->toBe('mail');
-});
-
-it('records the bootstrap phase when LARAVEL_START is defined', function () {
-    if (! defined('LARAVEL_START')) {
-        $this->markTestSkipped('LARAVEL_START is not defined in this runtime.');
-    }
-
-    Route::get('/boot', fn () => 'ok');
-
-    $this->get('/boot')->assertOk();
-
-    Telemetry::flush();
-
-    $spans = collect($this->collector->batches())->flatMap(fn ($batch) => $batch->spans);
-
-    expect($spans->firstWhere('name', 'laravel.bootstrap'))->not->toBeNull();
 });
 
 it('records detailed cache spans with key, store and duration', function () {

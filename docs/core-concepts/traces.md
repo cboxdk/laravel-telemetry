@@ -387,8 +387,17 @@ flushes always keep details: a 5000-span request IS interesting.
 
 When `LARAVEL_START` is defined (it is, in every standard `public/
 index.php`), the request trace includes a backdated `laravel.bootstrap`
-span covering framework boot up to the middleware stack, and the request
-span carries `laravel.bootstrap_ms`.
+span covering framework boot until the request middleware runs, and the
+request span carries `laravel.bootstrap_ms`. The request middleware is
+appended to the global stack, so the span also covers the app's global
+middleware that runs before it.
+
+Only the first request a process serves gets it, because that is the
+only request that waited for the boot. Under FPM every request is the
+first. A long-lived runtime that defines `LARAVEL_START` once per worker
+(NativePHP's persistent interpreter, a custom worker) records it once, for
+its first request. Octane doesn't define `LARAVEL_START`, so its requests
+have no bootstrap span.
 
 ## Half-open client spans
 

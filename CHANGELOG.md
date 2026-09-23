@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`laravel.bootstrap` no longer reports a worker's age as boot time.**
+  The span measured from `LARAVEL_START` on every request, but that
+  constant is set once per process. On a long-lived runtime that defines
+  it (NativePHP's persistent interpreter, a custom worker), every request
+  in the first minute of a worker's life got a bootstrap span as long as
+  the worker had been running. A 60-second cap hid it after that. The span
+  is now recorded only for the first request a process serves, which is
+  every request under FPM. An ignored first request consumes it as well.
+
 ## [2.5.0] - 2026-09-23
 
 ### Added
