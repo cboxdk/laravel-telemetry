@@ -17,7 +17,8 @@ use Cbox\Telemetry\Tracing\Tracer;
  * response from slow cleanup. Framework events mark the boundaries:
  *
  *   laravel.routing    middleware → RouteMatched
- *   laravel.handler    → RequestHandled (route middleware, controller, views)
+ *   laravel.middleware → the controller being dispatched (route middleware)
+ *   laravel.handler    → RequestHandled (controller, views, response prep)
  *   laravel.send       → Terminating (the response going out)
  *   laravel.terminate  → the middleware's terminate() (session save,
  *                        defer() callbacks, terminable middleware)
@@ -61,6 +62,24 @@ final class RequestPhases implements ManagesRequestState
     public function routeMatched(): void
     {
         $this->pass('laravel.routing');
+    }
+
+    /**
+     * The route's middleware stack is done and the controller is about to
+     * run. Laravel fires no event here — the boundary comes from
+     * InstrumentedControllerDispatcher, which is the last thing between
+     * the stack and the action.
+     *
+     * Two routes never reach it: a closure route, which is not dispatched
+     * through a controller, and a request a middleware short-circuited
+     * (an auth redirect, a rate limit). Both leave the phase unrecorded,
+     * and its time folds into laravel.handler the way any missed boundary
+     * does — better than reporting a middleware cost of zero for a
+     * request that never got past the middleware.
+     */
+    public function controllerDispatching(): void
+    {
+        $this->pass('laravel.middleware');
     }
 
     public function handled(): void

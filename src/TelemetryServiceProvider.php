@@ -40,6 +40,7 @@ use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
+use Cbox\Telemetry\Instrumentation\InstrumentedControllerDispatcher;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
@@ -95,6 +96,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
+use Illuminate\Routing\Contracts\ControllerDispatcher as ControllerDispatcherContract;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
@@ -705,6 +707,15 @@ class TelemetryServiceProvider extends ServiceProvider
         $events->listen(RouteMatched::class, static fn () => FailSafe::guard(static fn () => $phases->routeMatched()));
         $events->listen(RequestHandled::class, static fn () => FailSafe::guard(static fn () => $phases->handled()));
         $events->listen(Terminating::class, static fn () => FailSafe::guard(static fn () => $phases->terminating()));
+
+        // The middleware/controller seam has no event, so it comes from
+        // decorating the dispatcher Route::run() resolves. extend() is
+        // safe before the routing provider has bound it: the container
+        // applies extenders when the abstract is finally resolved.
+        $this->app->extend(
+            ControllerDispatcherContract::class,
+            static fn (ControllerDispatcherContract $inner): ControllerDispatcherContract => new InstrumentedControllerDispatcher($inner, $phases),
+        );
 
         // The login POST authenticates AFTER the span starts, and logout
         // empties the guard BEFORE terminate — remember the identity so
