@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:ab500b5d-8078-e124-3401-128be7860a89",
+    "serialNumber": "urn:uuid:88495446-99af-396b-0757-882d3dc2d77f",
     "version": 1,
     "metadata": {
         "component": {
@@ -21,10 +21,10 @@
     "components": [
         {
             "type": "library",
-            "bom-ref": "pkg:composer/brick/math@0.19.1",
+            "bom-ref": "pkg:composer/brick/math@1.0.0",
             "name": "brick/math",
-            "version": "0.19.1",
-            "purl": "pkg:composer/brick/math@0.19.1",
+            "version": "1.0.0",
+            "purl": "pkg:composer/brick/math@1.0.0",
             "licenses": [
                 {
                     "license": {
@@ -81,10 +81,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/doctrine/lexer@3.0.1",
+            "bom-ref": "pkg:composer/doctrine/lexer@3.0.2",
             "name": "doctrine/lexer",
-            "version": "3.0.1",
-            "purl": "pkg:composer/doctrine/lexer@3.0.1",
+            "version": "3.0.2",
+            "purl": "pkg:composer/doctrine/lexer@3.0.2",
             "licenses": [
                 {
                     "license": {
@@ -216,10 +216,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/laravel/framework@v13.32.0",
+            "bom-ref": "pkg:composer/laravel/framework@v13.33.0",
             "name": "laravel/framework",
-            "version": "v13.32.0",
-            "purl": "pkg:composer/laravel/framework@v13.32.0",
+            "version": "v13.33.0",
+            "purl": "pkg:composer/laravel/framework@v13.33.0",
             "licenses": [
                 {
                     "license": {
@@ -246,10 +246,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/laravel/serializable-closure@v2.0.16",
+            "bom-ref": "pkg:composer/laravel/serializable-closure@v2.1.0",
             "name": "laravel/serializable-closure",
-            "version": "v2.0.16",
-            "purl": "pkg:composer/laravel/serializable-closure@v2.0.16",
+            "version": "v2.1.0",
+            "purl": "pkg:composer/laravel/serializable-closure@v2.1.0",
             "licenses": [
                 {
                     "license": {
@@ -261,10 +261,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/commonmark@2.10.1",
+            "bom-ref": "pkg:composer/league/commonmark@2.10.3",
             "name": "league/commonmark",
-            "version": "2.10.1",
-            "purl": "pkg:composer/league/commonmark@2.10.1",
+            "version": "2.10.3",
+            "purl": "pkg:composer/league/commonmark@2.10.3",
             "licenses": [
                 {
                     "license": {
