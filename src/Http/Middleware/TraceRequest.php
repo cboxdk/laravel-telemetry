@@ -261,6 +261,8 @@ final class TraceRequest
                 'http.response.status_code' => $response->getStatusCode(),
             ]);
 
+            $span->setAttributes($this->routeAction($request));
+
             // Preserve the literal Laravel route template when overridden —
             // the raw pattern is still useful for debugging.
             if ($route !== $template) {
@@ -857,6 +859,55 @@ final class TraceRequest
      * The low-cardinality route pattern ("/users/{user}"), falling back
      * to a constant when no route matched.
      */
+    /**
+     * Which code answered, as OpenTelemetry names it.
+     *
+     * http.route says which URL pattern matched, which is not the same
+     * question: two routes can share a controller, and one controller can
+     * answer a dozen routes. Without this a trace shows the path and the
+     * queries underneath it, and nothing about what ran in between.
+     *
+     * Laravel writes the action three ways. "Class@method" is the common
+     * one; an invokable controller is the bare class, which is dispatched
+     * through __invoke; a closure route has no class at all and reports
+     * the literal string "Closure". A closure gets code.function alone —
+     * inventing a namespace for it would be a lie a UI then groups by.
+     *
+     * Bounded by the route table, so it is safe on a span and would be
+     * safe as a label; it is set here as an attribute because that is
+     * where per-request detail belongs.
+     *
+     * @return array<string, string>
+     */
+    private function routeAction(Request $request): array
+    {
+        $route = $request->route();
+
+        if (! is_object($route) || ! method_exists($route, 'getActionName')) {
+            return [];
+        }
+
+        $action = $route->getActionName();
+
+        if (! is_string($action) || $action === '') {
+            return [];
+        }
+
+        if ($action === 'Closure') {
+            return ['code.function' => 'Closure'];
+        }
+
+        if (str_contains($action, '@')) {
+            [$class, $method] = explode('@', $action, 2);
+
+            return ['code.namespace' => $class, 'code.function' => $method];
+        }
+
+        // An invokable controller: the action is the class, and Laravel
+        // dispatches __invoke on it.
+        return ['code.namespace' => $action, 'code.function' => '__invoke'];
+    }
+
     private function routePattern(Request $request): string
     {
         $route = $request->route();
