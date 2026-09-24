@@ -5,6 +5,21 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-09-24
+
+### Fixed
+
+- **`laravel.routing` no longer includes the instrument's own startup.**
+  The phase boundary opened before the middleware had finished arming
+  itself, so opening the span, adopting the native unit, starting the
+  sampler and taking the first resource sample were all measured as the
+  application's route resolution. On one Hubhus request `laravel.routing`
+  reported 29 ms while matching against 2697 uncached routes took 0.03 ms
+  — the rest was this middleware. The size varies by platform (on macOS
+  the resource sample shells out to `lsof`; Linux reads `/proc/{pid}`),
+  but the mis-attribution did not: the trace read as though the app's
+  route table were slow, and there was nothing there to optimise.
+
 ## [2.6.0] - 2026-09-24
 
 ### Added
@@ -2186,7 +2201,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/cboxdk/laravel-telemetry/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.3.0...v2.4.0
