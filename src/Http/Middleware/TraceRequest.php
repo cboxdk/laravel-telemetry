@@ -160,8 +160,6 @@ final class TraceRequest
                 $span->setAttribute('laravel.bootstrap_ms', round($bootstrapMs, 2));
             }
 
-            $this->phases->start($span, $this->telemetry->tracer());
-
             if (config('telemetry.instrument.resources', true)) {
                 $request->attributes->set(self::USAGE_KEY, ResourceUsage::start());
             }
@@ -188,6 +186,17 @@ final class TraceRequest
                     Cast::float(config('telemetry.profiling.period'), 0.001),
                 ));
             }
+
+            // LAST, so the first phase measures the application rather than
+            // this middleware. Everything above is the instrument starting
+            // itself — opening the span, adopting the native unit, arming a
+            // sampler, taking the first resource sample — and a boundary set
+            // before it charged all of that to laravel.routing, which reads
+            // as the app's route resolution being slow. The cost is small on
+            // Linux, where process metrics are file reads; on macOS the
+            // resource sample shells out to lsof and put ~30 ms of this
+            // middleware's own time on the application's routing.
+            $this->phases->start($span, $this->telemetry->tracer());
         });
 
         $response = $next($request);
