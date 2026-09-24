@@ -407,16 +407,43 @@ waterfall shows where the time went without a profiler:
 | Span | From → to | Covers |
 |---|---|---|
 | `laravel.routing` | middleware → `RouteMatched` | Route lookup |
-| `laravel.handler` | → `RequestHandled` | Route middleware, controller, views |
+| `laravel.middleware` | → the controller being dispatched | The route's middleware stack |
+| `laravel.handler` | → `RequestHandled` | Controller, views, response preparation |
 | `laravel.send` | → `Terminating` | Sending the response, streamed bodies included |
 | `laravel.terminate` | → request span ends | Session save, `defer()` callbacks, terminable middleware |
 
 Each one is a detail span (tail mode trims it from healthy fast traces)
 plus a tally on the request span that is always kept:
-`laravel.routing_ms`, `laravel.handler_ms`, `laravel.send_ms` and
-`laravel.terminate_ms`. A boundary that never fires folds its phase into
-the next: a 404 matches no route, so it has no `laravel.routing` and its
-`laravel.handler` starts at the middleware.
+`laravel.routing_ms`, `laravel.middleware_ms`, `laravel.handler_ms`,
+`laravel.send_ms` and `laravel.terminate_ms`. A boundary that never fires
+folds its phase into the next: a 404 matches no route, so it has no
+`laravel.routing` and its `laravel.handler` starts at the middleware.
+
+Laravel announces no event between the middleware stack ending and the
+controller starting, so that boundary comes from decorating the
+controller dispatcher `Route::run()` resolves from the container. Two
+kinds of request never reach it and so have no `laravel.middleware`: a
+closure route, which is not dispatched through a controller, and a
+request a middleware answered itself (an auth redirect, a rate limit).
+Their time folds into `laravel.handler`, which is more honest than
+reporting a middleware cost of zero for a request that never got past
+the middleware.
+
+## Which code answered
+
+The request span carries the action alongside the route, because
+`http.route` says which URL pattern matched, not which code ran — routes
+share controllers, and one controller answers many routes.
+
+| Attribute | Example |
+|---|---|
+| `code.namespace` | `App\Http\Controllers\OrderController` |
+| `code.function` | `show` |
+
+An invokable controller reports `__invoke`. A closure route has no class,
+so it gets `code.function` set to `Closure` and no `code.namespace` —
+inventing one would give a UI something false to group by. Both are
+bounded by the route table.
 
 Laravel runs `terminate()` after the response has gone out. The request
 span covers that work, so spans from `defer()` callbacks stay in the

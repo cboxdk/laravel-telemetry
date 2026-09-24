@@ -5,16 +5,33 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.6.0] - 2026-09-24
 
 ### Added
 
 - **Request phases.** The request span now splits into `laravel.routing`,
-  `laravel.handler`, `laravel.send` and `laravel.terminate`, with a
-  matching `<phase>_ms` tally on the request span. The waterfall shows
-  whether time went to route middleware and the controller, to sending
-  the response, or to work after it. See
+  `laravel.middleware`, `laravel.handler`, `laravel.send` and
+  `laravel.terminate`, with a matching `<phase>_ms` tally on the request
+  span. The waterfall shows whether time went to the route's middleware
+  stack, to the controller and its views, to sending the response, or to
+  work after it. See
   [Request phases](docs/core-concepts/traces.md#request-phases).
+
+- **Which controller answered.** The request span carries `code.namespace`
+  and `code.function` for the route's action. `http.route` says which URL
+  pattern matched, which is not the same question — routes share
+  controllers and one controller answers many routes, so a trace could
+  show the path and the queries under it and nothing about the code in
+  between. An invokable controller reports `__invoke`; a closure route
+  gets `code.function` alone, because inventing a namespace for it gives a
+  UI something false to group by. Both bounded by the route table.
+
+  `laravel.middleware` comes from the same work: Laravel announces no
+  event between the middleware stack ending and the controller starting,
+  so the boundary comes from decorating the controller dispatcher
+  `Route::run()` resolves from the container. A closure route, and a
+  request a middleware answered itself, never reach that seam and fold
+  into `laravel.handler` rather than reporting a middleware cost of zero.
 
 ### Fixed
 
@@ -2169,7 +2186,8 @@ First public release. **Alpha** — the public API may still change before the
   for contributors, and copy-paste **Agent prompt** blocks in the docs
   (install, instrument-my-app, log channel, package provider, Grafana).
 
-[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/cboxdk/laravel-telemetry/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/cboxdk/laravel-telemetry/compare/v2.2.1...v2.3.0
