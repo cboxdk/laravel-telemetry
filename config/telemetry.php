@@ -628,6 +628,26 @@ return [
         'redis' => env('TELEMETRY_INSTRUMENT_REDIS', false),
         'redis_ignore_connections' => null,
 
+        // db.connect / redis.connect spans + the
+        // db.client.connection.create_time histogram.
+        //
+        // Laravel's query and command events fire only once a connection is
+        // already up, so the handshake — DNS, TCP, TLS, auth — is invisible
+        // to them. It is also where a healthy-looking app spends its worst
+        // seconds: a database answering every query in a millisecond still
+        // hangs for thirty if the connect blocks. Without these, that wait
+        // is an unexplained gap in the waterfall before the first query.
+        //
+        // Cheap: PDO is resolved lazily, so this fires at most once per
+        // connection per request, not once per query. The spans are NOT
+        // detail-marked — a connect is exactly what you want kept when a
+        // slow trace is trimmed.
+        //
+        // redis_connect honours redis_ignore_connections and always skips
+        // the package's own store and spool connections.
+        'db_connect' => env('TELEMETRY_INSTRUMENT_DB_CONNECT', true),
+        'redis_connect' => env('TELEMETRY_INSTRUMENT_REDIS_CONNECT', true),
+
         // Gate/policy checks: authorization.checks{ability, result}
         // counter + gate.check.count / gate.denied.count root-span
         // tallies. Ability names are code identifiers (bounded).

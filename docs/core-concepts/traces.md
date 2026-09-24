@@ -37,6 +37,7 @@ started while another is active becomes its child.
 | HTTP requests | `GET /users/{id}` (server) | `instrument.requests` |
 | Queue jobs | `App\Jobs\Import process` (consumer) | `instrument.jobs` |
 | DB queries | `db.query` (client, backdated) | `instrument.queries` |
+| DB connects | `db.connect` (client) — the PDO handshake, once per connection per request | `instrument.db_connect` |
 | Artisan commands | `artisan app:sync` | `instrument.commands` (off by default) |
 | Scheduled tasks | `schedule artisan inspire` | `instrument.scheduled_tasks` |
 | Mail | `mail.send` (client) | `instrument.mail` |
@@ -44,6 +45,7 @@ started while another is active becomes its child.
 | Blade/PHP views | `view components.button` — nested, real durations, detail-marked | `instrument.views` |
 | DB transactions | `db.transaction` (nested via savepoints, outcome attribute) | `instrument.transactions` |
 | Redis commands | `redis GET` (client, backdated, key only) | `instrument.redis` (off by default) |
+| Redis connects | `redis.connect` (client) — the handshake; telemetry's own store/spool skipped | `instrument.redis_connect` |
 | Cache counters | `cache.operations{operation,store}` | `instrument.cache` (off by default) |
 | Cache timeline spans | `cache.hit`/`miss`/`write`/`forget` with key + duration | `instrument.cache_spans` (off by default) |
 | Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
@@ -449,6 +451,30 @@ Laravel runs `terminate()` after the response has gone out. The request
 span covers that work, so spans from `defer()` callbacks stay in the
 request's trace. `http.server.request.duration` doesn't: it stops when
 the response is sent, because nobody waits for work after that.
+
+## Connect time
+
+`QueryExecuted` and `CommandExecuted` fire only once a connection is already
+up, so the handshake — DNS, TCP, TLS, auth — is invisible to query
+instrumentation. It is also where a healthy-looking app spends its worst
+seconds: a database that answers every query in a millisecond still hangs for
+thirty if the connect blocks, and in a query-only waterfall that shows up as
+an unexplained gap before the first `db.query`.
+
+`db.connect` and `redis.connect` fill that gap. Laravel resolves PDO lazily,
+so the span is emitted the first time a connection is actually used and not
+again — a request making two hundred queries has one `db.connect`, not two
+hundred. The same lazy resolution is why the timing wraps the resolver closure
+rather than `ConnectionFactory::make()`, which returns before any socket is
+opened.
+
+These spans are **not** detail-marked. A connect is rare and high-signal, so
+it survives `traces.details.mode=tail` trimming — which is exactly when you
+want it, since a trace is trimmed for being healthy and kept for being slow.
+
+A connect that throws is recorded and then rethrown unchanged: a twenty-second
+connect that ends in a refused connection is the most useful span in the
+trace, and losing it to the exception would be losing the answer.
 
 ## Half-open client spans
 
