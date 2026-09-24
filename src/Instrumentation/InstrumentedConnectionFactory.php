@@ -17,8 +17,15 @@ use Illuminate\Database\Connectors\ConnectionFactory;
  * closure instead, which is the exact moment the connect happens — and it
  * defers to the parent for building it, so read/write splits and the
  * multi-host failover loop keep working without being reimplemented here.
+ *
+ * Deliberately NOT `final`, for the same reason as
+ * {@see InstrumentedRedisManager}: it replaces a container binding, and a
+ * final class cannot be mocked. Treat it as internal; do not extend it
+ * yourself.
+ *
+ * @internal
  */
-final class InstrumentedConnectionFactory extends ConnectionFactory
+class InstrumentedConnectionFactory extends ConnectionFactory
 {
     public function __construct(private readonly Container $app)
     {

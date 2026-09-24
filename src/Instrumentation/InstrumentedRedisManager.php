@@ -13,8 +13,16 @@ use Illuminate\Redis\RedisManager;
  * `connector()` is not told which connection it is building, so the name is
  * captured on the way through `resolve()` and read back here. Both methods
  * defer to the parent for the work itself.
+ *
+ * Deliberately NOT `final` — it replaces the 'redis' binding, so a final
+ * class breaks the standard `Redis::shouldReceive(...)` / `partialMock()`
+ * test pattern: Mockery cannot mock a final class, and the facade mocks the
+ * bound instance's class. Laravel's own RedisManager is non-final for the
+ * same reason. Treat it as internal; do not extend it yourself.
+ *
+ * @internal
  */
-final class InstrumentedRedisManager extends RedisManager
+class InstrumentedRedisManager extends RedisManager
 {
     private ?string $resolving = null;
 

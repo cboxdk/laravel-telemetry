@@ -12,6 +12,7 @@ use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Contracts\Redis\Connector;
 use Illuminate\Redis\Connections\Connection as RedisConnection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     $this->collector = new CollectingExporter;
@@ -148,4 +149,18 @@ it('leaves the telemetry store and spool connections untimed', function () {
 it('decorates both managers', function () {
     expect(app('db.factory'))->toBeInstanceOf(InstrumentedConnectionFactory::class);
     expect(app('redis'))->toBeInstanceOf(InstrumentedRedisManager::class);
+});
+
+it('leaves the decorated managers mockable', function () {
+    // Mockery cannot mock a final class, and a facade mock mocks the BOUND
+    // instance's class — so marking either decorator final breaks
+    // Redis::shouldReceive() and partialMock() in every consuming app. A
+    // health-check test in a host application found this the hard way, on a
+    // class that had nothing to do with telemetry.
+    Redis::shouldReceive('connection')->andReturnNull();
+
+    expect(Redis::connection())->toBeNull();
+
+    expect((new ReflectionClass(app('db.factory')))->isFinal())->toBeFalse();
+    expect((new ReflectionClass(app('redis')))->isFinal())->toBeFalse();
 });

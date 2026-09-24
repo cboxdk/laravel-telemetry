@@ -5,6 +5,22 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-09-24
+
+### Fixed
+
+- **`Redis::shouldReceive()` works again.** `InstrumentedRedisManager` and
+  `InstrumentedConnectionFactory` were marked `final`. They replace the
+  `redis` and `db.factory` bindings, and a facade mock mocks the bound
+  instance's class — so Mockery refused, and every test in a consuming app
+  that mocks the Redis facade failed with "marked final and its methods
+  cannot be replaced". It surfaced in a host application's health-check
+  test, which has nothing to do with telemetry.
+
+  Both are now open, as `InstrumentedFilesystemManager` already was for the
+  same reason (and as Laravel's own `RedisManager` and `ConnectionFactory`
+  are). There is a test for it now, so it cannot regress quietly.
+
 ## [2.7.0] - 2026-09-24
 
 ### Added

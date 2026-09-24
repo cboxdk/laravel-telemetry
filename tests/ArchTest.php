@@ -37,6 +37,11 @@ arch('final by default')
         'Cbox\Telemetry\Exporters\Otlp\OtlpTransport',
         // Deliberately open so Storage::shouldReceive()/partialMock() work.
         'Cbox\Telemetry\Instrumentation\InstrumentedFilesystemManager',
+        // Same reason: these replace the 'redis' and 'db.factory' bindings,
+        // and Mockery cannot mock a final class, so Redis::shouldReceive()
+        // and partialMock() would break in every consuming app.
+        'Cbox\Telemetry\Instrumentation\InstrumentedRedisManager',
+        'Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory',
         // Stands in for Laravel's FilesystemAdapter, which is itself
         // non-final — a resolved disk is a plausible partial-mock target
         // in an app's test suite, and Mockery cannot subclass a final
