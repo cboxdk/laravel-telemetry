@@ -5,6 +5,38 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-09-24
+
+### Added
+
+- **`db.connect` and `redis.connect` spans, plus a
+  `db.client.connection.create_time` histogram.** Laravel's `QueryExecuted`
+  and `CommandExecuted` events fire only once a connection is already up, so
+  the handshake — DNS, TCP, TLS, auth — was invisible: a database that
+  answers every query in a millisecond but blocks for thirty seconds on
+  connect showed up as an unexplained gap in the waterfall before the first
+  query, with nothing to attribute it to.
+
+  PDO is resolved lazily, so the timing wraps the resolver closure rather
+  than `ConnectionFactory::make()` (which returns before any socket opens).
+  That also makes it cheap: one span per connection per request, not one per
+  query. `InstrumentedConnectionFactory` defers to the parent for building
+  the resolver, so read/write splits and the multi-host failover loop are
+  unchanged.
+
+  The spans are deliberately not detail-marked — a connect is rare and
+  high-signal, so it survives `traces.details.mode=tail` trimming. A connect
+  that throws is recorded and then rethrown unchanged.
+
+  Redis is decorated through `extend()` rather than a rebinding, because
+  Laravel's `RedisServiceProvider` is deferred and would otherwise register
+  after this package and overwrite it. Telemetry's own store and spool
+  connections are always skipped: a span about opening the spool would be
+  written into the spool.
+
+  Both default to on; `TELEMETRY_INSTRUMENT_DB_CONNECT=false` and
+  `TELEMETRY_INSTRUMENT_REDIS_CONNECT=false` turn them off.
+
 ## [2.6.1] - 2026-09-24
 
 ### Fixed

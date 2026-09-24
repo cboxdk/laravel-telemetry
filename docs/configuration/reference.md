@@ -285,6 +285,8 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.batches` | `TELEMETRY_INSTRUMENT_BATCHES` | `true` — `bus.batches{event,name}` job-batch lifecycle |
 | `instrument.redis` | `TELEMETRY_INSTRUMENT_REDIS` | `false` — Redis command spans (key only, never values) + `redis.commands` counter; telemetry's own connections auto-ignored |
 | `instrument.redis_ignore_connections` | — | `null` → auto (metric-store + spool connections); set a list to override |
+| `instrument.db_connect` | `TELEMETRY_INSTRUMENT_DB_CONNECT` | `true` — `db.connect` span per PDO handshake + `db.client.connection.create_time` histogram. Fires once per connection per request, not per query |
+| `instrument.redis_connect` | `TELEMETRY_INSTRUMENT_REDIS_CONNECT` | `true` — `redis.connect` span per Redis handshake; honours `redis_ignore_connections` and always skips telemetry's own store/spool |
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `user.id` + `user.type` (model) + `user.guard` (multi-guard safe; never PII) |
 | `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
 | `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via cboxdk/telemetry-native, or ext-excimer as a fallback; a silent no-op without either. See [Profiling](#profiling) below |

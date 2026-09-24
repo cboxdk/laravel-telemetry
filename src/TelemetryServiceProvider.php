@@ -40,7 +40,9 @@ use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
+use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
 use Cbox\Telemetry\Instrumentation\InstrumentedControllerDispatcher;
+use Cbox\Telemetry\Instrumentation\InstrumentedRedisManager;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
@@ -98,6 +100,7 @@ use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Routing\Contracts\ControllerDispatcher as ControllerDispatcherContract;
 use Illuminate\Routing\Events\RouteMatched;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
@@ -252,12 +255,61 @@ class TelemetryServiceProvider extends ServiceProvider
             return new GeoResolver(is_string($db) && $db !== '' ? $db : null);
         });
 
+        $this->registerConnectionTiming();
+
         // Register the `telemetry` log driver in register(), not boot(): the
         // `log` manager may be resolved (and a `stack` channel built) before
         // this provider boots — if the driver isn't registered by then, the
         // telemetry sub-channel silently falls back to an emergency handler
         // and no logs ever reach telemetry.
         $this->registerLogDriver();
+    }
+
+    /**
+     * Time the handshake behind database and Redis connections.
+     *
+     * In register(), not boot(): both bindings are resolved by other
+     * providers' boot methods — and by this one's — so a decoration that
+     * waits until boot is a decoration that arrives after the singleton it
+     * meant to replace is already built.
+     */
+    private function registerConnectionTiming(): void
+    {
+        $config = $this->app->make('config');
+
+        if ($config->get('telemetry.instrument.db_connect', true)) {
+            $this->app->singleton('db.factory', fn (Application $app): InstrumentedConnectionFactory => new InstrumentedConnectionFactory($app));
+        }
+
+        if ($config->get('telemetry.instrument.redis_connect', true)) {
+            // Unioned with the package's own connections exactly as the
+            // command instrumentation does: timing the spool's own connect
+            // would be written back into the spool.
+            $ignored = Cast::stringList($config->get('telemetry.instrument.redis_ignore_connections', []));
+            $ignored = array_values(array_unique([
+                Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
+                Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
+                ...$ignored,
+            ]));
+
+            // extend(), not singleton(): Laravel's RedisServiceProvider is
+            // deferred, so it registers when `redis` is first resolved —
+            // after this provider, overwriting a plain rebinding. An
+            // extender runs on the resolved instance and wins regardless of
+            // who registered the binding.
+            $this->app->extend('redis', function (mixed $manager, Application $app) use ($ignored): mixed {
+                if ($manager instanceof InstrumentedRedisManager) {
+                    return $manager;
+                }
+
+                /** @var array<string, mixed> $redis */
+                $redis = $app->make('config')->get('database.redis', []);
+
+                $driver = Cast::string(Arr::pull($redis, 'client'), 'phpredis');
+
+                return (new InstrumentedRedisManager($app, $driver, $redis))->ignoreConnections($ignored);
+            });
+        }
     }
 
     public function boot(): void
