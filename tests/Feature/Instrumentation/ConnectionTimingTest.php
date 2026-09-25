@@ -164,3 +164,36 @@ it('leaves the decorated managers mockable', function () {
     expect((new ReflectionClass(app('db.factory')))->isFinal())->toBeFalse();
     expect((new ReflectionClass(app('redis')))->isFinal())->toBeFalse();
 });
+
+it('does not time predis, which connects lazily', function () {
+    // PredisConnector::connect() returns `new Client(...)`, and predis's
+    // constructor only assembles objects — the socket opens on the first
+    // command. Timing it there reports the handshake as a few microseconds
+    // of object construction, which is worse than no span at all: it rules
+    // out a slow connect that may be exactly what is wrong.
+    config()->set('database.redis.client', 'predis');
+
+    app()->forgetInstance('redis');
+
+    $manager = app('redis');
+
+    expect($manager)->toBeInstanceOf(InstrumentedRedisManager::class);
+
+    $connector = (new ReflectionClass($manager))->getMethod('connector');
+    $connector->setAccessible(true);
+
+    expect($connector->invoke($manager))->not->toBeInstanceOf(TimedRedisConnector::class);
+});
+
+it('times phpredis, which opens the socket in connect()', function () {
+    config()->set('database.redis.client', 'phpredis');
+
+    app()->forgetInstance('redis');
+
+    $manager = app('redis');
+
+    $connector = (new ReflectionClass($manager))->getMethod('connector');
+    $connector->setAccessible(true);
+
+    expect($connector->invoke($manager))->toBeInstanceOf(TimedRedisConnector::class);
+});

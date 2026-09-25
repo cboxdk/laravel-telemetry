@@ -90,6 +90,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
+use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Foundation\Events\Terminating;
 use Illuminate\Foundation\Http\Events\RequestHandled;
@@ -278,7 +279,16 @@ class TelemetryServiceProvider extends ServiceProvider
         $config = $this->app->make('config');
 
         if ($config->get('telemetry.instrument.db_connect', true)) {
-            $this->app->singleton('db.factory', fn (Application $app): InstrumentedConnectionFactory => new InstrumentedConnectionFactory($app));
+            // The enabled check lives INSIDE the closure, like the Tracer
+            // binding above: config is read when the binding is resolved, not
+            // when it is registered, so a later override is honoured and the
+            // disabled case hands back the framework's own factory. Zero cost
+            // when disabled (AGENTS.md invariant 6) — otherwise every query
+            // would resolve TelemetryManager, its registry, resource
+            // detection and the exporters, only to discard the observation.
+            $this->app->singleton('db.factory', fn (Application $app): ConnectionFactory => $app->make('config')->get('telemetry.enabled')
+                ? new InstrumentedConnectionFactory($app)
+                : new ConnectionFactory($app));
         }
 
         if ($config->get('telemetry.instrument.redis_connect', true)) {
@@ -298,7 +308,7 @@ class TelemetryServiceProvider extends ServiceProvider
             // extender runs on the resolved instance and wins regardless of
             // who registered the binding.
             $this->app->extend('redis', function (mixed $manager, Application $app) use ($ignored): mixed {
-                if ($manager instanceof InstrumentedRedisManager) {
+                if ($manager instanceof InstrumentedRedisManager || ! $app->make('config')->get('telemetry.enabled')) {
                     return $manager;
                 }
 

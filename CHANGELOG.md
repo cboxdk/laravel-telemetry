@@ -5,6 +5,29 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-09-25
+
+### Fixed
+
+- **predis is no longer timed, because there is nothing to time yet.**
+  `PredisConnector::connect()` returns `new Client(...)`, and predis's
+  constructor only assembles objects — the socket opens on the first
+  command. `redis.connect` therefore reported the handshake as a few
+  microseconds of object construction, which is worse than no span: it rules
+  out a slow connect that may be exactly what is wrong. Only phpredis, whose
+  `connect()` does open the socket, is timed now; a custom creator is left
+  alone for the same reason, since we cannot know whether it connects
+  eagerly.
+
+- **The connection decorators honour the master switch.** With
+  `TELEMETRY_ENABLED=false` both were installed anyway, so every database
+  query resolved `TelemetryManager` — its registry, resource detection and
+  configured exporters — only to discard the observation, breaking the
+  zero-cost-when-disabled invariant. The check now lives inside the binding
+  closure, as the `Tracer` binding's does, so it reads config at resolution
+  rather than at registration and hands back the framework's own
+  `ConnectionFactory` when telemetry is off.
+
 ## [2.7.1] - 2026-09-24
 
 ### Fixed
