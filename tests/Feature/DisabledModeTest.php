@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Tests\Feature;
 
+use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
+use Cbox\Telemetry\Instrumentation\InstrumentedRedisManager;
 use Cbox\Telemetry\Tests\DisabledTestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Blade;
@@ -29,5 +31,16 @@ final class DisabledModeTest extends DisabledTestCase
 
         $this->assertSame('', Blade::render('@telemetryTraceparent'));
         $this->assertSame('', Blade::render('@telemetryBrowser'));
+    }
+
+    #[Test]
+    public function the_connection_decorators_are_not_installed_when_telemetry_is_disabled(): void
+    {
+        // Invariant 6: zero cost when disabled. A decorated factory makes
+        // every query resolve TelemetryManager, its registry, resource
+        // detection and the configured exporters, only to discard the
+        // observation.
+        $this->assertNotInstanceOf(InstrumentedConnectionFactory::class, $this->app->make('db.factory'));
+        $this->assertNotInstanceOf(InstrumentedRedisManager::class, $this->app->make('redis'));
     }
 }

@@ -54,12 +54,34 @@ class InstrumentedRedisManager extends RedisManager
         }
     }
 
+    /**
+     * Clients whose `connect()` actually opens the socket.
+     *
+     * phpredis does: `PhpRedisConnector::connect()` builds the client and
+     * calls `connect()` on it. predis does NOT — `PredisConnector::connect()`
+     * returns `new Client(...)`, whose constructor only assembles objects,
+     * and predis opens the socket lazily on the first command. Timing it
+     * there would report the handshake as a few microseconds of object
+     * construction: not merely useless but misleading, because it rules out
+     * a slow connect that may be exactly what is wrong.
+     *
+     * A custom creator is left alone for the same reason — we cannot know
+     * whether it connects eagerly, and a wrong number is worse than none.
+     *
+     * @var list<string>
+     */
+    private const EAGER_CLIENTS = ['phpredis'];
+
     protected function connector(): ?Connector
     {
         $connector = parent::connector();
 
         if (! $connector instanceof Connector) {
             return null;
+        }
+
+        if (! in_array($this->driver, self::EAGER_CLIENTS, true) || isset($this->customCreators[$this->driver])) {
+            return $connector;
         }
 
         return new TimedRedisConnector(
