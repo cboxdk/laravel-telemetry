@@ -105,11 +105,38 @@ has to be visible without one:
 | metric | labels | |
 |---|---|---|
 | `runtime.operations` | `operation`, `unit` | Calls by operation type |
-| `runtime.operation.duration` | `operation`, `unit` | Time one unit spent inside that operation (ms) |
+| `runtime.operation.duration` | `operation`, `unit` | Time one unit spent inside that operation (seconds) |
 | `runtime.gc.runs` / `runtime.gc.collected` | `unit` | Cycle-collector pressure |
 | `runtime.crashes` | `signal`, `unit` | Processes that died on a fatal signal |
 
-The labels are deliberately not the route or job name — the span already
+### What `curl.exec` does and does not cover
+
+Two things worth knowing before comparing these numbers to the HTTP
+client's own spans.
+
+**It counts every cURL call in the process, not just Laravel's.** A
+payment SDK, an AWS client, anything reaching for `curl_exec` directly —
+all of it lands here and none of it produces an `http.client.*` span. That
+gap is the point: outgoing traffic you have no spans for is exactly what
+you want to know about.
+
+**It does not see parallel requests.** The extension hooks `curl_exec`.
+Guzzle routes synchronous calls through its `CurlHandler`, which uses
+`curl_exec`, but `Http::pool()` and any async call go through
+`CurlMultiHandler` and `curl_multi_exec`, which is not hooked. So a
+request that fans out to six upstreams reports `curl.exec.count` of zero
+while six client spans sit in the trace.
+
+Hooking `curl_multi_exec` naively would be worse than not hooking it:
+it is called repeatedly in a poll loop, so summing its wall time is not
+time spent on HTTP, and the per-transfer timing is not visible from that
+function at all. The number would look right and mean nothing.
+
+**There is no per-call correlation either way.** These are aggregates per
+unit of work — count, total and max — with no handle or URL identity. You
+can compare "this request made four cURL calls totalling 29ms" against the
+client spans; you cannot say which measurement belongs to which span. The
+labels are deliberately not the route or job name — the span already
 has those, and a per-route breakdown of connect time is a cardinality bill
 for a question you can answer from the trace.
 
