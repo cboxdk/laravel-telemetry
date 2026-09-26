@@ -47,12 +47,60 @@ it('keeps the app own host, which is the single-domain case', function () {
 });
 
 it('trusts the concrete host once trusted-host patterns exist', function () {
-    // Symfony has already thrown on anything else by the time we are called,
-    // so the value is validated by something the app controls.
+    // Validated AND finite. Trusted hosts alone only prove the first:
+    // see the wildcard case below, which is Laravel's own default.
     config()->set('app.url', 'https://app.example');
     Request::setTrustedHosts(['^(a|b)\.tenant\.example$']);
 
     $request = Request::create('https://b.tenant.example/x');
 
     expect(boundedHostFor($request))->toBe('b.tenant.example');
+});
+
+it('refuses a wildcard trusted host, which is what Laravel configures by default', function () {
+    // TrustHosts::allSubdomainsOfApplicationUrl() is the documented
+    // setup and the default of Laravel's own middleware. It validates
+    // the Host header, which is what it is for — but an app behind
+    // wildcard DNS accepts every subdomain anyone asks for, and each
+    // one of them was a permanent series on three histograms.
+    config()->set('app.url', 'https://app.example');
+    Request::setTrustedHosts(['^(.+\.)?app\.example$']);
+
+    $request = Request::create('https://app.example/x');
+    $request->headers->set('Host', 'a94f2.app.example');
+    $request->server->set('HTTP_HOST', 'a94f2.app.example');
+
+    expect(boundedHostFor($request))->toBe('other');
+});
+
+it('keeps each host of a finite alternation', function () {
+    config()->set('app.url', 'https://app.example');
+    Request::setTrustedHosts(['^(a|b)\.tenant\.example$']);
+
+    foreach (['a.tenant.example', 'b.tenant.example'] as $host) {
+        $request = Request::create("https://{$host}/x");
+
+        expect(boundedHostFor($request))->toBe($host);
+    }
+});
+
+it('keeps a host the application listed itself', function () {
+    // The way out for a multi-domain app that cannot enumerate its
+    // domains in TrustHosts: name them here, where the list is the
+    // application's and not the caller's.
+    config()->set('app.url', 'https://app.example');
+    config()->set('telemetry.instrument.hosts', ['shop.example', 'admin.example']);
+
+    $request = Request::create('https://shop.example/x');
+
+    expect(boundedHostFor($request))->toBe('shop.example');
+});
+
+it('does not read an alternation big enough to be a cardinality problem itself', function () {
+    config()->set('app.url', 'https://app.example');
+    Request::setTrustedHosts(['^('.implode('|', array_map(fn (int $i) => "t{$i}", range(1, 100))).')\.tenant\.example$']);
+
+    $request = Request::create('https://t7.tenant.example/x');
+
+    expect(boundedHostFor($request))->toBe('other');
 });

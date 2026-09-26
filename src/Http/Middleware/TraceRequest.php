@@ -75,6 +75,13 @@ final class TraceRequest
      *
      * @see Redactor::parameterIsCredential()
      */
+    /**
+     * The hosts this application named, resolved once.
+     *
+     * @var list<string>|null
+     */
+    private ?array $boundedHosts = null;
+
     public function __construct(
         private readonly TelemetryManager $telemetry,
         private readonly NativeProfiler $native,
@@ -536,36 +543,171 @@ final class TraceRequest
     }
 
     /**
-     * The concrete host, but only when something has vouched for it.
+     * The concrete host, but only when it comes from a FINITE set.
      *
-     * `$request->getHost()` is the client's `Host:` header. Symfony validates
-     * it only when the app configured trusted-host patterns, and Laravel ships
-     * with none — so on a default install this is an attacker-controlled string
-     * going straight onto three histograms as a LABEL. A loop with an
-     * incrementing Host mints a permanent series per value, and no store here
-     * has a TTL or a cardinality cap. No route needs to match: an unrouted
-     * request still gets labelled.
+     * `$request->getHost()` is the client's `Host:` header. Symfony
+     * validates it only when the app configured trusted-host patterns,
+     * and Laravel ships with none — so on a default install this is an
+     * attacker-controlled string going straight onto three histograms
+     * as a LABEL. A loop with an incrementing Host mints a permanent
+     * series per value, and no store here has a TTL.
      *
-     * So: trust it when trusted-host patterns exist (Symfony has already
-     * thrown on anything else by the time we are called), otherwise keep it
-     * only when it IS the app's own host — which is the single-domain case,
-     * where the label is a constant anyway and nothing is lost. Everything
-     * else collapses to one bucket.
+     * Trusted hosts alone are not the answer, which is the correction
+     * this method needed: they prove the host was VALIDATED, not that
+     * there are few of them. Laravel's own TrustHosts defaults to
+     * `allSubdomainsOfApplicationUrl()`, a wildcard — and an app with
+     * wildcard DNS behind it accepts, and would have labelled, every
+     * subdomain anyone cares to ask for.
      *
-     * A multi-domain app that wants its domains apart should configure
-     * TrustHosts, or register the routes with a domain pattern; both are
-     * bounded by the app rather than by the caller.
+     * So the label is kept only when the host matches something the
+     * APPLICATION named: its own `app.url`, a host listed in
+     * `telemetry.instrument.hosts`, or a trusted-host pattern with no
+     * wildcard in it — a literal pattern is a finite set, and reading
+     * them is how a multi-domain app gets its domains apart without
+     * configuring anything twice. Everything else is one bucket.
      */
     private function boundedHost(Request $request): string
     {
-        if (Request::getTrustedHosts() !== []) {
-            return $request->getHost();
+        $host = $request->getHost();
+
+        foreach ($this->boundedHosts() as $allowed) {
+            if (strcasecmp($host, $allowed) === 0) {
+                return $host;
+            }
         }
 
-        $host = $request->getHost();
+        return 'other';
+    }
+
+    /**
+     * The hosts this application has named, memoized for the request.
+     *
+     * @return list<string>
+     */
+    private function boundedHosts(): array
+    {
+        if ($this->boundedHosts !== null) {
+            return $this->boundedHosts;
+        }
+
+        $hosts = [];
+
         $appHost = Cast::string(parse_url(Cast::string(config('app.url'), ''), PHP_URL_HOST), '');
 
-        return $appHost !== '' && strcasecmp($host, $appHost) === 0 ? $host : 'other';
+        if ($appHost !== '') {
+            $hosts[] = $appHost;
+        }
+
+        foreach (Cast::stringList(config('telemetry.instrument.hosts', [])) as $host) {
+            if ($host !== '') {
+                $hosts[] = $host;
+            }
+        }
+
+        foreach (Request::getTrustedHosts() as $pattern) {
+            foreach (self::literalHosts($pattern) as $literal) {
+                $hosts[] = $literal;
+            }
+        }
+
+        return $this->boundedHosts = array_values(array_unique($hosts));
+    }
+
+    /** Most hosts one trusted-host pattern may contribute. */
+    private const MAX_LITERAL_HOSTS = 32;
+
+    /**
+     * The hosts a trusted-host pattern admits, if they can be counted.
+     *
+     * Trusted hosts are regexes, wrapped by Symfony as `{...}i`.
+     * `{^shop\.example\.com$}i` names one host and
+     * `{^(a|b)\.tenant\.example$}i` names two — both finite, both safe
+     * as labels. `{^(.+\.)?example\.com$}i`, which is what Laravel's
+     * own `TrustHosts::allSubdomainsOfApplicationUrl()` produces, names
+     * as many as DNS will answer for, and is refused.
+     *
+     * @return list<string>
+     */
+    private static function literalHosts(string $pattern): array
+    {
+        $inner = self::withoutDelimiters(trim($pattern));
+        $inner = preg_replace('/^\^|\$$/', '', $inner) ?? $inner;
+        $inner = str_replace('\\.', '.', $inner);
+
+        $hosts = [''];
+
+        // Walk the pattern, expanding literal alternations as we go.
+        // Anything that is not a hostname character or such a group
+        // means the set is not finite, and the pattern contributes
+        // nothing.
+        $offset = 0;
+        $length = strlen($inner);
+
+        while ($offset < $length) {
+            if (preg_match('/\G\((?:\?:)?((?:[A-Za-z0-9.-]+\|)+[A-Za-z0-9.-]+)\)/', $inner, $match, 0, $offset) === 1) {
+                $branches = explode('|', $match[1]);
+                $expanded = [];
+
+                foreach ($hosts as $host) {
+                    foreach ($branches as $branch) {
+                        $expanded[] = $host.$branch;
+                    }
+                }
+
+                if (count($expanded) > self::MAX_LITERAL_HOSTS) {
+                    return [];
+                }
+
+                $hosts = $expanded;
+                $offset += strlen($match[0]);
+
+                continue;
+            }
+
+            if (preg_match('/\G[A-Za-z0-9.-]+/', $inner, $match, 0, $offset) === 1) {
+                foreach ($hosts as $index => $host) {
+                    $hosts[$index] = $host.$match[0];
+                }
+
+                $offset += strlen($match[0]);
+
+                continue;
+            }
+
+            return [];
+        }
+
+        return array_values(array_filter($hosts, static fn (string $host): bool => $host !== ''));
+    }
+
+    /**
+     * The body of a delimited regex, without its delimiters or
+     * modifiers. Symfony writes `{...}i`; the bracket styles are
+     * handled because nothing stops an app writing its own.
+     */
+    private static function withoutDelimiters(string $pattern): string
+    {
+        if ($pattern === '') {
+            return $pattern;
+        }
+
+        $open = $pattern[0];
+
+        if (preg_match('/[A-Za-z0-9\\\\ ]/', $open) === 1) {
+            return $pattern; // undelimited, as Laravel's own docs write them
+        }
+
+        $close = match ($open) {
+            '{' => '}',
+            '(' => ')',
+            '[' => ']',
+            '<' => '>',
+            default => $open,
+        };
+
+        $end = strrpos($pattern, $close);
+
+        return $end === false || $end === 0 ? $pattern : substr($pattern, 1, $end - 1);
     }
 
     /**

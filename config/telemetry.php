@@ -601,13 +601,25 @@ return [
         // ("{tenant}.app.example"), keeping wildcard-tenant cardinality
         // bounded.
         //
-        // Without a pattern the concrete host is only used when something
-        // has vouched for it — trusted-host patterns are configured, or it
-        // is the app's own host. Anything else reports "other", because
-        // $request->getHost() is otherwise just the caller's Host header
-        // and a label must never be caller-controlled. Configure
-        // TrustHosts to tell your domains apart.
+        // Without a pattern the concrete host is only used when it comes
+        // from a FINITE set the application named: app.url, the list in
+        // `hosts` below, or a trusted-host pattern with no wildcard in
+        // it. Anything else reports "other", because $request->getHost()
+        // is otherwise just the caller's Host header and a label must
+        // never be caller-controlled.
+        //
+        // Trusted hosts alone are not enough, which is worth saying
+        // plainly: they prove the host was VALIDATED, not that there are
+        // few of them. Laravel's own TrustHosts defaults to every
+        // subdomain of app.url, and an app behind wildcard DNS would
+        // have minted a permanent series per subdomain anyone asked for.
         'host_label' => env('TELEMETRY_INSTRUMENT_HOST_LABEL', true),
+
+        // Hosts kept as-is in server.address, for a multi-domain app
+        // whose domains cannot be enumerated in TrustHosts. The list is
+        // the application's, which is the whole point — every host not
+        // on it (and not covered by the rules above) reports "other".
+        'hosts' => [],
 
         // Methods reported as themselves on http.request.method; anything
         // else becomes "_OTHER", with the real one kept on the span as
