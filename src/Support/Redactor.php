@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Support;
 
+use Cbox\Telemetry\Contracts\RedactsTelemetry;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanEvent;
@@ -29,14 +30,17 @@ use Closure;
  * A broken custom pattern never breaks telemetry: patterns that fail to
  * compile are skipped, and the hook is guarded.
  */
-final class Redactor
+final class Redactor implements RedactsTelemetry
 {
     private ?Closure $custom = null;
+
+    private ?string $prefixPattern = null;
 
     /**
      * @param  list<string>  $keys
      * @param  array<string, string>  $patterns  regex => replacement
      * @param  list<string>  $safeKeys
+     * @param  list<string>  $credentialPrefixes
      */
     public function __construct(
         private readonly bool $enabled = true,
@@ -46,6 +50,12 @@ final class Redactor
         private readonly array $safeKeys = [],
         /** Whether the app took the lists over, which also turns off the built-in name heuristics. */
         private readonly bool $replaceDefaults = false,
+        /** Issuer prefixes that mark a value as a credential whatever it was called. */
+        private readonly array $credentialPrefixes = [],
+        /** Whether to judge a value by its shape when its name says nothing. */
+        private readonly bool $valueShape = true,
+        /** How long an unrecognised value must be before its shape is evidence. */
+        private readonly int $valueMinLength = 24,
     ) {}
 
     /**
@@ -87,6 +97,18 @@ final class Redactor
             // unioning an exemption is not.
             safeKeys: $safeKeys ?? self::defaultSafeKeys(),
             replaceDefaults: $replace,
+            // Unioned like the other RULES, for the same reason: a new
+            // issuer prefix added in a later version must reach an app
+            // that published its config two versions ago.
+            credentialPrefixes: self::union(
+                self::defaultCredentialPrefixes(),
+                self::stringList($config['credential_prefixes'] ?? null),
+                $replace,
+            ),
+            valueShape: (bool) ($config['value_shape'] ?? true),
+            valueMinLength: is_numeric($config['value_min_length'] ?? null)
+                ? max(8, (int) $config['value_min_length'])
+                : 24,
         );
     }
 
@@ -167,7 +189,13 @@ final class Redactor
                 $separator = $m[1][0];
                 $ambiguous = $separator === '?' || $separator === '&' || $separator === ';';
 
-                if (! self::parameterIsCredential($m[2][0], $ambiguous)) {
+                // The name first, because it is cheap and certain. Then
+                // the VALUE, which is the only thing that can catch a
+                // parameter nobody enumerated — `?t=`, `?sas=`, and
+                // every name a third-party API invented. Auto-instrumented
+                // URLs are full of those.
+                if (! self::parameterIsCredential($m[2][0], $ambiguous)
+                    && ! $this->valueLooksLikeCredential(self::decodedValue($m[3][0]))) {
                     // `url=https://x/?token=SECRET` — the outer assignment is
                     // not a credential, but the match consumed its value and
                     // with it the query inside. Look again in there, once.
@@ -265,6 +293,9 @@ final class Redactor
         // context the way `key` and `code` do. `pwd` is NOT among them —
         // `pwd=/srv/app` is a working directory in any shell-flavoured log.
         'sig', 'jwt', 'otp',
+        // A session id in a URL is a credential — that is what session
+        // fixation is — and it arrives spelled both ways.
+        'session_id', 'sessionid',
     ];
 
     /**
@@ -278,6 +309,20 @@ final class Redactor
      * @var list<string>
      */
     public const AMBIGUOUS_PARAMETERS = ['key', 'auth', 'code', 'state', 'pwd'];
+
+    /**
+     * Words that turn an ambiguous parameter into an unambiguous one.
+     *
+     * `key` on its own could be a sort key. Behind one of these it is a
+     * credential and nothing else — and `postal`, `sort`, `status` and
+     * `zip` are conspicuously not here, which is the point.
+     *
+     * @var list<string>
+     */
+    public const CREDENTIAL_QUALIFIERS = [
+        'private', 'secret', 'api', 'access', 'auth', 'client', 'app',
+        'encryption', 'signing', 'consumer', 'shared', 'master',
+    ];
 
     /**
      * Is this parameter NAME a credential, however it was spelled?
@@ -300,6 +345,7 @@ final class Redactor
             $name = rawurldecode($name);
         }
 
+        $original = $name;
         $name = strtolower($name);
 
         // Truncate at the FIRST bracket rather than stripping trailing levels
@@ -319,8 +365,37 @@ final class Redactor
         // spelling counts: `x-api-key` is `x_api_key`.
         $name = strtr($name, ['-' => '_', '.' => '_']);
 
-        if ($allowAmbiguous && in_array($name, self::AMBIGUOUS_PARAMETERS, true)) {
-            return true;
+        // And so does a capital. `accessToken` is the same parameter as
+        // `access_token` to every application that reads it, and was not
+        // to this function — which mattered because camelCase is what a
+        // JavaScript-facing API uses, and those are exactly the URLs an
+        // application does not control.
+        //
+        // Done on the ORIGINAL spelling, since $name is lowercased above.
+        $name = self::splitCamelCase($name, $original);
+
+        if ($allowAmbiguous) {
+            foreach (self::AMBIGUOUS_PARAMETERS as $ambiguous) {
+                if ($name === $ambiguous) {
+                    return true;
+                }
+
+                // As a suffix ONLY behind a qualifier that settles it.
+                // `private_key` is a credential and `sort_key` is a sort
+                // order; `client_code` is an OAuth code and `postal_code`
+                // is an address. Matching every suffix caught all four,
+                // which is how the first version of this broke a test
+                // written to protect exactly those two.
+                if (! str_ends_with($name, '_'.$ambiguous)) {
+                    continue;
+                }
+
+                $qualifier = substr($name, 0, -strlen($ambiguous) - 1);
+
+                if (in_array($qualifier, self::CREDENTIAL_QUALIFIERS, true)) {
+                    return true;
+                }
+            }
         }
 
         foreach (self::CREDENTIAL_PARAMETERS as $credential) {
@@ -330,6 +405,152 @@ final class Redactor
         }
 
         return false;
+    }
+
+    /**
+     * The issuer prefixes as one anchored pattern, built on first use.
+     *
+     * Memoised on the instance rather than statically: the list is
+     * configurable, so two applications in one process — a test suite —
+     * must not share one.
+     */
+    private function prefixPattern(): string
+    {
+        if ($this->prefixPattern !== null) {
+            return $this->prefixPattern;
+        }
+
+        $prefixes = array_filter($this->credentialPrefixes, static fn (string $p): bool => $p !== '');
+
+        // Matching nothing, for an empty list: `(?!)` always fails, and
+        // an empty alternation would match everything.
+        return $this->prefixPattern = $prefixes === []
+            ? '/(?!)/'
+            : '/^(?:'.implode('|', array_map(static fn (string $p): string => preg_quote($p, '/'), $prefixes)).')/';
+    }
+
+    /**
+     * A parameter value as the receiving application reads it: quotes
+     * off, percent-decoded. `sk%5Flive%5F…` is the same secret as
+     * `sk_live_…` and matches no prefix without this.
+     */
+    private static function decodedValue(string $value): string
+    {
+        $value = trim($value, '"\'');
+
+        return str_contains($value, '%') ? rawurldecode($value) : $value;
+    }
+
+    /**
+     * Vendor prefixes that are a credential and nothing else.
+     *
+     * A name list cannot help here. `?t=`, `?k=`, `?sas=` and every
+     * other parameter a third-party API invented are unknowable in
+     * advance, and auto-instrumentation records URLs the application did
+     * not write. What IS knowable is what the secret looks like: every
+     * one of these issuers stamps its keys so they can be found in a
+     * leak, which works just as well for finding them before one.
+     *
+     * @var list<string>
+     */
+    private const DEFAULT_CREDENTIAL_PREFIXES = [
+        'sk_live_', 'sk_test_', 'rk_live_', 'rk_test_', 'whsec_',   // Stripe
+        'ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_', 'github_pat_',      // GitHub
+        'glpat-', 'gldt-',                                          // GitLab
+        'xoxb-', 'xoxp-', 'xoxa-', 'xoxr-', 'xoxs-', 'xapp-',       // Slack
+        'AKIA', 'ASIA',                                             // AWS
+        'AIza',                                                     // Google
+        'SG.',                                                      // SendGrid
+        'shpat_', 'shpss_',                                         // Shopify
+        'npm_', 'dop_v1_', 'doo_v1_', 'dor_v1_',                    // npm, DigitalOcean
+        'sq0atp-', 'sq0csp-',                                       // Square
+        'ya29.',                                                    // Google OAuth
+    ];
+
+    /**
+     * @return list<string>
+     */
+    public static function defaultCredentialPrefixes(): array
+    {
+        return self::DEFAULT_CREDENTIAL_PREFIXES;
+    }
+
+    /**
+     * Does this VALUE look like a credential, whatever it was called?
+     *
+     * The second half of the model, and the half that matters for
+     * auto-instrumentation: a name list only catches parameters someone
+     * thought of, and the URLs an application calls are full of ones
+     * nobody did.
+     *
+     * Two rules, deliberately narrow, because over-redaction is its own
+     * failure — an operator who cannot read the URLs stops trusting the
+     * tool:
+     *
+     *  - A known issuer prefix. Unambiguous, and free to check.
+     *  - Length with mixed character classes: 24+ characters containing
+     *    lower, upper AND digits, which is what a generated token looks
+     *    like and what a slug, an email, a date, a path or a sentence
+     *    does not. A UUID is excluded by name — hex and hyphens only,
+     *    never mixed case — because a UUID in a URL is almost always an
+     *    id somebody needs to read.
+     */
+    public function valueLooksLikeCredential(string $value): bool
+    {
+        $length = strlen($value);
+
+        if ($length < 8) {
+            return false;
+        }
+
+        // One anchored alternation, compiled once, rather than a
+        // str_starts_with per prefix: twenty-five of those ran for every
+        // parameter of every URL on every span, and measured 9µs a span
+        // — more than a third of the whole redaction pass, to check a
+        // list that almost never matches.
+        if (preg_match($this->prefixPattern(), $value) === 1) {
+            return true;
+        }
+
+        if (! $this->valueShape || $length < $this->valueMinLength) {
+            return false;
+        }
+
+        // A UUID is an identifier, not a secret, and it is the single
+        // most common long value in a real query string.
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $value) === 1) {
+            return false;
+        }
+
+        // Anything with a space, or a character no token generator emits,
+        // is prose or a path rather than a credential.
+        if (preg_match('/^[A-Za-z0-9._~+\/=-]+$/', $value) !== 1) {
+            return false;
+        }
+
+        return preg_match('/[a-z]/', $value) === 1
+            && preg_match('/[A-Z]/', $value) === 1
+            && preg_match('/[0-9]/', $value) === 1;
+    }
+
+    /**
+     * `accessToken` → `access_token`, using the original spelling to see
+     * the capitals that lowercasing has already removed.
+     *
+     * Only when the lowercased name has no separators of its own: a name
+     * that already says `x-api-key` needs nothing, and re-splitting
+     * `AWSAccessKeyId` into `a_w_s_access_key_id` would be worse than
+     * leaving it — which is why runs of capitals stay together.
+     */
+    private static function splitCamelCase(string $name, string $original): string
+    {
+        if (str_contains($name, '_') || $original === strtolower($original)) {
+            return $name;
+        }
+
+        $split = preg_replace('/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/', '_', $original);
+
+        return is_string($split) ? strtolower($split) : $name;
     }
 
     /**

@@ -92,6 +92,7 @@ measured with the listener armed and with it absent.
 | N+1 detection | **+0.2 µs** — an `xxh3` of the statement. Leave it on. |
 | Outgoing HTTP hop | **+20 µs** — against a network call measured in milliseconds. |
 | Request middleware + terminate | **0.23 ms** (0.04 handle, 0.19 terminate) |
+| Redaction, per span at flush | **~25 µs** — 2.5 ms for a hundred-span trace |
 | Listeners registered on defaults | **84** |
 
 That middleware figure was **79 ms** until this was measured, and all of
@@ -108,6 +109,13 @@ round trip through testbench, which costs ~58 ms with ±10 ms of
 variance. A sub-millisecond delta is not separable there, and it is why
 that benchmark showed nothing while the middleware was costing 79 ms.
 Trust the per-operation table.
+
+Redaction is the one line above that scales with the size of a trace
+rather than the number of requests, because it walks every attribute of
+every span and event on the way out. It runs after the response, and it
+is the price of not shipping a secret to a third-party backend — but a
+trace with hundreds of detail spans pays it per span, which is another
+reason `traces.details.mode = tail` earns its keep on a busy endpoint.
 
 The one number worth acting on is the query path. Fifty queries in a
 request is half a millisecond; five hundred — an N+1 you would want to

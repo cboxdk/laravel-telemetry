@@ -113,6 +113,42 @@ spans keep the real hostname, because per-occurrence it costs nothing and
 it is what you need when reading a trace. Return `null` to drop the
 metrics for that host entirely while still recording the span.
 
+## Redaction — config, or your own class
+
+Two halves, because a name list is enough for context you set yourself
+and is not enough for auto-instrumentation.
+
+**Names.** `redaction.keys` covers attribute keys; query parameters are
+matched by name too, through every spelling the same parameter takes —
+`api_key`, `apiKey`, `x-api-key`, `%61pi_key`, `token[0]`.
+
+**Values.** The URLs this package records are not yours. They belong to
+whatever third-party API the application calls, and no list enumerates
+`?t=`, `?sas=`, or whatever the next vendor names its token. So a query
+parameter whose NAME said nothing is judged by its VALUE:
+
+```php
+'credential_prefixes' => Redactor::defaultCredentialPrefixes(), // sk_live_, ghp_, AKIA, …
+'value_shape' => true,        // 24+ chars, token alphabet, mixed case + digits
+'value_min_length' => 24,
+```
+
+UUIDs are excluded by shape — a UUID in a URL is an id somebody needs to
+read — and so is anything with a space or a character no token generator
+emits. Over-redaction is its own failure: an operator who cannot read
+the URLs stops trusting the tool.
+
+**Or replace the model.** `RedactsTelemetry` is a contract, for an
+organisation whose redaction policy is its own — a compliance list, a
+shared internal package, a scanner that already exists elsewhere:
+
+```php
+$this->app->bind(RedactsTelemetry::class, AcmeRedactor::class);
+```
+
+Bind it and the whole pipeline uses it. Reach for this when you need a
+different model, not a different list.
+
 ## Queue name classification — `classifyQueuesUsing()`
 
 `queue` is a metric label on every queue metric this package emits, and

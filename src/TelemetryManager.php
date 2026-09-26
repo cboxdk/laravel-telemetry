@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry;
 
 use Cbox\Telemetry\Contracts\Exporter;
+use Cbox\Telemetry\Contracts\RedactsTelemetry;
 use Cbox\Telemetry\Contracts\TelemetryProvider;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Metrics\Instruments\Counter;
@@ -19,7 +20,6 @@ use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\FailSafe;
-use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\Signal;
 use Cbox\Telemetry\Support\TelemetryBatch;
 use Cbox\Telemetry\Support\TraceParent;
@@ -97,7 +97,7 @@ class TelemetryManager
         private readonly bool $tailDetails = false,
         private readonly float $slowRequestMs = 1000.0,
         private readonly float $slowSpanMs = 100.0,
-        private readonly ?Redactor $redactor = null,
+        private readonly ?RedactsTelemetry $redactor = null,
         private readonly bool $selfMetrics = true,
     ) {
         // A buffer-cap flush means the trace is pathological — keep every

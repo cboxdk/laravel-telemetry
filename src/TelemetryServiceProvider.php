@@ -15,6 +15,7 @@ use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Contracts\NativeRuntime;
+use Cbox\Telemetry\Contracts\RedactsTelemetry;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
@@ -164,6 +165,19 @@ class TelemetryServiceProvider extends ServiceProvider
             fn (Application $app) => new NativeScreenInstrumentation($app),
         );
 
+        // A contract, so an organisation with its own redaction policy —
+        // a compliance list, a shared internal package, a scanner that
+        // already exists elsewhere in the estate — can bind it and have
+        // the whole pipeline use it. The built-in one is configured
+        // entirely from `telemetry.redaction`, so most needs are a
+        // config change rather than a class.
+        $this->app->singleton(
+            RedactsTelemetry::class,
+            fn (Application $app): RedactsTelemetry => Redactor::fromConfig(
+                Cast::stringKeyedArray($app->make('config')->get('telemetry.redaction', [])),
+            ),
+        );
+
         $this->app->singleton(Registry::class, function (Application $app) {
             /** @var list<float> $buckets */
             $buckets = $app->make('config')->get('telemetry.default_buckets', []);
@@ -209,7 +223,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
                 slowRequestMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_request_ms'), 1000),
                 slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
-                redactor: Redactor::fromConfig(Cast::stringKeyedArray($app->make('config')->get('telemetry.redaction', []))),
+                redactor: $app->make(RedactsTelemetry::class),
                 selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
             );
 

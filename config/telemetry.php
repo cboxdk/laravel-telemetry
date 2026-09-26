@@ -352,6 +352,34 @@ return [
         'safe_keys' => Redactor::defaultSafeKeys(),
 
         'replacement' => '[REDACTED]',
+
+        // Auto-instrumentation needs more than a name list.
+        //
+        // For a context value you set yourself, a list of key names is
+        // enough — you chose the key. The URLs this package records are
+        // not yours: they belong to whatever third-party API the
+        // application calls, and no list enumerates `?t=`, `?sas=` or
+        // whatever the next vendor decides to call its token.
+        //
+        // So a query-parameter value is ALSO judged by its shape, when
+        // its name said nothing.
+
+        // Issuer prefixes: unambiguous, free to check, and the reason
+        // every one of these vendors stamps its keys in the first place.
+        // Unioned with the package's list unless replace_defaults.
+        'credential_prefixes' => Redactor::defaultCredentialPrefixes(),
+
+        // The generic rule: a value this long, made only of token
+        // characters, with lower AND upper AND digits, is a generated
+        // credential and not a slug, an email, a date or a path. UUIDs
+        // are excluded by shape — a UUID in a URL is an id somebody
+        // needs to read.
+        //
+        // Set false to judge values by prefix only. Raise the length if
+        // your own identifiers trip it; lower it at your peril, because
+        // the false positives start immediately below here.
+        'value_shape' => env('TELEMETRY_REDACTION_VALUE_SHAPE', true),
+        'value_min_length' => env('TELEMETRY_REDACTION_VALUE_MIN_LENGTH', 24),
     ],
 
     /*
