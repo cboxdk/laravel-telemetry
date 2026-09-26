@@ -155,6 +155,15 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
+        // A sum can reach infinity from observations that were each
+        // perfectly finite — two of PHP_FLOAT_MAX is all it takes, and
+        // the write buffer adds them up before anything here sees
+        // them. Redis then refuses the sum after the buckets have
+        // already been counted.
+        if (! is_finite($sum)) {
+            return;
+        }
+
         $key = $this->familyKey(MetricType::Histogram, $definition->name);
         $series = base64_encode(Labels::encode($labels));
 
@@ -255,7 +264,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
                 // transient error throws away atomicity and the
                 // series budget with it.
                 if ($result === false) {
-                    if (! $this->scriptingIsRefusedByProbe($connection)) {
+                    if (! $this->scriptingIsRefusedByProbe($connection, $key)) {
                         return;
                     }
 
@@ -380,12 +389,17 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
      * script's own — a NaN increment, a wrong type — and the fallback
      * would repeat work that already happened.
      */
-    private function scriptingIsRefusedByProbe(Connection $connection): bool
+    private function scriptingIsRefusedByProbe(Connection $connection, string $key): bool
     {
         try {
+            // One key, like the real script. A managed Redis can
+            // refuse a zero-key EVAL while running keyed ones
+            // perfectly well — ElastiCache documents exactly that —
+            // and a probe that does not look like the thing it is
+            // probing for answers the wrong question.
             $probe = $connection instanceof PhpRedisConnection
-                ? $connection->eval('return 1', 0)
-                : $connection->command('eval', ['return 1', 0]);
+                ? $connection->eval('return 1', 1, $key)
+                : $connection->command('eval', ['return 1', 1, $key]);
 
             return $probe === false;
         } catch (Throwable $e) {
@@ -405,6 +419,14 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
     private static function scriptingIsUnsupported(Throwable $e): bool
     {
         $message = strtolower($e->getMessage());
+
+        // An ACL failure INSIDE the script is not a refused EVAL: the
+        // script ran, some of its commands landed, and repeating them
+        // non-atomically double-counts what already happened. Redis
+        // says which by prefixing the in-script form.
+        if (str_contains($message, 'in script') || str_contains($message, 'called from script')) {
+            return false;
+        }
 
         foreach (['unknown command', 'not allowed', 'unsupported', 'disabled', 'noperm', 'no permissions'] as $needle) {
             if (str_contains($message, $needle)) {

@@ -211,7 +211,13 @@ final class BufferedMetricStore implements MetricStore, ReportsOverflow
             }
         }
 
-        $entry['sum'] += $sum;
+        // Adding is where infinity comes from: each observation was
+        // finite and the total is not. Keeping the previous total is
+        // the honest answer — a sum that stopped being meaningful
+        // should not take the bucket counts down with it, and the
+        // store below refuses a non-finite sum anyway.
+        $total = $entry['sum'] + $sum;
+        $entry['sum'] = is_finite($total) ? $total : $entry['sum'];
         $entry['count'] += $count;
 
         if ($exemplar !== null) {

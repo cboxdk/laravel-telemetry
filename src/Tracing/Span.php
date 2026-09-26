@@ -161,10 +161,21 @@ final class Span
     }
 
     /**
+     * @param  array-key  $key  an INT is legal here and arrives routinely:
+     *                          PHP turns a numeric string array key into
+     *                          an integer, so any `['0' => …]` an
+     *                          application passes to setAttributes(),
+     *                          addContext() or the constructor reaches
+     *                          this as an int. Declaring it `string` made
+     *                          that a TypeError out of `end()`, which is
+     *                          telemetry failing the application over an
+     *                          attribute name.
      * @param  scalar|null  $value
      */
-    private function put(string $key, mixed $value, bool $reserved): self
+    private function put(string|int $key, mixed $value, bool $reserved): self
     {
+        $key = (string) $key;
+
         $limit = self::MAX_ATTRIBUTES + ($reserved ? self::RESERVE : 0);
 
         if (! array_key_exists($key, $this->attributes) && count($this->attributes) >= $limit) {

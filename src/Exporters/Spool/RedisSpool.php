@@ -78,16 +78,25 @@ final class RedisSpool implements Spool
         try {
             /** @var mixed $raw */
             $raw = $connection->command('lpop', [$this->key, $count]);
-        } catch (Throwable) {
-            // The command may have RUN and only its reply been lost,
-            // in which case those entries are already off the list.
-            // Popping again here would skip past them for good, so
-            // this tick ships nothing and the next one starts clean.
-            return [];
-        }
 
-        if (is_array($raw)) {
-            return $this->decodeAll($raw);
+            if (is_array($raw)) {
+                return $this->decodeAll($raw);
+            }
+        } catch (Throwable $e) {
+            // Two very different failures arrive the same way.
+            //
+            // A server that does not know the count form REJECTS the
+            // command — nothing was popped, and the per-entry loop
+            // below is the whole point. Older clients raise that as an
+            // argument-count error rather than returning false.
+            //
+            // Anything else may have RUN and only lost its reply, and
+            // those entries are already off the list; popping again
+            // would skip past them for good. That tick ships nothing
+            // and the next starts clean.
+            if (! self::isArgumentRejection($e)) {
+                return [];
+            }
         }
 
         // A non-array answer is ambiguous: phpredis returns false both
@@ -119,6 +128,22 @@ final class RedisSpool implements Spool
         }
 
         return $entries;
+    }
+
+    /**
+     * Whether the server refused the command before running it.
+     *
+     * `LPOP key count` needs Redis 6.2. Older ones answer "wrong
+     * number of arguments", which is a rejection: nothing was popped,
+     * and retrying per entry is safe.
+     */
+    private static function isArgumentRejection(Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        return str_contains($message, 'wrong number of arguments')
+            || str_contains($message, 'unknown command')
+            || str_contains($message, 'syntax error');
     }
 
     /**

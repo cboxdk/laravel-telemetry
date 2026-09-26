@@ -161,8 +161,12 @@ it('does not mistake a refused batch pop for an empty spool', function () {
                 public function command($method, array $parameters = [])
                 {
                     // An old server: the count form is not understood.
+                    // Older clients raise that rather than returning
+                    // false, so both shapes are exercised — the throw
+                    // is the one that stopped the spool draining
+                    // entirely.
                     if ($method === 'lpop' && count($parameters) > 1) {
-                        return false;
+                        throw new RuntimeException("ERR wrong number of arguments for 'lpop' command");
                     }
 
                     return $this->inner->command($method, $parameters);
@@ -188,4 +192,84 @@ it('does not mistake a refused batch pop for an empty spool', function () {
 
     expect(array_column(array_column($entries, 'payload'), 'id'))->toBe(['e1', 'e2', 'e3'])
         ->and($spool->size())->toBe(0);
+});
+
+it('falls back when the old server THROWS rather than answering false', function () {
+    // The same Redis, a different client. Catching the rejection and
+    // calling it an empty list meant the spool never drained again,
+    // with the daemon reporting success on every pass.
+    $factory = new class(app(Factory::class)) implements Factory
+    {
+        public function __construct(private readonly Factory $inner) {}
+
+        public function connection($name = null)
+        {
+            return new class($this->inner->connection($name)) extends Connection
+            {
+                public function __construct(private readonly Connection $inner) {}
+
+                public function command($method, array $parameters = [])
+                {
+                    if ($method === 'lpop' && count($parameters) > 1) {
+                        throw new RuntimeException("ERR wrong number of arguments for 'lpop' command");
+                    }
+
+                    return $this->inner->command($method, $parameters);
+                }
+
+                public function createSubscription($channels, Closure $callback, $method = 'subscribe') {}
+
+                public function client()
+                {
+                    return $this->inner->client();
+                }
+            };
+        }
+    };
+
+    $spool = new RedisSpool($factory, 'default', $this->key, maxItems: 100);
+    $spool->push(spoolEntry('a'));
+    $spool->push(spoolEntry('b'));
+
+    expect(array_column(array_column($spool->pop(50), 'payload'), 'id'))->toBe(['a', 'b']);
+});
+
+it('ships nothing rather than skipping entries when a pop fails ambiguously', function () {
+    // A timeout is not a rejection: the command may have run and only
+    // its reply been lost, and popping again would step over entries
+    // that are already off the list.
+    $factory = new class(app(Factory::class)) implements Factory
+    {
+        public function __construct(private readonly Factory $inner) {}
+
+        public function connection($name = null)
+        {
+            return new class($this->inner->connection($name)) extends Connection
+            {
+                public function __construct(private readonly Connection $inner) {}
+
+                public function command($method, array $parameters = [])
+                {
+                    if ($method === 'lpop' && count($parameters) > 1) {
+                        throw new RuntimeException('read error on connection to 127.0.0.1:6379');
+                    }
+
+                    return $this->inner->command($method, $parameters);
+                }
+
+                public function createSubscription($channels, Closure $callback, $method = 'subscribe') {}
+
+                public function client()
+                {
+                    return $this->inner->client();
+                }
+            };
+        }
+    };
+
+    $spool = new RedisSpool($factory, 'default', $this->key, maxItems: 100);
+    $spool->push(spoolEntry('a'));
+
+    expect($spool->pop(50))->toBe([])
+        ->and($spool->size())->toBe(1);
 });

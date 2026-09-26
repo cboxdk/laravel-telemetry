@@ -16,11 +16,6 @@ use Throwable;
  */
 final class ExceptionAttributes
 {
-    /** stacktrace / source can bloat OTLP batches — cap defensively. */
-    private const MAX_STACKTRACE = 12000;
-
-    private const MAX_SOURCE = 4000;
-
     /**
      * @return array<string, scalar>
      */
@@ -31,7 +26,14 @@ final class ExceptionAttributes
             'exception.message' => $e->getMessage(),
             'exception.file' => self::relative($e->getFile(), $basePath),
             'exception.line' => $e->getLine(),
-            'exception.stacktrace' => self::cap($e->getTraceAsString(), self::MAX_STACKTRACE),
+            // NOT capped here. Redaction runs at export, so cutting a
+            // trace — whose frames carry arguments when the host has
+            // that on — can remove the `@` or the separator a pattern
+            // matches, and the credential then reads as ordinary text.
+            // Length is `telemetry.redaction.max_value_length`, which
+            // redacts first and cuts after, and whose default is
+            // shorter than the cap this replaces.
+            'exception.stacktrace' => $e->getTraceAsString(),
             'exception.group' => self::fingerprint($e),
         ];
 
@@ -111,11 +113,8 @@ final class ExceptionAttributes
             $out[] = sprintf('%s%d| %s', $i + 1 === $line ? '> ' : '  ', $i + 1, (string) $lines[$i]);
         }
 
-        return self::cap(implode("\n", $out), self::MAX_SOURCE);
-    }
-
-    private static function cap(string $value, int $max): string
-    {
-        return strlen($value) > $max ? substr($value, 0, $max)."\n… (truncated)" : $value;
+        // Bounded by the line window above, not by a byte cut — see
+        // the note on the stack trace.
+        return implode("\n", $out);
     }
 }

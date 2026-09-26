@@ -633,7 +633,9 @@ final class QueueInstrumentation implements ManagesRequestState
             unset($this->jobUsage[$id], $this->jobUnits[$id], $this->jobProfiles[$id]);
         }
 
-        FailSafe::guard(function () use ($job, $queue, $outcome, $span, $usage, $unit, $profile) {
+        $reported = false;
+
+        FailSafe::guard(function () use ($job, $queue, $outcome, $span, $usage, $unit, $profile, &$reported) {
             // "job.name", not "job" — a bare `job` label collides with
             // Prometheus' reserved scrape-job label and gets overwritten
             // by collectors.
@@ -693,6 +695,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 $span->end();
 
                 if ($profile !== null) {
+                    $reported = true;
                     $this->reportProfile($profile, $span->durationMs(), $job, $queue ?? 'default');
                 }
 
@@ -733,7 +736,10 @@ final class QueueInstrumentation implements ManagesRequestState
             FailSafe::guard(static fn () => $unit->discard());
         }
 
-        if ($profile !== null) {
+        // Only when reporting did not already consume it: stop()
+        // obtains, aggregates and sorts the log, and doing that twice
+        // is the profiler's whole cost paid twice on the happy path.
+        if ($profile !== null && ! $reported) {
             FailSafe::guard(static fn () => $profile->stop(0));
         }
 

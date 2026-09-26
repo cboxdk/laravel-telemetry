@@ -432,16 +432,32 @@ it('records nothing rather than half of something when the manager is broken', f
 });
 
 it('does not throw on an attribute key PHP turns into an integer', function (): void {
-    // `$array['0']` is `$array[0]`. A size estimate reached from end(),
-    // outside any guard, handed strlen() that integer and threw into
-    // the application — from the code whose entire job is to make sure
-    // that cannot happen.
+    // `$array['0']` is `$array[0]`. Every route into a span's
+    // attributes can therefore hand it an int, and each of these was a
+    // TypeError out of `end()` or out of the constructor — from the
+    // code whose entire job is to make sure that cannot happen.
     $tracer = new Tracer;
-    $span = $tracer->startSpan('checkout');
-    $span->setAttribute('0', 'v');
-    $span->setAttribute('12', 'v');
+
+    $span = $tracer->startSpan('checkout', attributes: ['0' => 'from the constructor']);
+    $span->setAttribute('12', 'from the setter');
+    $span->setAttributes(['34' => 'from the bulk setter']);
+    $span->addEvent('step', ['56' => 'from an event']);
+    $tracer->addContext(['78' => 'from the ambient context']);
+    $tracer->bumpStat('90', 1);
 
     $span->end();
 
     expect($tracer->bufferedCount())->toBe(1);
+});
+
+it('does not let a failing flush escape through end()', function (): void {
+    // The buffer-full callback is a flush: exporters, the store, the
+    // network. It runs from inside `end()`, on the application's
+    // stack, and nothing above it catches.
+    $tracer = new Tracer(maxBuffer: 1);
+    $tracer->onBufferFull(static fn () => throw new RuntimeException('the collector is on fire'));
+
+    $tracer->startSpan('a')->end();
+
+    expect(fn () => $tracer->startSpan('b')->end())->not->toThrow(Throwable::class);
 });

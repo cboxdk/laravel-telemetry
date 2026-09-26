@@ -25,6 +25,11 @@ final readonly class ExportOutcome
     {
         $status = match (true) {
             $result->rejected > 0 => ExportStatus::Partial,
+            // Accepted, with something to say about it — a response
+            // too large to read, so any rejection count in it is
+            // lost. `rejected` is 0 because we do not know, which is
+            // not the same as knowing it was none.
+            $result->success && $result->reason !== null => ExportStatus::Partial,
             $result->success => ExportStatus::Ok,
             $result->retryable => ExportStatus::Retryable,
             default => ExportStatus::Failed,

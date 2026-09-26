@@ -123,3 +123,25 @@ it('waits out a Retry-After the backend asked for', function () {
 
     SharedState::use(null);
 });
+
+it('says it is waiting, not that there is work to come back for', function () {
+    // The daemon skips its sleep when a drain stopped short, because
+    // that normally means backlog. A cooldown is the opposite: there
+    // is nothing to come back for, and not telling the two apart
+    // spins the process at full speed for as long as the backend
+    // asked it to wait.
+    SharedState::use(new PoolMemory);
+
+    $spool = new ArraySpool;
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => []]]);
+
+    $shipper = new SpoolShipper($spool, fn (): ExportResult => ExportResult::retryable('HTTP 503', 120));
+
+    $shipper->ship();
+    $second = $shipper->ship();
+
+    expect($second->waiting)->toBeTrue()
+        ->and($second->drained)->toBeFalse();
+
+    SharedState::use(null);
+});

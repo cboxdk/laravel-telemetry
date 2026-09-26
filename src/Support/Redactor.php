@@ -717,7 +717,14 @@ final class Redactor implements RedactsTelemetry
             // signature, which is where a long token's secret actually
             // lives, unbounded. 4096 base64 characters is far more
             // header than any real token carries, x5c chains included.
-            '/\beyJ[\w-]{10,4096}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
+            // `eyJ` is base64 of `{"`, and a JWT header is JSON — so
+            // one written with whitespace or a leading newline starts
+            // `ewo` or `eyA` instead, and is just as much a
+            // credential. Known gap: a token whose header exceeds the
+            // bound above (an x5c chain), and one with an empty claims
+            // set, whose `e30` payload is shorter than the minimum
+            // that keeps ordinary text out.
+            '/\b(?:eyJ|ewo|eyA)[\w-]{10,4096}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
             //
             // Two ways to qualify, because a flat length threshold cannot
@@ -739,7 +746,11 @@ final class Redactor implements RedactsTelemetry
             // Only the scheme is case-insensitive. An `/i` over the whole
             // pattern makes `[A-Z0-9]` match lowercase too and swallows the
             // prose, which is how the first attempt at this failed.
-            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,}+={0,2}|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*+[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
+            // `\d{4,}` for the short numeric kind — a one-time code
+            // presented as a bearer token is still a bearer token, and
+            // no auth-param list (`realm=api`, `error=invalid_token`)
+            // is four digits with nothing else.
+            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,}+={0,2}|\d{4,}+|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*+[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
             //
             // Anchored on `://` and not on the scheme. Matching the
@@ -749,7 +760,9 @@ final class Redactor implements RedactsTelemetry
             // credential preceded by a long unbroken word, because the
             // run had been swallowing it. The scheme was never needed:
             // it is reproduced verbatim in the replacement.
-            '#://[^/@\s:]++:[^/@\s]++@#' => '://[REDACTED]@',
+            // `*` on the username, not `+`: `https://:hunter2@host`
+            // has no username and is still a password in a URL.
+            '#://[^/@\s:]*+:[^/@\s]++@#' => '://[REDACTED]@',
             // NOTE: the two query-parameter patterns that used to live here
             // are gone. Matching a parameter by literal text could never see
             // that `%74oken=` and `token%5B%5D=` are the same secret, and a
@@ -814,6 +827,10 @@ final class Redactor implements RedactsTelemetry
                     $this->value('event.name', $event->name),
                     $event->timeUnixNano,
                     $this->attributes($event->attributes),
+                    // Carried. Rebuilding the event without it reset
+                    // the count to zero, and the OTLP record then said
+                    // nothing was dropped.
+                    $event->droppedAttributes,
                 ),
                 $span->events(),
             ));
@@ -895,8 +912,12 @@ final class Redactor implements RedactsTelemetry
         return $attributes;
     }
 
-    public function value(string $key, string $value): string
+    public function value(string|int $key, string $value): string
     {
+        // An int key is legal — PHP turns `'0'` into `0` on the way
+        // into an array — and everything below reads the key as text.
+        $key = (string) $key;
+
         if (! $this->enabled) {
             return $value;
         }

@@ -138,7 +138,7 @@ it('can be replaced outright by binding the contract', function () {
 
         public function redactUsing(?Closure $custom): void {}
 
-        public function value(string $key, string $value): string
+        public function value(string|int $key, string $value): string
         {
             return '[GONE]';
         }
@@ -208,3 +208,29 @@ it('reads camelCase attribute keys as sensitive too', function () {
         ->and($redactor->keyIsSensitive('cache.key'))->toBeFalse()
         ->and($redactor->keyIsSensitive('http.route'))->toBeFalse();
 });
+
+it('recognises the credential shapes a narrower reading of the spec missed', function (string $value, string $secret) {
+    expect(Redactor::fromConfig(config('telemetry.redaction'))->value('log.context.message', $value))
+        ->not->toContain($secret);
+})->with([
+    // A JWT header is JSON, and JSON may carry whitespace: written
+    // with a newline it is base64 `ewo`, not `eyJ`.
+    'jwt with a whitespace header' => [
+        'token ewogICJhbGciOiAiSFMyNTYiCn0.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U rejected',
+        'dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+    ],
+    // No username. Still a password in a URL.
+    'userinfo with no username' => ['redis://:hunter2@cache.internal:6379', 'hunter2'],
+    // A one-time code presented as a bearer token is a bearer token.
+    'short numeric bearer' => ['Authorization: Bearer 483920', '483920'],
+]);
+
+it('still leaves an auth-param list alone', function (string $value) {
+    // The reason the Bearer rule has shapes at all: a real
+    // WWW-Authenticate header is not a credential.
+    expect(Redactor::fromConfig(config('telemetry.redaction'))->value('log.context.message', $value))->toBe($value);
+})->with([
+    'Bearer error=invalid_token',
+    'Bearer realm=api',
+    'Bearer Authentication',
+]);

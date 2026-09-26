@@ -41,6 +41,15 @@ class OtlpTransport
     private const MAX_RESPONSE_BYTES = 65536;
 
     /**
+     * Longest cooldown a backend can ask for.
+     *
+     * A day. Longer than that is indistinguishable from the exporter
+     * being switched off, and an unclamped value overflows into a
+     * float when added to the clock.
+     */
+    private const MAX_RETRY_AFTER_SECONDS = 86_400;
+
+    /**
      * @param  array<string, string>  $headers
      */
     public function __construct(
@@ -236,7 +245,11 @@ class OtlpTransport
     private function retryAfter(string $rawHeaders): ?int
     {
         if (preg_match('/^Retry-After:\s*(\d+)\s*$/mi', $rawHeaders, $matches) === 1) {
-            return (int) $matches[1];
+            // Clamped like the date form below. `Retry-After:
+            // 999999999999999999999` casts to PHP_INT_MAX, and
+            // PHP_INT_MAX + time() is a float — which then threw from
+            // the circuit breaker, out of the export path.
+            return min((int) $matches[1], self::MAX_RETRY_AFTER_SECONDS);
         }
 
         if (preg_match('/^Retry-After:\s*(.+?)\s*$/mi', $rawHeaders, $matches) !== 1) {
@@ -252,6 +265,6 @@ class OtlpTransport
         // A date in the past means "now"; a date absurdly far out is
         // clamped, because a cooldown longer than a day is indistinguishable
         // from the exporter being switched off.
-        return max(0, min($at - time(), 86_400));
+        return max(0, min($at - time(), self::MAX_RETRY_AFTER_SECONDS));
     }
 }

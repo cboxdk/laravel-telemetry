@@ -68,7 +68,7 @@ final class SpoolShipper
 
         // A cooldown the backend itself asked for, still running.
         if (time() < SharedState::deadline(self::COOLDOWN_KEY)) {
-            return new ShipResult(drained: false);
+            return new ShipResult(drained: false, waiting: true);
         }
 
         $shipped = 0;

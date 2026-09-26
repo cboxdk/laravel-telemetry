@@ -164,6 +164,13 @@ final class FailSafe
         // shared memory with keys nobody will look up twice.
         $shape = (string) preg_replace('/[A-Za-z0-9_-]{16,}/', '#', $shape);
 
+        // And hex specifically, from eight characters. A short hash,
+        // a request id, an abbreviated commit: all below the general
+        // rule's length and all unique per occurrence. Widening the
+        // general rule instead of keeping this one turned three
+        // hundred ids into three hundred shapes.
+        $shape = (string) preg_replace('/\b[0-9a-f]{8,}\b/', '#', $shape);
+
         // Then every number, short ones included. This is a deliberate
         // trade in one direction: `collector returned HTTP 401` and
         // `… 403` share a key and the second waits a minute, while

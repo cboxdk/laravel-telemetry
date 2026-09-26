@@ -147,10 +147,23 @@ final class OtlpExporter implements Exporter
         // the batch was accepted but something about it is unknown,
         // and both have to survive the fold. Reporting a clean success
         // here is how a partial loss goes unnoticed.
+        //
+        // Summed and joined across signals: traces rejecting three and
+        // logs rejecting seven is ten, not three, and the operator
+        // needs both reasons.
+        $rejected = 0;
+        $reasons = [];
+
         foreach ($results as $result) {
-            if ($result->rejected > 0 || $result->reason !== null) {
-                return $result;
+            $rejected += $result->rejected;
+
+            if ($result->reason !== null) {
+                $reasons[] = $result->reason;
             }
+        }
+
+        if ($rejected > 0 || $reasons !== []) {
+            return ExportResult::partial($rejected, $reasons === [] ? null : implode('; ', $reasons));
         }
 
         return ExportResult::ok();

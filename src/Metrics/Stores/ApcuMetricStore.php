@@ -90,6 +90,10 @@ final class ApcuMetricStore implements MetricStore
 
     public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
     {
+        if (! is_finite($sum)) {
+            return;
+        }
+
         $series = Labels::encode($labels);
         $base = $this->valueKey(MetricType::Histogram, $definition->name, $series);
 

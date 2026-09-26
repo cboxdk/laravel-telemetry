@@ -156,9 +156,21 @@ final class FlushCommand extends Command
                 }
 
                 $shipped = $shipped->plus($result);
-            } while (! $result->drained && ! $this->shouldStop && microtime(true) < $deadline);
+            } while (! $result->drained && ! $result->waiting && ! $this->shouldStop && microtime(true) < $deadline);
 
             $healthy = $this->reportSpool($shipped) && $healthy;
+
+            // A run that stopped with a backlog is not a clean run,
+            // whatever it managed to ship. Reporting success there is
+            // how a spool grows across cron ticks that all look fine.
+            if (! $shipped->drained && ! $shipped->waiting) {
+                $this->components->warn(sprintf(
+                    'The spool still has %d payload(s) — the drain stopped on its time budget.',
+                    FailSafe::guard(fn (): int => $this->laravel->make(Spool::class)->size()) ?? 0,
+                ));
+
+                $healthy = false;
+            }
         }
 
         if ($this->option('wipe')) {
@@ -213,7 +225,12 @@ final class FlushCommand extends Command
                 // spool. Sleeping now would let a backlog built up
                 // during an outage take hours to clear at one budget
                 // per interval.
-                $backlog = $result !== null && ! $result->drained;
+                //
+                // Unless it is waiting out a Retry-After: then there
+                // IS nothing to come back for, and skipping the sleep
+                // spins the daemon at full speed for the length of the
+                // cooldown the backend asked for.
+                $backlog = $result !== null && ! $result->drained && ! $result->waiting;
             }
 
             if (microtime(true) - $lastMetricsFlush >= $metricsInterval) {

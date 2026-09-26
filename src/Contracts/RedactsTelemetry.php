@@ -65,7 +65,7 @@ interface RedactsTelemetry
      * Cutting first is what lets a credential through: it removes the
      * `@` or the separator the pattern matches on.
      */
-    public function value(string $key, string $value): string;
+    public function value(string|int $key, string $value): string;
 
     /**
      * An application hook, run after the built-in rules.

@@ -6,6 +6,7 @@ use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
+use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 
 /**
@@ -111,4 +112,24 @@ it('keeps aggregating the series it already has', function () {
     expect($series['orders.created']['series'])->toHaveCount(1)
         ->and(array_values($series['orders.created']['series'])[0])->toBe(100.0)
         ->and($buffer->droppedObservations())->toBe(0);
+});
+
+it('does not let a sum reach infinity and take the buckets with it', function () {
+    // Each observation is finite; their total is not. The buffer adds
+    // them up before any store sees them, and Redis then refuses the
+    // sum AFTER the buckets have been counted — a series whose buckets
+    // outnumber its count.
+    $inner = new ArrayMetricStore;
+    $buffer = new BufferedMetricStore($inner, maxPending: 1_000);
+    $definition = new MetricDefinition('work.duration', MetricType::Histogram, buckets: [1.0, 2.0]);
+
+    $buffer->recordHistogram($definition, [], PHP_FLOAT_MAX);
+    $buffer->recordHistogram($definition, [], PHP_FLOAT_MAX);
+    $buffer->flushBuffer();
+
+    $family = collect($inner->collect())->firstWhere(fn ($f) => $f->name() === 'work.duration');
+    $sample = $family->samples[0];
+
+    expect(is_finite($sample->sum))->toBeTrue()
+        ->and(array_sum($sample->bucketCounts))->toBe($sample->count);
 });

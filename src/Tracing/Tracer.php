@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Tracing;
 
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Ids;
 use Cbox\Telemetry\Support\TraceParent;
 use Closure;
@@ -634,7 +635,12 @@ final class Tracer
         if (count($this->finished) >= $this->maxBuffer
             || ($this->maxBufferBytes > 0 && $this->bufferedBytes + $bytes > $this->maxBufferBytes)) {
             if ($this->onBufferFull !== null) {
-                ($this->onBufferFull)();
+                // Guarded: the callback is a flush, which reaches the
+                // exporters, the store and the network. It runs from
+                // inside `end()`, on the application's stack, and
+                // nothing above it catches.
+                $flush = $this->onBufferFull;
+                FailSafe::guard(static fn () => $flush());
             }
 
             // The drain is a request, not a guarantee: the callback may

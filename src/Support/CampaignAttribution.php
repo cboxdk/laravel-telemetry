@@ -20,9 +20,6 @@ namespace Cbox\Telemetry\Support;
  */
 final class CampaignAttribution
 {
-    /** Cap on a captured utm value — mirrors the ingest MAX_VALUE bound. */
-    private const MAX_VALUE = 1024;
-
     /**
      * The utm parameter → attribute-key suffix map, in schema order.
      *
@@ -110,6 +107,10 @@ final class CampaignAttribution
 
         $value = mb_strtolower(trim($raw));
 
-        return $value === '' ? null : mb_substr($value, 0, self::MAX_VALUE);
+        // NOT cut. These become span attributes, which redaction sees
+        // at export — and a cut before then can remove the character
+        // a pattern matches on, which is how a credential pasted into
+        // a utm parameter would survive. Length is the redactor's.
+        return $value === '' ? null : $value;
     }
 }

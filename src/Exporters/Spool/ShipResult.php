@@ -30,6 +30,11 @@ final readonly class ShipResult
         public int $dropped = 0,
         public array $failures = [],
         public bool $drained = true,
+        // Set when the drain did nothing because the BACKEND asked it
+        // to wait. Distinct from an unfinished drain, which means come
+        // straight back: a caller that could not tell the two apart
+        // spun at full speed for the length of the cooldown.
+        public bool $waiting = false,
     ) {}
 
     public function successful(): bool
@@ -50,6 +55,7 @@ final readonly class ShipResult
             $this->dropped + $other->dropped,
             [...$this->failures, ...$other->failures],
             $other->drained,
+            $other->waiting,
         );
     }
 
