@@ -56,9 +56,12 @@ final class SpoolShipper
      *
      * @param  int  $maxEntries  entries to handle before returning
      * @param  (Closure(): bool)|null  $shouldStop  asked between batches
+     * @param  float  $maxSeconds  wall clock to spend before returning; 0 is unlimited
      */
-    public function ship(int $maxBatch = 200, int $maxEntries = 10_000, ?Closure $shouldStop = null): ShipResult
+    public function ship(int $maxBatch = 200, int $maxEntries = 10_000, ?Closure $shouldStop = null, float $maxSeconds = 0.0): ShipResult
     {
+        $deadline = $maxSeconds > 0.0 ? microtime(true) + $maxSeconds : 0.0;
+
         $shipped = 0;
         $requeued = 0;
         $dropped = 0;
@@ -105,7 +108,14 @@ final class SpoolShipper
                 break;
             }
 
-            if ($handled >= $maxEntries || ($shouldStop !== null && $shouldStop())) {
+            // Entries AND wall clock. An entry budget bounds the work
+            // but not the time it takes: ten thousand entries at two
+            // seconds a POST is a hundred seconds in which the daemon
+            // flushes no metrics, and after SIGTERM it is a hundred
+            // seconds past the supervisor's grace period.
+            if ($handled >= $maxEntries
+                || ($deadline > 0.0 && microtime(true) >= $deadline)
+                || ($shouldStop !== null && $shouldStop())) {
                 $drained = false;
 
                 break;

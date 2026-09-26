@@ -136,6 +136,37 @@ it('does not buffer an endpoint that answers with a gigabyte', function () {
         ->and($result->reason)->toContain('HTTP 500');
 });
 
+it('does not read a truncated 200 as a clean accept', function () {
+    // OTLP reports rejections INSIDE a 200. A response too large to
+    // read does not decode, and "does not decode" must not become
+    // "accepted everything" — that is the silent partial loss these
+    // tests exist for.
+    $body = json_encode([
+        'partialSuccess' => [
+            'rejectedSpans' => '7',
+            'errorMessage' => str_repeat('x', 200_000),
+        ],
+    ], JSON_THROW_ON_ERROR);
+
+    $this->server = StubOtlpServer::start(200, $body);
+
+    $result = transportFor($this->server)->post('/v1/traces', ['resourceSpans' => []]);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->reason)->toContain('too large to read');
+});
+
+it('still reads a partial success that fits', function () {
+    $this->server = StubOtlpServer::start(200, json_encode([
+        'partialSuccess' => ['rejectedSpans' => '7', 'errorMessage' => 'bad resource'],
+    ], JSON_THROW_ON_ERROR));
+
+    $result = transportFor($this->server)->post('/v1/traces', ['resourceSpans' => []]);
+
+    expect($result->rejected)->toBe(7)
+        ->and($result->reason)->toBe('bad resource');
+});
+
 function freeLoopbackPort(): int
 {
     $socket = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
@@ -144,3 +175,27 @@ function freeLoopbackPort(): int
 
     return (int) substr($name, (int) strrpos($name, ':') + 1);
 }
+
+it('reads Retry-After in both forms RFC 9110 allows', function (string $header, int $atLeast, int $atMost) {
+    $transport = new OtlpTransport('http://unused:4318');
+    $method = new ReflectionMethod(OtlpTransport::class, 'retryAfter');
+
+    $seconds = $method->invoke($transport, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: {$header}\r\n\r\n");
+
+    expect($seconds)->toBeGreaterThanOrEqual($atLeast)
+        ->and($seconds)->toBeLessThanOrEqual($atMost);
+})->with([
+    // Delay-seconds: what a collector sends.
+    'seconds' => ['120', 120, 120],
+    // HTTP-date: what a proxy in front of one sends. Ignoring it fell
+    // back to the default cooldown, which is wrong in both directions.
+    'http date' => [gmdate('D, d M Y H:i:s \G\M\T', time() + 300), 295, 300],
+    'http date in the past' => [gmdate('D, d M Y H:i:s \G\M\T', time() - 300), 0, 0],
+]);
+
+it('ignores a Retry-After it cannot make sense of', function () {
+    $transport = new OtlpTransport('http://unused:4318');
+    $method = new ReflectionMethod(OtlpTransport::class, 'retryAfter');
+
+    expect($method->invoke($transport, "HTTP/1.1 503 x\r\nRetry-After: soon please\r\n\r\n"))->toBeNull();
+});

@@ -312,8 +312,6 @@ function eventsThatCannotReachTelemetryHere(): array
         // Dispatches are counted in the payload callback, which sees
         // every dispatch including the ones that never reach a queue.
         JobQueued::class,
-        // Opens the task's span; the metrics are on the outcome.
-        ScheduledTaskStarting::class,
         // Not state-only, but inert HERE: CommandStarting could not open
         // a span against a backend that was already broken, so there is
         // nothing for this to close. Covered on its own below, where the

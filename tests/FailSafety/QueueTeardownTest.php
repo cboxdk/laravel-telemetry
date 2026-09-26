@@ -6,8 +6,10 @@ use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Contracts\Queue\Job;
+use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 
@@ -238,4 +240,53 @@ it('holds nothing after a teardown the extension made fail', function () {
             'jobUnits' => 0,
             'attemptSpans' => 0,
         ]);
+});
+
+it('holds nothing after a teardown that could not even resolve telemetry', function () {
+    // The harsher order, and the one that survived the first fix:
+    // the job starts against a healthy manager, the binding then
+    // throws, and the very first thing teardown does — classifying the
+    // labels — resolves it. Release has to come before that, or every
+    // map still holds the span. JobAttempted is the backstop, and it
+    // has to clear the same maps.
+    config([
+        'telemetry.instrument.resources' => true,
+        'telemetry.instrument.resources_process' => true,
+        'telemetry.instrument.profiling' => true,
+    ]);
+
+    Telemetry::addExporter(new CollectingExporter);
+
+    app('queue');
+    $events = app('events');
+    $job = teardownJob(1);
+
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    app()->forgetInstance(TelemetryManager::class);
+    Telemetry::clearResolvedInstances();
+    app()->bind(TelemetryManager::class, static fn () => throw new RuntimeException('the manager is gone'));
+
+    FailSafe::handleExceptionsUsing(fn () => null);
+
+    $events->dispatch(new JobProcessed('redis', $job));
+    $events->dispatch(new JobAttempted('redis', $job));
+
+    FailSafe::handleExceptionsUsing(null);
+
+    $instrumentation = app(QueueInstrumentation::class);
+    $held = [];
+
+    foreach (['jobSpans', 'jobUsage', 'jobProfiles', 'jobUnits', 'attemptSpans'] as $name) {
+        $property = new ReflectionProperty(QueueInstrumentation::class, $name);
+        $held[$name] = count((array) $property->getValue($instrumentation));
+    }
+
+    expect($held)->toBe([
+        'jobSpans' => 0,
+        'jobUsage' => 0,
+        'jobProfiles' => 0,
+        'jobUnits' => 0,
+        'attemptSpans' => 0,
+    ]);
 });

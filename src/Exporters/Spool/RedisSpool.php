@@ -78,17 +78,30 @@ final class RedisSpool implements Spool
 
         $connection = $this->redis->connection($this->connection);
 
+        $tried = false;
+
         if ($this->batchPop) {
             try {
+                $tried = true;
+
                 /** @var mixed $raw */
                 $raw = $connection->command('lpop', [$this->key, $count]);
 
-                return $this->decodeAll(is_array($raw) ? $raw : []);
+                if (is_array($raw)) {
+                    return $this->decodeAll($raw);
+                }
             } catch (Throwable) {
                 $this->batchPop = false;
+                $tried = false;
             }
         }
 
+        // A non-array answer is ambiguous: phpredis returns false both
+        // for an empty list and for a command the server did not
+        // understand. One single-key LPOP settles it — and treating
+        // "did not understand" as "empty" would have made the spool
+        // look permanently drained on Redis before 6.2, which is
+        // silent, total data loss.
         $entries = [];
 
         for ($i = 0; $i < $count; $i++) {
@@ -103,6 +116,11 @@ final class RedisSpool implements Spool
             if ($entry !== null) {
                 $entries[] = $entry;
             }
+        }
+
+        if ($tried && $entries !== []) {
+            // The list was not empty, so the count form was refused.
+            $this->batchPop = false;
         }
 
         return $entries;

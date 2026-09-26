@@ -138,3 +138,24 @@ it('takes a whole batch off the list in one command', function () {
     expect($commands)->toBe(['lpop'])
         ->and(array_column(array_column($entries, 'payload'), 'id'))->toBe(['e1', 'e2', 'e3']);
 });
+
+it('does not mistake a refused batch pop for an empty spool', function () {
+    // phpredis answers both an empty list and a command it could not
+    // run with false. Reading "could not run" as "empty" would make the
+    // spool look permanently drained on Redis before 6.2 — silent,
+    // total data loss, and the daemon reporting success throughout.
+    $spool = new RedisSpool(app(Factory::class), 'default', $this->key, maxItems: 100);
+
+    foreach (range(1, 3) as $i) {
+        $spool->push(spoolEntry("e{$i}"));
+    }
+
+    // Force the ambiguous answer by pretending the count form failed.
+    $batchPop = new ReflectionProperty(RedisSpool::class, 'batchPop');
+    $batchPop->setValue($spool, true);
+
+    $entries = $spool->pop(200);
+
+    expect(array_column(array_column($entries, 'payload'), 'id'))->toBe(['e1', 'e2', 'e3'])
+        ->and($spool->size())->toBe(0);
+});

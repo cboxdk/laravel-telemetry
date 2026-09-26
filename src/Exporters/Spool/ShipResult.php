@@ -37,6 +37,22 @@ final readonly class ShipResult
         return $this->failures === [];
     }
 
+    /**
+     * Fold another drain's counts into this one — a one-shot run
+     * reports what all of its passes achieved, not what the last one
+     * did.
+     */
+    public function plus(self $other): self
+    {
+        return new self(
+            $this->shipped + $other->shipped,
+            $this->requeued + $other->requeued,
+            $this->dropped + $other->dropped,
+            [...$this->failures, ...$other->failures],
+            $other->drained,
+        );
+    }
+
     public function isEmpty(): bool
     {
         return $this->shipped === 0 && $this->requeued === 0 && $this->dropped === 0;

@@ -104,3 +104,25 @@ it('routes a failure to the application own error handler by default', function 
 
     expect($reported)->toBeNull();
 });
+
+it('separates two different problems that share a throw site', function () {
+    // Two container bindings failing from the same line of the same
+    // vendor file, through the same guard. Keyed on class and location
+    // alone they are one failure, and the second is silenced for a
+    // minute — which is exactly when you need to hear about it.
+    FailSafe::guard(static fn () => throw new RuntimeException('Target class [BillingClient] does not exist'));
+    FailSafe::guard(static fn () => throw new RuntimeException('Target class [ShippingClient] does not exist'));
+
+    expect($this->reported)->toHaveCount(2);
+});
+
+it('still collapses the same problem with a different id in it', function () {
+    // And the reason the message is not simply part of the key: a
+    // message carrying the row, the host or the key that varied is the
+    // high-volume case the throttle exists for.
+    for ($i = 0; $i < 500; $i++) {
+        FailSafe::guard(static fn () => throw new RuntimeException("cannot write key user:{$i} on shard 7"));
+    }
+
+    expect($this->reported)->toHaveCount(1);
+});

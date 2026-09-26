@@ -37,7 +37,7 @@ final class OutageTransport extends OtlpTransport
     {
         $this->posts++;
 
-        return ExportResult::retryable('connection refused');
+        return ExportResult::unreachable('connection refused');
     }
 }
 
@@ -110,7 +110,7 @@ it('keeps the circuit open across a request boundary', function () {
         ->and(OtlpExporter::circuitOpen())->toBeTrue();
 });
 
-it('stops at the first dead signal instead of timing out once per signal', function () {
+it('stops at the first UNREACHABLE signal instead of timing out once per signal', function () {
     // A batch carries traces and logs to the same collector. Posting
     // the second after the first proved it unreachable pays the connect
     // timeout twice for an answer already known.
@@ -120,6 +120,36 @@ it('stops at the first dead signal instead of timing out once per signal', funct
     $exporter->export(outageBatch());
 
     expect($transport->posts)->toBe(1);
+});
+
+it('still tries the rest of the batch when the collector answered', function () {
+    // A 503 is not an unreachable collector: it came back from a
+    // server that answered promptly, the next signal may well be
+    // accepted, and skipping it drops data the manager has already
+    // handed over and cleared. Only a connect failure justifies
+    // stopping.
+    $transport = new class extends OtlpTransport
+    {
+        public int $posts = 0;
+
+        public function __construct()
+        {
+            parent::__construct('http://collector:4318');
+        }
+
+        public function post(string $path, array $payload): ExportResult
+        {
+            $this->posts++;
+
+            return $path === '/v1/traces'
+                ? ExportResult::retryable('HTTP 503: overloaded')
+                : ExportResult::ok();
+        }
+    };
+
+    (new OtlpExporter($transport, new OtlpSerializer([])))->export(outageBatch());
+
+    expect($transport->posts)->toBe(2);
 });
 
 it('falls back to per-process state when no shared memory exists', function () {

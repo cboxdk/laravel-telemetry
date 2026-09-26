@@ -246,6 +246,14 @@ return [
         // (protects long-running jobs and Octane workers).
         'max_buffer' => env('TELEMETRY_TRACES_MAX_BUFFER', 5000),
 
+        // And the same in bytes, because five thousand spans is a
+        // sensible ceiling for ordinary spans and no ceiling at all for
+        // spans carrying a 100KB query or a serialized payload. Whole
+        // spans are dropped past it, counted as telemetry.spans.dropped
+        // — never a truncated value, which would cut a credential in
+        // half before redaction could recognise it. 0 disables it.
+        'max_buffer_bytes' => env('TELEMETRY_TRACES_MAX_BUFFER_BYTES', 33554432),
+
         // Error spans are exported even from unsampled traces — a
         // 10%-sampled app still surfaces every failing span.
         'always_sample_errors' => env('TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS', true),

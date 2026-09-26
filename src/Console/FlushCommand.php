@@ -38,6 +38,15 @@ use Illuminate\Support\Facades\Log;
  */
 final class FlushCommand extends Command
 {
+    /**
+     * Seconds the shutdown drain may spend.
+     *
+     * Supervisors send SIGTERM and then SIGKILL, typically ten seconds
+     * later. A drain that outlasts that is not a graceful shutdown; it
+     * is a kill with extra steps, and the spool survives either way.
+     */
+    private const SHUTDOWN_DRAIN_SECONDS = 5.0;
+
     protected $signature = 'telemetry:flush
                             {--daemon : Keep running, shipping the spool every --interval seconds}
                             {--interval=1 : Seconds between spool ships in daemon mode}
@@ -109,15 +118,26 @@ final class FlushCommand extends Command
         }
 
         if ($shipper !== null) {
-            $result = FailSafe::guard(fn () => $shipper->ship((int) $this->option('max-batch')));
+            // Until the spool is empty, not until the first budget runs
+            // out. A one-shot run that shipped its ten thousand and
+            // reported success left the rest for the next cron tick,
+            // so a backlog could grow across runs that all looked fine.
+            $maxBatch = (int) $this->option('max-batch');
+            $shipped = new ShipResult;
 
-            if ($result === null) {
-                $this->components->error('Failed to ship the spool — see the configured exception handler for details.');
+            do {
+                $result = FailSafe::guard(fn () => $shipper->ship($maxBatch, shouldStop: fn (): bool => $this->shouldStop));
 
-                return self::FAILURE;
-            }
+                if ($result === null) {
+                    $this->components->error('Failed to ship the spool — see the configured exception handler for details.');
 
-            $healthy = $this->reportSpool($result) && $healthy;
+                    return self::FAILURE;
+                }
+
+                $shipped = $shipped->plus($result);
+            } while (! $result->drained && ! $this->shouldStop);
+
+            $healthy = $this->reportSpool($shipped) && $healthy;
         }
 
         if ($this->option('wipe')) {
@@ -163,6 +183,7 @@ final class FlushCommand extends Command
                 $result = FailSafe::guard(fn () => $shipper->ship(
                     $maxBatch,
                     shouldStop: fn (): bool => $this->shouldStop,
+                    maxSeconds: (float) $interval,
                 ));
 
                 $this->watchSpool($result);
@@ -189,11 +210,16 @@ final class FlushCommand extends Command
             }
         }
 
-        // One last drain of what arrived during shutdown. Anything the
-        // endpoint still rejects stays durably in Redis and the next
-        // daemon start picks it up — the spool survives restarts.
+        // One last drain of what arrived during shutdown, on a short
+        // clock. Whatever does not fit stays durably in Redis and the
+        // next daemon start picks it up — a spool that survives
+        // restarts is worth more than one more batch shipped past the
+        // supervisor's patience.
         if ($shipper !== null) {
-            $this->watchSpool(FailSafe::guard(fn () => $shipper->ship($maxBatch)));
+            $this->watchSpool(FailSafe::guard(fn () => $shipper->ship(
+                $maxBatch,
+                maxSeconds: self::SHUTDOWN_DRAIN_SECONDS,
+            )));
         }
 
         $this->components->info('Telemetry flush daemon stopped.');

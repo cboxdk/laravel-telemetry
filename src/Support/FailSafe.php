@@ -113,13 +113,18 @@ final class FailSafe
     /**
      * Once per distinct failure per minute, across the whole pool.
      *
-     * Keyed by what was thrown, where it was thrown, and which of our
-     * own guards it surfaced through — not by message: a message often
-     * carries the key, the host or the id that varied, and keying on it
-     * would defeat the throttle exactly when the failure is
-     * high-volume. Including our own frame keeps two different
-     * instrumentations that fail on the same vendor line from silencing
-     * each other, which a throw-site-only key does.
+     * Keyed by what was thrown, where it was thrown, which of our own
+     * guards it surfaced through, and the SHAPE of the message.
+     *
+     * Not the message itself: it usually carries the key, the host or
+     * the id that varied, and keying on that defeats the throttle
+     * exactly when the failure is high-volume. But not ignoring it
+     * either — `Target class [BillingClient] does not exist` and the
+     * same for `ShippingClient` are one class, one throw site and one
+     * frame, and silencing the second for a minute hides a genuinely
+     * different problem. The shape keeps the words and drops the
+     * numbers, which separates those two and still collapses
+     * `cannot write key user:123`.
      */
     private static function shouldReport(Throwable $e): bool
     {
@@ -127,6 +132,7 @@ final class FailSafe
             $e::class,
             $e->getFile().':'.$e->getLine(),
             self::origin($e),
+            self::shape($e->getMessage()),
         ])), 0, 16);
 
         if (time() < SharedState::deadline($key)) {
@@ -141,6 +147,20 @@ final class FailSafe
         SharedState::remember($key, time() + self::REPEAT_AFTER_SECONDS);
 
         return true;
+    }
+
+    /**
+     * A message with everything variable taken out of it: digits, hex
+     * runs, and anything past the first line or the first 160
+     * characters.
+     */
+    private static function shape(string $message): string
+    {
+        $shape = strtolower(strtok($message, "\n") ?: '');
+        $shape = (string) preg_replace('/\b[0-9a-f]{8,}\b/', '#', $shape);
+        $shape = (string) preg_replace('/\d+/', '#', $shape);
+
+        return substr($shape, 0, 160);
     }
 
     /**

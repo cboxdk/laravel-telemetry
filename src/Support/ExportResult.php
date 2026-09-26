@@ -18,6 +18,7 @@ final readonly class ExportResult
         public ?string $reason = null,
         public int $rejected = 0,
         public ?int $retryAfterSeconds = null,
+        public bool $unreachable = false,
     ) {}
 
     public static function ok(): self
@@ -40,6 +41,21 @@ final readonly class ExportResult
     public static function retryable(?string $reason = null, ?int $retryAfterSeconds = null): self
     {
         return new self(success: false, retryable: true, reason: $reason, retryAfterSeconds: $retryAfterSeconds);
+    }
+
+    /**
+     * The endpoint could not be reached at all — a refused connection,
+     * a DNS failure, a timeout.
+     *
+     * Distinct from an ordinary retryable failure because of what it
+     * says about the NEXT call: a 503 came back from a server that
+     * answered promptly, so there is every reason to try the rest of
+     * the batch; a connect timeout means the next signal pays the same
+     * timeout for the same answer.
+     */
+    public static function unreachable(?string $reason = null, ?int $retryAfterSeconds = null): self
+    {
+        return new self(success: false, retryable: true, reason: $reason, retryAfterSeconds: $retryAfterSeconds, unreachable: true);
     }
 
     /**

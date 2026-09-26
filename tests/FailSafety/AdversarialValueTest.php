@@ -120,3 +120,23 @@ it('stays fast on the shapes that only bite once the cap is off', function (stri
     'jwt prefix, no dots' => ['eyJ'.str_repeat('a', 60_000)],
     'bearer with a long tail' => ['Bearer '.str_repeat('a', 60_000)],
 ]);
+
+it('redacts the whole credential, however long it is', function (string $value, string $secret) {
+    // The bounds these patterns briefly carried did not stop a single
+    // adversarial input measurably, and each one ended the match early:
+    // a token one character past the cap kept its tail, and a password
+    // past it stopped matching at all. What a pattern no longer covers
+    // is exported verbatim, so a length limit here is a disclosure with
+    // a performance story attached.
+    $out = Redactor::fromConfig(['max_value_length' => 0] + config('telemetry.redaction'))
+        ->value('log.context.message', $value);
+
+    expect($out)->not->toContain($secret);
+})->with([
+    'bearer with a long token' => ['Bearer '.str_repeat('a', 4_096).'TAILSECRET', 'TAILSECRET'],
+    'userinfo with a long password' => ['https://alice:hunter2'.str_repeat('a', 4_096).'@example.test', 'hunter2'],
+    'jwt with a long payload' => [
+        'eyJhbGciOiJIUzI1NiJ9.'.str_repeat('p', 5_000).'SECRETCLAIM.c2lnbmF0dXJl',
+        'SECRETCLAIM',
+    ],
+]);

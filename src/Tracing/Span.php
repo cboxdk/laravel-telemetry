@@ -39,14 +39,6 @@ final class Span
 
     private const RESERVE = 8;
 
-    /**
-     * Longest attribute value kept. Truncation is marked, so a reader
-     * sees a cut value rather than a wrong one. Redaction has its own,
-     * smaller cap; this one exists for the values redaction never
-     * sees, and for the memory they occupy until it runs.
-     */
-    private const MAX_VALUE_LENGTH = 8192;
-
     /** @var array<string, scalar|null> */
     private array $attributes;
 
@@ -111,7 +103,15 @@ final class Span
         ?int $startUnixNano = null,
         array $links = [],
     ) {
-        $this->attributes = $attributes;
+        // Through the same gate as setAttribute(). Assigning the array
+        // straight through let `startSpan('x', attributes: $thousand)`
+        // past the limit entirely, and reported nothing dropped.
+        $this->attributes = [];
+
+        foreach ($attributes as $key => $value) {
+            $this->put($key, $value, reserved: false);
+        }
+
         $this->startUnixNano = $startUnixNano ?? (int) (microtime(true) * 1e9);
         $this->startMonotonic = hrtime(true);
         $this->links = $links;
@@ -173,10 +173,14 @@ final class Span
             return $this;
         }
 
-        if (is_string($value) && strlen($value) > self::MAX_VALUE_LENGTH) {
-            $value = mb_strcut($value, 0, self::MAX_VALUE_LENGTH).'… (truncated)';
-        }
-
+        // No length limit here, deliberately. Cutting a value before
+        // redaction sees it destroys the evidence redaction matches on:
+        // truncating `…https://alice:hunter2@example.test/` at the `@`
+        // leaves a string the userinfo pattern no longer recognises,
+        // and the password ships. Length is the redactor's cap to
+        // apply, after it has redacted; the memory a long value
+        // occupies until then is bounded by the tracer's byte budget,
+        // which drops whole spans rather than mutilating one.
         $this->attributes[$key] = $value;
 
         return $this;
@@ -195,6 +199,34 @@ final class Span
     public function droppedEvents(): int
     {
         return $this->droppedEvents;
+    }
+
+    /**
+     * Roughly how much memory this span's content occupies.
+     *
+     * Rough on purpose: the tracer's byte budget is a safety valve, not
+     * an accounting system, and an exact measurement would cost more
+     * than the thing it protects against. Keys and scalar values are
+     * counted flat, with a small constant for the per-attribute
+     * overhead PHP's arrays carry.
+     */
+    public function approximateBytes(): int
+    {
+        $bytes = strlen($this->name) + 128;
+
+        foreach ($this->attributes as $key => $value) {
+            $bytes += strlen($key) + (is_string($value) ? strlen($value) : 8) + 48;
+        }
+
+        foreach ($this->events as $event) {
+            $bytes += strlen($event->name) + 64;
+
+            foreach ($event->attributes as $key => $value) {
+                $bytes += strlen($key) + (is_string($value) ? strlen($value) : 8) + 48;
+            }
+        }
+
+        return $bytes;
     }
 
     /**
@@ -285,6 +317,13 @@ final class Span
             $this->droppedEvents++;
 
             return $this;
+        }
+
+        // An event's own attribute map is as unbounded as the span's
+        // was, and a hundred and twenty-eight events of it is the same
+        // problem multiplied.
+        if (count($attributes) > self::MAX_ATTRIBUTES) {
+            $attributes = array_slice($attributes, 0, self::MAX_ATTRIBUTES, preserve_keys: true);
         }
 
         $this->events[] = new SpanEvent($name, (int) (microtime(true) * 1e9), $attributes);

@@ -63,15 +63,31 @@ it('still records the exception on a span whose events are full', function () {
         ->and($span->attributes()['error.type'] ?? null)->toBe(RuntimeException::class);
 });
 
-it('truncates an attribute value rather than carrying it whole', function () {
+it('keeps a long value whole rather than cutting it before redaction', function () {
+    // A span-level length cap looks harmless and is not: redaction runs
+    // at export, and cutting `…https://alice:hunter2@example.test/` at
+    // the `@` leaves a string the userinfo pattern no longer matches,
+    // so the password ships. Length is the redactor's to cap, after it
+    // has redacted.
     $span = (new Tracer)->startSpan('work');
     $span->setAttribute('db.query.text', str_repeat('a', 100_000));
 
-    $value = $span->attributes()['db.query.text'];
+    expect(strlen((string) $span->attributes()['db.query.text']))->toBe(100_000);
+});
 
-    expect($value)->toBeString()
-        ->and(strlen((string) $value))->toBeLessThan(9_000)
-        ->and($value)->toEndWith('(truncated)');
+it('drops whole spans once the buffer is heavy, not just numerous', function () {
+    // Five thousand spans is a sensible ceiling for ordinary spans and
+    // no ceiling at all for spans carrying a 100KB query each.
+    $tracer = new Tracer(maxBuffer: 10_000, maxBufferBytes: 2 * 1024 * 1024);
+
+    for ($i = 0; $i < 200; $i++) {
+        $tracer->startSpan("work.{$i}")
+            ->setAttribute('db.query.text', str_repeat('a', 100_000))
+            ->end();
+    }
+
+    expect($tracer->bufferedCount())->toBeLessThan(25)
+        ->and($tracer->droppedSpans())->toBeGreaterThan(175);
 });
 
 it('drops spans rather than growing when the buffer cannot be drained', function () {
@@ -86,4 +102,33 @@ it('drops spans rather than growing when the buffer cannot be drained', function
 
     expect($tracer->bufferedCount())->toBe(50)
         ->and($tracer->droppedSpans())->toBe(450);
+});
+
+it('applies the limit to attributes handed in at construction', function () {
+    // The way most spans are actually built. Assigning the array
+    // straight through let a thousand attributes past the gate and
+    // reported nothing dropped.
+    $attributes = [];
+
+    for ($i = 0; $i < 1_000; $i++) {
+        $attributes["key.{$i}"] = $i;
+    }
+
+    $span = (new Tracer)->startSpan('work', attributes: $attributes);
+
+    expect($span->attributes())->toHaveCount(128)
+        ->and($span->droppedAttributes())->toBe(872);
+});
+
+it('bounds the attributes on an event too', function () {
+    $attributes = [];
+
+    for ($i = 0; $i < 1_000; $i++) {
+        $attributes["key.{$i}"] = $i;
+    }
+
+    $span = (new Tracer)->startSpan('work');
+    $span->addEvent('cache.get', $attributes);
+
+    expect($span->events()[0]->attributes)->toHaveCount(128);
 });

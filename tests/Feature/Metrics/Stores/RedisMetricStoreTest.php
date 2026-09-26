@@ -283,7 +283,7 @@ it('re-creates its bookkeeping after the keys are lost underneath it', function 
     // fixed: the old memo said done forever, so the window is the whole point.
     // Written straight into the shared memory, past-dated, which a caller
     // going through SharedState::remember() could not do.
-    $this->pool->put('store:init:'.$this->prefix.':counter:orders.created', time() - 3600, 1);
+    $this->pool->expireAll();
 
     $this->store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
 
@@ -382,4 +382,21 @@ it('keeps counting a series it already has after the budget is reached', functio
     $acme = collect($family->samples)->first(fn ($sample) => ($sample->labels['tenant'] ?? null) === 'acme');
 
     expect($acme->value)->toBe(2.0);
+});
+
+it('refuses a whole observation at the budget, never half of one', function () {
+    // Deciding the budget per FIELD let a histogram land its sum and
+    // count while its bucket was refused: buckets adding to 1 under a
+    // count of 2, which is not a number anyone can read. The budget is
+    // decided for the observation.
+    $store = new RedisMetricStore(app(Factory::class), 'default', $this->prefix, maxFields: 5);
+    $definition = new MetricDefinition('http.server.request.duration', MetricType::Histogram, buckets: [10, 100]);
+
+    $store->recordHistogram($definition, ['route' => '/a'], 5);
+    $store->recordHistogram($definition, ['route' => '/a'], 50);
+
+    $family = collect($store->collect())->firstWhere(fn ($f) => $f->name() === 'http.server.request.duration');
+    $sample = $family->samples[0];
+
+    expect(array_sum($sample->bucketCounts))->toBe($sample->count);
 });

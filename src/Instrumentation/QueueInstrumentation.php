@@ -174,7 +174,9 @@ final class QueueInstrumentation implements ManagesRequestState
                 FailSafe::guard(fn () => $telemetry
                     ->counter('queue.jobs.dispatched', 'Jobs pushed onto the queue')
                     ->inc(1, [
-                        'job.name' => is_string($payload['displayName'] ?? null) ? $payload['displayName'] : 'unknown',
+                        'job.name' => $telemetry->classifyJob(
+                            is_string($payload['displayName'] ?? null) ? $payload['displayName'] : null,
+                        ),
                         'queue' => $telemetry->classifyQueue($queueName),
                     ]));
 
@@ -315,7 +317,9 @@ final class QueueInstrumentation implements ManagesRequestState
         $job = $event->job ?? null;
 
         return [
-            'job.name' => is_object($job) && method_exists($job, 'resolveName') ? $job->resolveName() : 'unknown',
+            'job.name' => $this->telemetry()->classifyJob(
+                is_object($job) && method_exists($job, 'resolveName') ? $job->resolveName() : null,
+            ),
             'queue' => $this->telemetry()->classifyQueue(
                 is_object($job) && method_exists($job, 'getQueue') ? $job->getQueue() : null,
             ),
@@ -407,7 +411,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 $this->telemetry()
                     ->histogram('queue.job.wait_time', buckets: [0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600], description: 'Time from dispatch until the attempt started', unit: 's')
                     ->record($waitMs / 1000, [
-                        'job.name' => $event->job->resolveName(),
+                        'job.name' => $this->telemetry()->classifyJob($event->job->resolveName()),
                         'queue' => $this->telemetry()->classifyQueue($event->job->getQueue()),
                     ]);
             }
@@ -604,7 +608,32 @@ final class QueueInstrumentation implements ManagesRequestState
             $this->completedAttempts[$attempt] = true;
         }
 
-        FailSafe::guard(function () use ($job, $queue, $outcome) {
+        // Detach FIRST, outside the guard and before anything fallible.
+        // Classifying the labels resolves the manager, and resolving
+        // the manager can throw — so the very first thing this method
+        // did was something that could leave every map still holding
+        // this span's entries. Nothing below can fail before the
+        // release now, because the release is above it.
+        $span = array_pop($this->jobSpans);
+        $usage = null;
+        $unit = null;
+        $profile = null;
+
+        if ($span !== null) {
+            $id = spl_object_id($span);
+
+            if (($owner = array_search($id, $this->attemptSpans, true)) !== false) {
+                unset($this->attemptSpans[$owner]);
+            }
+
+            $usage = $this->jobUsage[$id] ?? null;
+            $unit = $this->jobUnits[$id] ?? null;
+            $profile = $this->jobProfiles[$id] ?? null;
+
+            unset($this->jobUsage[$id], $this->jobUnits[$id], $this->jobProfiles[$id]);
+        }
+
+        FailSafe::guard(function () use ($job, $queue, $outcome, $span, $usage, $unit, $profile) {
             // "job.name", not "job" — a bare `job` label collides with
             // Prometheus' reserved scrape-job label and gets overwritten
             // by collectors.
@@ -617,25 +646,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 'queue' => $this->telemetry()->classifyQueue($queue),
             ];
 
-            if ($span = array_pop($this->jobSpans)) {
-                $id = spl_object_id($span);
-
-                // Detach everything this span owns before doing anything
-                // with it. The teardown below is inside a guard, so a
-                // throw halfway through — a profiler that cannot read a
-                // counter, a histogram whose store is down — is
-                // swallowed; anything still referenced at that point
-                // would be retained for the life of the worker, which is
-                // the leak the guard exists to prevent.
-                if (($owner = array_search($id, $this->attemptSpans, true)) !== false) {
-                    unset($this->attemptSpans[$owner]);
-                }
-
-                $usage = $this->jobUsage[$id] ?? null;
-                $unit = $this->jobUnits[$id] ?? null;
-                $profile = $this->jobProfiles[$id] ?? null;
-
-                unset($this->jobUsage[$id], $this->jobUnits[$id], $this->jobProfiles[$id]);
+            if ($span !== null) {
 
                 if ($span->status() === SpanStatus::Unset) {
                     $span->setStatus($outcome === 'processed' ? SpanStatus::Ok : SpanStatus::Error);
@@ -795,10 +806,20 @@ final class QueueInstrumentation implements ManagesRequestState
         unset($this->attemptSpans[$owner]);
 
         $unit = $this->jobUnits[$spanId] ?? null;
-        unset($this->jobUnits[$spanId]);
+        $profile = $this->jobProfiles[$spanId] ?? null;
+
+        // Every map, not just the two the first version of this
+        // remembered. The backstop exists precisely for the case where
+        // teardown failed partway through — leaving the usage baseline
+        // and the profiler behind is the leak it was written to stop.
+        unset($this->jobUnits[$spanId], $this->jobProfiles[$spanId], $this->jobUsage[$spanId]);
 
         if ($unit !== null) {
             FailSafe::guard(static fn () => $unit->discard());
+        }
+
+        if ($profile !== null) {
+            FailSafe::guard(static fn () => $profile->stop(0));
         }
 
         foreach ($this->jobSpans as $span) {

@@ -362,14 +362,22 @@ final class ApcuMetricStore implements MetricStore
                 $current = apcu_fetch($key);
                 $current = is_array($current) ? $current : [];
 
+                $stored = true;
+
                 if (! in_array($value, $current, true)) {
                     $current[] = $value;
-                    apcu_store($key, $current);
+
+                    // apcu_store() answers false when the segment is
+                    // full — the exact moment an index write matters
+                    // most. Reporting success here memoized a write
+                    // that never happened, and the series stayed
+                    // invisible to collect() for five minutes.
+                    $stored = apcu_store($key, $current);
                 }
 
                 apcu_delete($lock);
 
-                return true;
+                return $stored;
             }
 
             usleep(100);

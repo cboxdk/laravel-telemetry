@@ -36,6 +36,9 @@ final class Tracer
     /** Spans refused because the buffer was full and would not drain. */
     private int $dropped = 0;
 
+    /** Approximate bytes held by the finished-span buffer. */
+    private int $bufferedBytes = 0;
+
     /** @var array<string, scalar> ambient dimensions merged into every finished span; a null passed to addContext() removes the key rather than storing one */
     private array $contextAttributes = [];
 
@@ -59,6 +62,7 @@ final class Tracer
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
+        private readonly int $maxBufferBytes = 33_554_432,
         private readonly bool $alwaysSampleErrors = true,
     ) {}
 
@@ -477,6 +481,7 @@ final class Tracer
     {
         $spans = $this->finished;
         $this->finished = [];
+        $this->bufferedBytes = 0;
 
         return $spans;
     }
@@ -616,7 +621,15 @@ final class Tracer
             $this->traceStats = [];
         }
 
-        if (count($this->finished) >= $this->maxBuffer) {
+        $bytes = $span->approximateBytes();
+
+        // Count AND bytes. Five thousand spans is a sensible ceiling for
+        // ordinary spans and no ceiling at all for a span carrying a
+        // 100KB query, a serialized payload or a stack — and a limit on
+        // the value's length instead would cut a credential in half
+        // before redaction could see it.
+        if (count($this->finished) >= $this->maxBuffer
+            || ($this->maxBufferBytes > 0 && $this->bufferedBytes + $bytes > $this->maxBufferBytes)) {
             if ($this->onBufferFull !== null) {
                 ($this->onBufferFull)();
             }
@@ -627,7 +640,8 @@ final class Tracer
             // failing. Buffering anyway is how an observability library
             // becomes the reason a worker is OOM-killed, so the span is
             // dropped and counted instead.
-            if (count($this->finished) >= $this->maxBuffer) {
+            if (count($this->finished) >= $this->maxBuffer
+                || ($this->maxBufferBytes > 0 && $this->bufferedBytes + $bytes > $this->maxBufferBytes)) {
                 $this->dropped++;
 
                 return;
@@ -635,6 +649,7 @@ final class Tracer
         }
 
         $this->finished[] = $span;
+        $this->bufferedBytes += $bytes;
     }
 
     private function lottery(): bool

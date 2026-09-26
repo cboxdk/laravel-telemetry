@@ -620,6 +620,19 @@ final class TraceRequest
     private const MAX_LITERAL_HOSTS = 32;
 
     /**
+     * A run of literal hostname characters inside a regex — where a dot
+     * must be ESCAPED to count as a dot.
+     *
+     * An unescaped `.` is any character, so `{^shop.example.com$}i`
+     * admits `shopXexample.com` too and is not the finite set it looks
+     * like. Reading it as the literal `shop.example.com` happened to be
+     * harmless, because the host is then compared exactly — but a
+     * parser that cannot tell a wildcard from a dot should not be the
+     * thing deciding what is bounded.
+     */
+    private const LITERAL_RUN = '(?:[A-Za-z0-9-]|\\\\\.)+';
+
+    /**
      * The hosts a trusted-host pattern admits, if they can be counted.
      *
      * Trusted hosts are regexes, wrapped by Symfony as `{...}i`.
@@ -635,7 +648,6 @@ final class TraceRequest
     {
         $inner = self::withoutDelimiters(trim($pattern));
         $inner = preg_replace('/^\^|\$$/', '', $inner) ?? $inner;
-        $inner = str_replace('\\.', '.', $inner);
 
         $hosts = [''];
 
@@ -647,8 +659,8 @@ final class TraceRequest
         $length = strlen($inner);
 
         while ($offset < $length) {
-            if (preg_match('/\G\((?:\?:)?((?:[A-Za-z0-9.-]+\|)+[A-Za-z0-9.-]+)\)/', $inner, $match, 0, $offset) === 1) {
-                $branches = explode('|', $match[1]);
+            if (preg_match('/\G\((?:\?:)?((?:'.self::LITERAL_RUN.'\|)+'.self::LITERAL_RUN.')\)/', $inner, $match, 0, $offset) === 1) {
+                $branches = array_map(self::unescapeDots(...), explode('|', $match[1]));
                 $expanded = [];
 
                 foreach ($hosts as $host) {
@@ -667,9 +679,11 @@ final class TraceRequest
                 continue;
             }
 
-            if (preg_match('/\G[A-Za-z0-9.-]+/', $inner, $match, 0, $offset) === 1) {
+            if (preg_match('/\G'.self::LITERAL_RUN.'/', $inner, $match, 0, $offset) === 1) {
+                $literal = self::unescapeDots($match[0]);
+
                 foreach ($hosts as $index => $host) {
-                    $hosts[$index] = $host.$match[0];
+                    $hosts[$index] = $host.$literal;
                 }
 
                 $offset += strlen($match[0]);
@@ -681,6 +695,11 @@ final class TraceRequest
         }
 
         return array_values(array_filter($hosts, static fn (string $host): bool => $host !== ''));
+    }
+
+    private static function unescapeDots(string $literal): string
+    {
+        return str_replace('\\.', '.', $literal);
     }
 
     /**

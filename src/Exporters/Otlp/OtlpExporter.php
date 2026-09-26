@@ -71,11 +71,14 @@ final class OtlpExporter implements Exporter
             $result = $this->transport->post($path, $payload);
             $results[] = $result;
 
-            // Stop at the first transport-level failure. A batch carries
-            // up to three signals and the collector they all go to has
-            // just proved unreachable; sending the rest would pay the
-            // connect timeout again for a result we already know.
-            if (! $result->success && $result->retryable) {
+            // Stop only when the collector could not be REACHED. A
+            // batch carries up to three signals to one endpoint, and
+            // paying its connect timeout once per signal is what this
+            // avoids. A 429 or a 503 is not that: it came back from a
+            // server that answered, the next signal may well be
+            // accepted, and skipping it drops data the manager has
+            // already handed over and cleared.
+            if ($result->unreachable) {
                 break;
             }
         }

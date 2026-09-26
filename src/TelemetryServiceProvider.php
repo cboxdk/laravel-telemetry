@@ -203,6 +203,7 @@ class TelemetryServiceProvider extends ServiceProvider
             $tracer = new Tracer(
                 sampleRate: $enabled ? Cast::float($config->get('telemetry.traces.sample_rate'), 1.0) : 0.0,
                 maxBuffer: Cast::int($config->get('telemetry.traces.max_buffer'), 5000),
+                maxBufferBytes: Cast::int($config->get('telemetry.traces.max_buffer_bytes'), 33_554_432),
                 alwaysSampleErrors: $enabled && (bool) $config->get('telemetry.traces.always_sample_errors', true),
             );
 
@@ -589,7 +590,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $store = match ($driver) {
             'redis' => new RedisMetricStore(
                 redis: $app->make(RedisFactory::class),
-                connection: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
+                connectionName: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
                 prefix: Cast::string($config->get('telemetry.stores.redis.prefix'), 'telemetry'),
                 maxFields: Cast::int($config->get('telemetry.stores.redis.max_fields'), 50_000),
             ),

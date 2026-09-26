@@ -104,3 +104,16 @@ it('does not read an alternation big enough to be a cardinality problem itself',
 
     expect(boundedHostFor($request))->toBe('other');
 });
+
+it('does not read an unescaped dot as a literal one', function () {
+    // `.` is any character. `{^shop.example.com$}i` admits
+    // `shopXexample.com` too, so it is not the finite set it looks
+    // like — and a parser that cannot tell the two apart should not be
+    // the thing deciding what is bounded.
+    config()->set('app.url', 'https://app.example');
+    Request::setTrustedHosts(['^shop.example.com$']);
+
+    $request = Request::create('https://shop.example.com/x');
+
+    expect(boundedHostFor($request))->toBe('other');
+});

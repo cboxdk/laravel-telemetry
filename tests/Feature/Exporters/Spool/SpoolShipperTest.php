@@ -54,3 +54,28 @@ it('reports a spool it actually emptied as drained', function () {
     expect($result->drained)->toBeTrue()
         ->and($spool->size())->toBe(0);
 });
+
+it('stops on a wall-clock budget, not only an entry count', function () {
+    // An entry budget bounds the work and not the time it takes. Ten
+    // thousand entries at a slow POST each is minutes in which the
+    // daemon flushes no metrics — and after SIGTERM, minutes past the
+    // supervisor's grace period.
+    $spool = new ArraySpool;
+
+    for ($i = 0; $i < 5_000; $i++) {
+        $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['i' => $i]]]]);
+    }
+
+    $shipper = new SpoolShipper($spool, function (): ExportResult {
+        usleep(20_000);
+
+        return ExportResult::ok();
+    });
+
+    $started = microtime(true);
+    $result = $shipper->ship(maxBatch: 10, maxEntries: 5_000, maxSeconds: 0.2);
+
+    expect(microtime(true) - $started)->toBeLessThan(1.0)
+        ->and($result->drained)->toBeFalse()
+        ->and($spool->size())->toBeGreaterThan(0);
+});

@@ -57,4 +57,19 @@ final class PoolMemory implements SharedMemory
     {
         return $this->deadlines;
     }
+
+    /**
+     * Move every deadline into the past — time passing, rather than
+     * the entries being cleared.
+     *
+     * The distinction matters: clearing would also "pass" against a
+     * memo that is merely a boolean, which is the thing several of
+     * these windows exist to avoid.
+     */
+    public function expireAll(): void
+    {
+        foreach ($this->deadlines as $key => $until) {
+            $this->deadlines[$key] = time() - 3600;
+        }
+    }
 }

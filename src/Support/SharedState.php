@@ -47,8 +47,22 @@ final class SharedState
     public static function memory(): SharedMemory
     {
         return self::$memory ??= ApcuMemory::available()
-            ? new ApcuMemory
+            ? new ApcuMemory(self::namespace())
             : new ProcessMemory;
+    }
+
+    /**
+     * What distinguishes this application from another sharing the
+     * same APCu segment.
+     *
+     * The install path, hashed: two applications on one pool have
+     * different ones, and the same application has the same one across
+     * every worker — which is the whole point. Deliberately not
+     * config: this is read on a path that must not resolve anything.
+     */
+    private static function namespace(): string
+    {
+        return substr(hash('xxh128', dirname(__DIR__, 2)), 0, 12);
     }
 
     /**

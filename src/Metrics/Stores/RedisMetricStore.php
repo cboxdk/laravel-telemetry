@@ -17,6 +17,7 @@ use Cbox\Telemetry\Support\SharedState;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Redis\Connections\Connection;
 use Illuminate\Redis\Connections\PhpRedisConnection;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -46,37 +47,51 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
      */
     private const APPLY_SCRIPT = <<<'LUA'
         local limit = tonumber(ARGV[1])
-        local refused = 0
         local i = 2
+
+        -- The budget is decided for the WHOLE observation, never per
+        -- field. A histogram writes a bucket, a sum and a count; if the
+        -- bucket is refused and the other two are not, the series ends
+        -- up with a count of 2 and buckets adding to 1, which is not a
+        -- number anyone can read. Either all of it lands or none of it
+        -- does, and the refusal is counted once.
+        if limit > 0 then
+            local needed = 0
+            while i <= #ARGV do
+                if redis.call('HEXISTS', KEYS[1], ARGV[i + 1]) == 0 then
+                    needed = needed + 1
+                end
+                i = i + 3
+            end
+
+            if needed > 0 and redis.call('HLEN', KEYS[1]) + needed > limit then
+                redis.call('HINCRBY', KEYS[1], '__overflow', 1)
+                return 1
+            end
+        end
+
+        i = 2
         while i <= #ARGV do
             local op = ARGV[i]
-            local field = ARGV[i + 1]
-            local value = ARGV[i + 2]
-            if limit > 0
-                and redis.call('HEXISTS', KEYS[1], field) == 0
-                and redis.call('HLEN', KEYS[1]) >= limit then
-                refused = refused + 1
-            elseif op == 'i' then
-                redis.call('HINCRBY', KEYS[1], field, value)
+            if op == 'i' then
+                redis.call('HINCRBY', KEYS[1], ARGV[i + 1], ARGV[i + 2])
             elseif op == 'f' then
-                redis.call('HINCRBYFLOAT', KEYS[1], field, value)
+                redis.call('HINCRBYFLOAT', KEYS[1], ARGV[i + 1], ARGV[i + 2])
             else
-                redis.call('HSET', KEYS[1], field, value)
+                redis.call('HSET', KEYS[1], ARGV[i + 1], ARGV[i + 2])
             end
             i = i + 3
         end
-        if refused > 0 then
-            redis.call('HINCRBY', KEYS[1], '__overflow', refused)
-        end
-        return refused
+
+        return 0
         LUA;
 
-    /** Whether this server runs EVAL. Set false once, if it does not. */
-    private bool $scripting = true;
+    /** How long a server that refused EVAL is left alone before we ask again. */
+    private const RETRY_SCRIPTING_AFTER_SECONDS = 300;
 
     public function __construct(
         private readonly Factory $redis,
-        private readonly string $connection = 'default',
+        private readonly string $connectionName = 'default',
         private readonly string $prefix = 'telemetry',
         private readonly int $maxFields = 50_000,
     ) {}
@@ -200,7 +215,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
         $connection = $this->connection();
 
-        if ($this->scripting) {
+        if (! $this->scriptingIsRefused()) {
             $arguments = [(string) $this->maxFields];
 
             foreach ($operations as [$op, $field, $value]) {
@@ -216,15 +231,34 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
                 // takes (script, numKeys, ...args) natively. Spelling
                 // both out is shorter than the wrapper that would hide
                 // it, and says which is which.
-                if ($connection instanceof PhpRedisConnection) {
-                    $connection->eval(self::APPLY_SCRIPT, 1, $key, ...$arguments);
-                } else {
-                    $connection->command('eval', [self::APPLY_SCRIPT, 1, $key, ...$arguments]);
+                $result = $connection instanceof PhpRedisConnection
+                    ? $connection->eval(self::APPLY_SCRIPT, 1, $key, ...$arguments)
+                    : $connection->command('eval', [self::APPLY_SCRIPT, 1, $key, ...$arguments]);
+
+                // phpredis answers a refused command with false rather
+                // than an exception, and the script itself always
+                // returns an integer. Taking false for success meant a
+                // server with scripting disabled silently discarded
+                // every metric write, forever.
+                if ($result === false) {
+                    throw new RuntimeException('EVAL was refused: unknown command');
                 }
 
                 return;
-            } catch (Throwable) {
-                $this->scripting = false;
+            } catch (Throwable $e) {
+                // Only a server that cannot run EVAL justifies the
+                // non-atomic path. A timeout does not: the script may
+                // have executed and lost its reply, so repeating the
+                // operations would count the observation twice — and
+                // one lost observation is cheaper than a wrong one.
+                if (! self::scriptingIsUnsupported($e)) {
+                    return;
+                }
+
+                // Remembered with an expiry, not latched for the life
+                // of the process: a transient answer must not disable
+                // atomicity and the series budget permanently.
+                SharedState::remember($this->scriptingKey(), time() + self::RETRY_SCRIPTING_AFTER_SECONDS);
             }
         }
 
@@ -282,7 +316,15 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
         // every metric it touched, three commands each, and with ten
         // families that is thirty round trips a request for data that
         // changes on deploy.
-        $memo = 'store:init:'.$this->prefix.':'.$definition->type->value.':'.$definition->name;
+        // Keyed by the connection AND the definition's shape, not just
+        // its name. Two connections share a process; the same metric on
+        // connection B would otherwise skip its own bookkeeping because
+        // A had written its, and stay invisible to collection for five
+        // minutes. A deploy that changes a histogram's bounds is the
+        // same problem in time rather than space.
+        $memo = 'store:init:'.$this->prefix.':'.$this->connectionName.':'
+            .$definition->type->value.':'.$definition->name.':'
+            .substr(hash('xxh128', $this->encodeMeta($definition)), 0, 12);
         $now = time();
 
         // Re-run periodically rather than once per process. The bookkeeping
@@ -306,6 +348,33 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
         // transient failure disabled initialization for the life of the
         // process, permanently.
         SharedState::remember($memo, $now + self::REINITIALIZE_AFTER_SECONDS);
+    }
+
+    private function scriptingKey(): string
+    {
+        return 'store:noscript:'.$this->prefix.':'.$this->connectionName;
+    }
+
+    private function scriptingIsRefused(): bool
+    {
+        return time() < SharedState::deadline($this->scriptingKey());
+    }
+
+    /**
+     * Whether this failure says the SERVER will not run scripts, as
+     * opposed to saying nothing useful about whether it ran this one.
+     */
+    private static function scriptingIsUnsupported(Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+
+        foreach (['unknown command', 'not allowed', 'unsupported', 'disabled'] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -535,7 +604,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     private function connection(): Connection
     {
-        return $this->redis->connection($this->connection);
+        return $this->redis->connection($this->connectionName);
     }
 
     /**
