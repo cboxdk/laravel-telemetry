@@ -118,6 +118,46 @@ removes both.
 
 Everything else is comfortably inside the noise of the work it measures.
 
+## At high volume
+
+The per-operation costs above are what one request pays in CPU. They are
+not what decides whether this survives a large fleet — writes are. Three
+defaults are chosen for an ordinary application and are wrong above
+roughly a hundred requests per second per app.
+
+**Spool the OTLP export.** With `otlp` in `exporters` and
+`otlp.spool.enabled` false, every request's terminate makes up to three
+synchronous POSTs to the collector — traces, metrics, logs. The response
+has already been sent, so the user waits for none of it, but the FPM
+worker is not released until the script ends, so the worker waits for
+all of it. At 800 requests a second against a collector answering in
+20ms that is roughly 48 worker-seconds of pure export per second: you
+are provisioning tens of workers to do nothing but post telemetry, and a
+collector that gets *slow* — not dead, which the circuit breaker
+handles — becomes worker-pool exhaustion in your application.
+
+`TELEMETRY_OTLP_SPOOL=true` replaces the round trip with one Redis push
+and lets `telemetry:flush --interval` drain it out of band. It is off by
+default because it needs that daemon, and an application without one
+would silently stop exporting.
+
+**Sample traces.** `traces.sample_rate` is 1.0. At 800 requests a second
+that is 800 root spans plus their children, every second, almost none of
+which anyone will read. Metrics are unaffected by trace sampling — the
+counters and histograms aggregate regardless — so this costs you nothing
+you were actually using.
+
+**Bound every label you add.** The built-ins are bounded by construction
+and `queue` is classifiable (see the hooks doc), but
+`labelRequestsUsing()` hands you the same gun. A label with a thousand
+values multiplies every series it appears on.
+
+None of this has been load-tested. The figures above are per-operation
+measurements on one machine and the arithmetic that follows from them;
+they are a reason to configure the three things above before going to
+that volume, not a substitute for watching what your own stack does when
+you get there.
+
 ## Tuning knobs
 
 - **Sample traces** in high-traffic apps: `TELEMETRY_TRACES_SAMPLE_RATE=0.1`.
