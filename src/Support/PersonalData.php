@@ -110,7 +110,25 @@ final class PersonalData
             return $value;
         }
 
-        return self::replace('/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/', $value, $replacement);
+        // Labels, not "dots and letters". `[A-Za-z0-9.-]+\.[A-Za-z]{2,}`
+        // puts `.` in both the class and the separator, so every dot is
+        // a place the engine can backtrack to — 8KB of `a.a.a…@b.b.b…`
+        // took 140ms, on a string an attacker can put in a validation
+        // message. Matching a label at a time removes the ambiguity, and
+        // the possessive quantifiers remove the backtracking outright.
+        // And a lookbehind, which is the half that actually mattered.
+        // Possessive quantifiers stop the engine backtracking WITHIN a
+        // match; they do not stop it trying every starting position, and
+        // with a leading character class every character is one. On
+        // `a.a.a…@b.b.b…` that is quadratic — 8KB took 122ms and 32KB
+        // took 1.9 SECONDS, at flush, on a string an attacker can put in
+        // a validation message. Refusing to start inside a local part
+        // makes it linear.
+        return self::replace(
+            '/(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@(?:[A-Za-z0-9-]++\.)++[A-Za-z]{2,}+/',
+            $value,
+            $replacement,
+        );
     }
 
     /**

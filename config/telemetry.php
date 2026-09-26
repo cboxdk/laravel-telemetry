@@ -410,6 +410,23 @@ return [
         // you find the one host that is broken, and a bare phone number
         // is indistinguishable from an order id.
         'pii' => env('TELEMETRY_REDACTION_PII', false),
+
+        // The longest attribute value that reaches an exporter, in
+        // bytes. 0 disables the cap.
+        //
+        // This is the only place in the pipeline where a value is
+        // bounded at all — Span::setAttribute stores what it is given —
+        // so without it an application that puts a megabyte in an
+        // attribute sends a megabyte, at a collector that will probably
+        // reject the batch. It also bounds what the patterns above have
+        // to scan: several of them scale worse than linearly on a
+        // pathological value, and an exception message can contain
+        // whatever a user typed.
+        //
+        // The cut is marked, because a silently truncated value looks
+        // like a complete one and somebody will debug against a string
+        // that ends in the middle of the answer.
+        'max_value_length' => env('TELEMETRY_REDACTION_MAX_VALUE_LENGTH', 4096),
     ],
 
     /*

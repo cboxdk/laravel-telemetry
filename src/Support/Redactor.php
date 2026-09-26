@@ -59,6 +59,8 @@ final class Redactor implements RedactsTelemetry
         private readonly int $valueMinLength = 24,
         /** Structured personal identifiers to scrub out of free text. Empty = off. */
         private readonly array $personalData = [],
+        /** Longest attribute value that reaches an exporter. 0 disables the cap. */
+        private readonly int $maxValueLength = 4096,
     ) {}
 
     /**
@@ -117,6 +119,9 @@ final class Redactor implements RedactsTelemetry
             // is a decision an organisation makes rather than one made
             // for them.
             personalData: self::personalDataFromConfig($config),
+            maxValueLength: is_numeric($config['max_value_length'] ?? null)
+                ? max(0, (int) $config['max_value_length'])
+                : 4096,
         );
     }
 
@@ -790,6 +795,24 @@ final class Redactor implements RedactsTelemetry
             return $this->replacement;
         }
 
+        // Length first, and this is the one place in the pipeline where
+        // any value is bounded at all: Span::setAttribute stores what it
+        // is given, so an application that puts a megabyte in an
+        // attribute gets a megabyte through redaction, into the batch,
+        // and at a collector that will likely reject the whole thing.
+        //
+        // It also makes the rest of this method affordable. Every
+        // pattern here scans the value, and several of them scale worse
+        // than linearly on a pathological one — 128KB of `a.a.a…@b.b.b…`
+        // took 374ms, at flush, on a string an attacker can put in a
+        // validation message.
+        //
+        // Before redaction rather than after, deliberately. A secret
+        // longer than this is not a realistic secret, and truncating
+        // AFTER would mean carrying the whole cost to protect against
+        // one that does not exist.
+        $value = $this->cap($value);
+
         foreach ($this->patterns as $pattern => $replacement) {
             if (! $this->patternCompiles($pattern)) {
                 continue;
@@ -828,6 +851,22 @@ final class Redactor implements RedactsTelemetry
         }
 
         return $value;
+    }
+
+    /**
+     * Bound a value's length, marking where it was cut.
+     *
+     * The marker matters: a silently truncated value looks like a
+     * complete one, and somebody will eventually debug for an hour
+     * against a string that ends in the middle of the answer.
+     */
+    private function cap(string $value): string
+    {
+        if ($this->maxValueLength <= 0 || strlen($value) <= $this->maxValueLength) {
+            return $value;
+        }
+
+        return substr($value, 0, $this->maxValueLength).'… (truncated)';
     }
 
     /** @var array<string, bool> */

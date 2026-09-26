@@ -92,7 +92,8 @@ measured with the listener armed and with it absent.
 | N+1 detection | **+0.2 µs** — an `xxh3` of the statement. Leave it on. |
 | Outgoing HTTP hop | **+20 µs** — against a network call measured in milliseconds. |
 | Request middleware + terminate | **0.23 ms** (0.04 handle, 0.19 terminate) |
-| Redaction, per span at flush | **~25 µs** — 2.5 ms for a hundred-span trace |
+| Redaction, per span at flush | **~22 µs** — 2.2 ms for a hundred-span trace |
+| …with `redaction.pii` on | **+2 µs** a span |
 | Listeners registered on defaults | **84** |
 
 That middleware figure was **79 ms** until this was measured, and all of
