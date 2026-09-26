@@ -155,7 +155,7 @@ final class ScheduleInstrumentation
                 ->inc(1, ['task' => $this->taskName($event->task)]);
         });
 
-        $this->telemetry()->flush();
+        FailSafe::guard(fn () => $this->telemetry()->flush());
     }
 
     private function completeTask(int $id, string $outcome): void
@@ -221,7 +221,7 @@ final class ScheduleInstrumentation
 
         // Isolate each task: flush its telemetry and clear trace context
         // before the next task runs in the same process.
-        $this->telemetry()->flush();
+        FailSafe::guard(fn () => $this->telemetry()->flush());
         $this->telemetry()->resetContext();
     }
 

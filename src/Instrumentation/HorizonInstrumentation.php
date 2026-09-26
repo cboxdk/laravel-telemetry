@@ -108,7 +108,7 @@ final class HorizonInstrumentation
             $labels = [
                 'supervisor' => $this->withoutToken(Cast::string($supervisor->name)),
                 'connection' => Cast::string($supervisor->options->connection),
-                'queue' => Cast::string($supervisor->options->queue),
+                'queue' => $this->telemetry()->classifyQueue(Cast::string($supervisor->options->queue)),
             ];
 
             $this->telemetry()
@@ -145,7 +145,16 @@ final class HorizonInstrumentation
     private function longWaitDetected(LongWaitDetected $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $labels = ['connection' => Cast::string($event->connection), 'queue' => Cast::string($event->queue)];
+            // Classified, like every other queue label. Horizon
+            // bypassed the hook entirely, so an application that
+            // named its queues per tenant got one permanent series
+            // per tenant here while the same names were collapsed
+            // everywhere else — which is worse than not classifying
+            // at all, because the dashboards disagree.
+            $labels = [
+                'connection' => Cast::string($event->connection),
+                'queue' => $this->telemetry()->classifyQueue(Cast::string($event->queue)),
+            ];
 
             $this->telemetry()
                 ->counter('horizon.long_wait.detected', 'Times a queue exceeded its configured long-wait threshold')
@@ -154,7 +163,7 @@ final class HorizonInstrumentation
             $this->telemetry()->event('horizon.long_wait.detected', [...$labels, 'wait.seconds' => $event->seconds]);
         });
 
-        $this->telemetry()->flush();
+        FailSafe::guard(fn () => $this->telemetry()->flush());
     }
 
     private function processRestarting(string $type): void
@@ -176,7 +185,7 @@ final class HorizonInstrumentation
             $this->telemetry()->event('horizon.process.out_of_memory', ['type' => $type]);
         });
 
-        $this->telemetry()->flush();
+        FailSafe::guard(fn () => $this->telemetry()->flush());
     }
 
     private function jobsMigrated(JobsMigrated $event): void
@@ -186,7 +195,7 @@ final class HorizonInstrumentation
                 ->counter('horizon.jobs.migrated', 'Jobs migrated between queues (e.g. rebalancing, retry migration)')
                 ->inc($event->payloads->count(), [
                     'connection' => Cast::string($event->connectionName),
-                    'queue' => Cast::string($event->queue),
+                    'queue' => $this->telemetry()->classifyQueue(Cast::string($event->queue)),
                 ]);
         });
     }

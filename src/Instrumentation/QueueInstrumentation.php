@@ -161,7 +161,15 @@ final class QueueInstrumentation implements ManagesRequestState
     {
         if ($propagate) {
             $queue->createPayloadUsing(function (?string $connection = null, ?string $queueName = null, array $payload = []) {
-                $telemetry = $this->telemetry();
+                // Resolved inside the guard. This runs on DISPATCH, and
+                // PendingDispatch::__destruct() dispatches — so a
+                // telemetry failure out here does not lose a metric, it
+                // loses the job, from a destructor.
+                $telemetry = FailSafe::guard(fn (): TelemetryManager => $this->telemetry());
+
+                if ($telemetry === null) {
+                    return [];
+                }
 
                 FailSafe::guard(fn () => $telemetry
                     ->counter('queue.jobs.dispatched', 'Jobs pushed onto the queue')

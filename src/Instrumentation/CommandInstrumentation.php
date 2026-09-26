@@ -128,11 +128,16 @@ final class CommandInstrumentation implements ManagesRequestState
                 ->inc(1, $labels);
         });
 
-        $unit?->discard();
+        // Teardown is guarded too. A command that finished must not
+        // fail on the way out because telemetry could not be flushed —
+        // the exit code is what a scheduler reads.
+        FailSafe::guard(static fn () => $unit?->discard());
 
         if ($this->stack === []) {
-            $this->telemetry()->flush();
-            $this->telemetry()->resetContext();
+            FailSafe::guard(function (): void {
+                $this->telemetry()->flush();
+                $this->telemetry()->resetContext();
+            });
         }
     }
 
