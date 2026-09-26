@@ -29,6 +29,17 @@ use PHPUnit\Framework\Assert;
  * for attributes production really does emit. Turn it off — to model
  * `instrument.resources => false` — with
  * `$fake->tracer()->measureSpanResources(false)`.
+ *
+ * REDACTION DOES NOT RUN HERE. The redaction engine is the last thing
+ * that touches a batch before an exporter sees it, and this double
+ * collects spans in place of exporting them — so what the assertions
+ * below show you is what was RECORDED, not what would be SENT. A test
+ * asserting that a secret was redacted will therefore pass whether or
+ * not the engine would have caught it, which is the worst possible
+ * outcome for that particular test.
+ *
+ * To assert redaction, use a real manager with a CollectingExporter and
+ * flush it: `tests/FailSafety/OutgoingUrlRedactionTest.php` does this.
  */
 final class TelemetryFake extends TelemetryManager
 {

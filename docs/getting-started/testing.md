@@ -24,6 +24,17 @@ it('tracks the order', function () {
 });
 ```
 
+## What the fake does not do
+
+Redaction. The engine is the last thing that touches a batch before an
+exporter sees it, and the fake collects spans in place of exporting
+them — so the assertions below show what was **recorded**, not what
+would be **sent**. A test asserting that a secret was redacted passes
+here whether or not the engine would have caught it.
+
+To assert redaction, use a real manager with a `CollectingExporter` and
+flush it.
+
 ## Available assertions
 
 | Assertion | Notes |
