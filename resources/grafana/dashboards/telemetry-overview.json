@@ -741,7 +741,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "min": 0,
           "custom": {
             "drawStyle": "line",
@@ -768,7 +768,7 @@
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 1
               }
             ]
           }
@@ -1487,7 +1487,7 @@
       "targets": [
         {
           "refId": "Q39",
-          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[10m]))) > 0",
+          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[10m]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -1510,7 +1510,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "decimals": 1,
           "custom": {
             "align": "auto",

@@ -121,9 +121,9 @@ groups:
         expr: |
           histogram_quantile(0.95,
             sum by (le, service_name, deployment_environment_name) (
-              rate(queue_job_wait_time_milliseconds_bucket[5m])
+              rate(queue_job_wait_time_seconds_bucket[5m])
             )
-          ) > 30000
+          ) > 30
         for: 10m
         labels:
           severity: warning

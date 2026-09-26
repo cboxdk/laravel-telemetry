@@ -23,7 +23,7 @@ LOKI = {"type": "loki", "uid": "loki"}
 
 REQ = "http_server_request_duration_seconds"
 MEM = "http_server_memory_peak_bytes"
-CPU = "http_server_cpu_time_milliseconds"
+CPU = "http_server_cpu_time_seconds"
 SVC = 'service_name=~"$service",deployment_environment_name=~"$environment",host_name=~"$host"'
 TSVC = 'resource.service.name=~"$service" && resource.deployment.environment.name=~"$environment" && resource.host.name=~"$host"'
 
@@ -269,7 +269,7 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
         target(f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{SVC}}}[$__rate_interval])))', 'p50'),
         target(f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{SVC}}}[$__rate_interval])))', 'p95'),
         target(f'histogram_quantile(0.99, sum by (le) (rate({REQ}_bucket{{{SVC}}}[$__rate_interval])))', 'p99'),
-    ], 12, 5, unit="ms", colors=PERCENTILE_COLORS, threshold_line=1000),
+    ], 12, 5, unit="s", colors=PERCENTILE_COLORS, threshold_line=1),
     row("Application", 13),
     timeseries("Queue outcomes / min", [
         target(f'sum(rate(queue_jobs_processed_total{{{SVC}}}[$__rate_interval])) * 60', 'processed'),
@@ -285,7 +285,7 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
     row("Drill-down", 22),
     table("Routes by p95 — click a route to drill down", f'histogram_quantile(0.95, sum by (le, http_route) (rate({REQ}_bucket{{{SVC}}}[10m]))) > 0', 0, 23, unit="s",
           field_link=("http_route", LINK_REQ, "Open in Requests"), gauge_max=2000),
-    table("Jobs by p95 — click a job to drill down", f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{{{SVC}}}[10m]))) > 0', 12, 23, unit="ms",
+    table("Jobs by p95 — click a job to drill down", f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_seconds_bucket{{{SVC}}}[10m]))) > 0', 12, 23, unit="s",
           field_link=("job_name", LINK_JOB, "Open in Jobs"), gauge_max=5000),
     traces("Latest failing traces — requests, jobs and tasks", f'{{{TSVC} && status=error}}', 0, 31),
     row("Fleet — environments & hosts", 40),
@@ -303,7 +303,7 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     stat("p95", f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 8, 0, unit="s", thresholds=ok_at([{"color": "orange", "value": 0.5}, {"color": "red", "value": 2.0}])),
     stat("p99", f'histogram_quantile(0.99, sum by (le) (rate({REQ}_bucket{{{RF}}}[5m])))', 12, 0, unit="s"),
     stat("p95 memory", f'histogram_quantile(0.95, sum by (le) (rate({MEM}_bucket{{{RF}}}[10m])))', 16, 0, unit="bytes"),
-    stat("p95 CPU", f'histogram_quantile(0.95, sum by (le) (rate({CPU}_bucket{{{RF}}}[10m])))', 20, 0, unit="ms"),
+    stat("p95 CPU", f'histogram_quantile(0.95, sum by (le) (rate({CPU}_bucket{{{RF}}}[10m])))', 20, 0, unit="s"),
     row("Traffic & latency", 4),
     timeseries("Rate by route", [target(f'sum by (http_route) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{http_route}}')], 0, 5, w=8, unit="reqpm"),
     timeseries("Rate by domain", [target(f'sum by (server_address) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{server_address}}')], 8, 5, w=8, unit="reqpm",
@@ -311,7 +311,7 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
     timeseries("Latency percentiles", [
         target(f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{RF}}}[$__rate_interval])))', 'p50'),
         target(f'histogram_quantile(0.95, sum by (le) (rate({REQ}_bucket{{{RF}}}[$__rate_interval])))', 'p95'),
-    ], 16, 5, w=8, unit="ms", colors=PERCENTILE_COLORS, threshold_line=1000),
+    ], 16, 5, w=8, unit="s", colors=PERCENTILE_COLORS, threshold_line=1),
     row("Errors — 4xx & 5xx", 13),
     timeseries("Responses by status code", [target(f'sum by (http_response_status_code) (rate({REQ}_count{{{RF}}}[$__rate_interval])) * 60', '{{http_response_status_code}}')],
                0, 14, unit="reqpm", regex_colors={"^2..": "green", "^3..": "blue", "^4..": "orange", "^5..": "red"},
@@ -320,7 +320,7 @@ D["requests"] = dashboard("cbox-tel-requests", "Telemetry / Requests", [
            f'{{{TSVC} && kind=server && span.http.response.status_code >= 400 && span.http.response.status_code < 500}}', 12, 14, w=12, h=8),
     row("Resources per route", 22),
     timeseries("p95 memory by route", [target(f'histogram_quantile(0.95, sum by (le, http_route) (rate({MEM}_bucket{{{RF}}}[$__rate_interval])))', '{{http_route}}')], 0, 23, unit="bytes"),
-    timeseries("p95 CPU by route", [target(f'histogram_quantile(0.95, sum by (le, http_route) (rate({CPU}_bucket{{{RF}}}[$__rate_interval])))', '{{http_route}}')], 12, 23, unit="ms"),
+    timeseries("p95 CPU by route", [target(f'histogram_quantile(0.95, sum by (le, http_route) (rate({CPU}_bucket{{{RF}}}[$__rate_interval])))', '{{http_route}}')], 12, 23, unit="s"),
     row("Traces & logs", 31),
     traces("Trace lookup — paste an id from X-Trace-Id, Sentry or a support case into the “trace id” box above",
            '{trace:id = "$traceid"}', 0, 32, h=5,
@@ -340,8 +340,8 @@ D["jobs"] = dashboard("cbox-tel-jobs", "Telemetry / Jobs", [
     stat("Processed / min", f'sum(rate(queue_jobs_processed_total{{{QF}}}[5m])) * 60', 4, 0, decimals=0),
     stat("Released / min", f'sum(rate(queue_jobs_released_total{{{QF}}}[5m])) * 60', 8, 0, thresholds=warn_at(0.1, "orange")),
     stat("Failed / min", f'sum(rate(queue_jobs_failed_total{{{QF}}}[5m])) * 60', 12, 0, bg=True, thresholds=warn_at(0.1)),
-    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(queue_job_duration_milliseconds_bucket{{{QF}}}[5m])))', 16, 0, unit="ms"),
-    stat("p95 wait time", f'histogram_quantile(0.95, sum by (le) (rate(queue_job_wait_time_milliseconds_bucket{{{QF}}}[5m])))', 20, 0, unit="ms", thresholds=warn_at(30000, "orange"),
+    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(queue_job_duration_seconds_bucket{{{QF}}}[5m])))', 16, 0, unit="s"),
+    stat("p95 wait time", f'histogram_quantile(0.95, sum by (le) (rate(queue_job_wait_time_seconds_bucket{{{QF}}}[5m])))', 20, 0, unit="s", thresholds=warn_at(30, "orange"),
          description="Time from dispatch until the attempt started — queue lag."),
     row("Throughput & latency", 4),
     timeseries("Outcomes by job", [
@@ -349,9 +349,9 @@ D["jobs"] = dashboard("cbox-tel-jobs", "Telemetry / Jobs", [
         target(f'sum by (job_name) (rate(queue_jobs_released_total{{{QF}}}[$__rate_interval])) * 60', 'retry {{job_name}}'),
         target(f'sum by (job_name) (rate(queue_jobs_failed_total{{{QF}}}[$__rate_interval])) * 60', 'fail {{job_name}}'),
     ], 0, 5, unit="opm", regex_colors={"^ok .*": "green", "^retry .*": "orange", "^fail .*": "red"}),
-    timeseries("Queue wait time p95 (dispatch → start)", [target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_job_wait_time_milliseconds_bucket{{{QF}}}[$__rate_interval])))', '{{queue}}')], 12, 5, unit="ms", threshold_line=30000),
+    timeseries("Queue wait time p95 (dispatch → start)", [target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_job_wait_time_seconds_bucket{{{QF}}}[$__rate_interval])))', '{{queue}}')], 12, 5, unit="s", threshold_line=30),
     row("Resources & leaks", 13),
-    timeseries("p95 duration by job", [target(f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_milliseconds_bucket{{{QF}}}[$__rate_interval])))', '{{job_name}}')], 0, 14, unit="ms"),
+    timeseries("p95 duration by job", [target(f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_seconds_bucket{{{QF}}}[$__rate_interval])))', '{{job_name}}')], 0, 14, unit="s"),
     timeseries("Worker memory — a climbing line IS the leak", [
         target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{{{SVC}}}[$__rate_interval])))', 'rss p95 {{queue}}'),
         target(f'histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_php_bytes_bucket{{{SVC}}}[$__rate_interval])))', 'php p95 {{queue}}'),
@@ -367,10 +367,10 @@ CF = f'{SVC},command=~"$command"'
 D["commands"] = dashboard("cbox-tel-commands", "Telemetry / Commands", [
     stat("Runs / h", f'sum(increase(commands_completed_total{{{CF}}}[1h])) + sum(increase(commands_failed_total{{{CF}}}[1h]))', 0, 0, w=6, decimals=0),
     stat("Failed / h", f'sum(increase(commands_failed_total{{{CF}}}[1h]))', 6, 0, w=6, bg=True, decimals=0, thresholds=warn_at(1), zero=True),
-    stat("avg duration", f'sum(rate(command_duration_milliseconds_sum{{{CF}}}[1h])) / sum(rate(command_duration_milliseconds_count{{{CF}}}[1h]))', 12, 0, w=6, unit="ms"),
-    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(command_duration_milliseconds_bucket{{{CF}}}[1h])))', 18, 0, w=6, unit="ms"),
+    stat("avg duration", f'sum(rate(command_duration_seconds_sum{{{CF}}}[1h])) / sum(rate(command_duration_seconds_count{{{CF}}}[1h]))', 12, 0, w=6, unit="s"),
+    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(command_duration_seconds_bucket{{{CF}}}[1h])))', 18, 0, w=6, unit="s"),
     table("Runs by command (1h)", f'sum by (command) (increase(commands_completed_total{{{CF}}}[1h]))', 0, 4, decimals=0),
-    table("p95 by command", f'histogram_quantile(0.95, sum by (le, command) (rate(command_duration_milliseconds_bucket{{{CF}}}[1h]))) > 0', 12, 4, unit="ms", gauge_max=60000),
+    table("p95 by command", f'histogram_quantile(0.95, sum by (le, command) (rate(command_duration_seconds_bucket{{{CF}}}[1h]))) > 0', 12, 4, unit="s", gauge_max=60),
     traces("Command traces", f'{{{TSVC} && name=~"artisan .*"}}', 0, 12),
     text("Enable", "Command spans/metrics are opt-in: `TELEMETRY_INSTRUMENT_COMMANDS=true`.", 0, 21),
 ], variables=[qvar("command", "commands_completed_total", "command")])
@@ -382,13 +382,13 @@ D["schedule"] = dashboard("cbox-tel-schedule", "Telemetry / Scheduled Tasks", [
     stat("Failed / h", f'sum(increase(schedule_tasks_failed_total{{{SF}}}[1h]))', 6, 0, w=6, bg=True, decimals=0, thresholds=warn_at(1), zero=True),
     stat("Skipped / h", f'sum(increase(schedule_tasks_skipped_total{{{SF}}}[1h]))', 12, 0, w=6, decimals=0, thresholds=warn_at(5, "orange"), zero=True,
          description="Skips from filters or withoutOverlapping locks — the outcome most monitoring misses."),
-    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(schedule_task_duration_milliseconds_bucket{{{SF}}}[1h])))', 18, 0, w=6, unit="ms"),
+    stat("p95 duration", f'histogram_quantile(0.95, sum by (le) (rate(schedule_task_duration_seconds_bucket{{{SF}}}[1h])))', 18, 0, w=6, unit="s"),
     timeseries("Outcomes by task", [
         target(f'sum by (task) (increase(schedule_tasks_processed_total{{{SF}}}[$__rate_interval]))', 'ok {{task}}'),
         target(f'sum by (task) (increase(schedule_tasks_failed_total{{{SF}}}[$__rate_interval]))', 'fail {{task}}'),
         target(f'sum by (task) (increase(schedule_tasks_skipped_total{{{SF}}}[$__rate_interval]))', 'skip {{task}}'),
     ], 0, 4, regex_colors={"^ok .*": "green", "^fail .*": "red", "^skip .*": "yellow"}),
-    timeseries("p95 duration by task", [target(f'histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_milliseconds_bucket{{{SF}}}[$__rate_interval])))', '{{task}}')], 12, 4, unit="ms"),
+    timeseries("p95 duration by task", [target(f'histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_seconds_bucket{{{SF}}}[$__rate_interval])))', '{{task}}')], 12, 4, unit="s"),
     traces("Task runs", f'{{{TSVC} && name=~"schedule .*"}}', 0, 12),
     traces("Failed task runs", f'{{{TSVC} && name=~"schedule .*" && status=error}}', 0, 21),
 ], variables=[qvar("task", "schedule_tasks_processed_total", "task")])
@@ -471,7 +471,7 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
     timeseries("Export outcomes / min", [target(f'sum by (outcome) (rate(telemetry_export_count_total{{{SVC}}}[$__rate_interval])) * 60', '{{outcome}}')],
                0, 31, w=8, unit="opm", regex_colors={"ok": "green", "partial": "orange", "retryable": "orange", "failed": "red", "error": "red"},
                description="The package reporting on itself. Sustained retryable/failed means the backend is unreachable."),
-    timeseries("Export p95 duration", [target(f'histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_milliseconds_bucket{{{SVC}}}[$__rate_interval])))', '{{signal}}')], 8, 31, w=8, unit="ms"),
+    timeseries("Export p95 duration", [target(f'histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_seconds_bucket{{{SVC}}}[$__rate_interval])))', '{{signal}}')], 8, 31, w=8, unit="s"),
     stat("Circuit breaker", f'max(telemetry_export_circuit_open_ratio{{{SVC}}}) or vector(0)', 16, 31, w=4, decimals=0, thresholds=ok_at([{"color": "red", "value": 1}]),
          description="1 = OTLP circuit open (recent transport failure). Alert on sustained 1."),
     stat("Spool depth", f'max(telemetry_spool_depth{{{SVC}}}) or vector(0)', 20, 31, w=4, decimals=0, thresholds=ok_at([{"color": "orange", "value": 1000}, {"color": "red", "value": 15000}]),

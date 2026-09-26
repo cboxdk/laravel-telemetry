@@ -26,9 +26,15 @@ worlds: no stock dashboard matches it, and a collector fed the same name
 from another SDK sees one metric arrive with two units.
 
 Names the spec does not define — `queue.job.duration`, `command.duration`,
-`schedule.task.duration` — are free choices, and stay in milliseconds
-because the unit travels in the Prometheus name (`_milliseconds`) and is
-the more readable scale for them.
+`schedule.task.duration` — are free choices, but their *unit* is not:
+"when instruments are measuring durations, seconds (i.e. `s`) SHOULD be
+used". Every duration this package emits is in seconds, so one scale reads
+across the stock HTTP metrics and our own, and a dashboard never has to
+know which it is looking at.
+
+A dimensionless `1` means a ratio. The Prometheus translation suffixes a
+gauge with that unit `_ratio`, so a *count* wants a braced annotation
+instead (`{run_queue_item}`, `{entry}`), which carries no suffix.
 
 Prometheus names are derived automatically — dots become underscores and
 counters get `_total`:

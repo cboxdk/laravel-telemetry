@@ -253,7 +253,7 @@
       "targets": [
         {
           "refId": "Q113",
-          "expr": "sum(rate(command_duration_milliseconds_sum{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) / sum(rate(command_duration_milliseconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
+          "expr": "sum(rate(command_duration_seconds_sum{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) / sum(rate(command_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -263,7 +263,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
@@ -306,7 +306,7 @@
       "targets": [
         {
           "refId": "Q115",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -316,7 +316,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
@@ -421,7 +421,7 @@
       "targets": [
         {
           "refId": "Q119",
-          "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_milliseconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) > 0",
+          "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",
@@ -444,7 +444,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "s",
           "decimals": 1,
           "custom": {
             "align": "auto",
@@ -467,7 +467,7 @@
               },
               {
                 "id": "max",
-                "value": 60000
+                "value": 60
               },
               {
                 "id": "min",
