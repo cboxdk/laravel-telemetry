@@ -615,9 +615,24 @@ final class QueueInstrumentation implements ManagesRequestState
             $labels = ['job.name' => $job, 'queue' => $this->telemetry()->classifyQueue($queue)];
 
             if ($span = array_pop($this->jobSpans)) {
-                if (($owner = array_search(spl_object_id($span), $this->attemptSpans, true)) !== false) {
+                $id = spl_object_id($span);
+
+                // Detach everything this span owns before doing anything
+                // with it. The teardown below is inside a guard, so a
+                // throw halfway through — a profiler that cannot read a
+                // counter, a histogram whose store is down — is
+                // swallowed; anything still referenced at that point
+                // would be retained for the life of the worker, which is
+                // the leak the guard exists to prevent.
+                if (($owner = array_search($id, $this->attemptSpans, true)) !== false) {
                     unset($this->attemptSpans[$owner]);
                 }
+
+                $usage = $this->jobUsage[$id] ?? null;
+                $unit = $this->jobUnits[$id] ?? null;
+                $profile = $this->jobProfiles[$id] ?? null;
+
+                unset($this->jobUsage[$id], $this->jobUnits[$id], $this->jobProfiles[$id]);
 
                 if ($span->status() === SpanStatus::Unset) {
                     $span->setStatus($outcome === 'processed' ? SpanStatus::Ok : SpanStatus::Error);
@@ -629,9 +644,6 @@ final class QueueInstrumentation implements ManagesRequestState
                     // occurrence, rather than in a metric label.
                     $span->setAttribute('queue.job.outcome', self::OUTCOME_ABANDONED);
                 }
-
-                $usage = $this->jobUsage[spl_object_id($span)] ?? null;
-                unset($this->jobUsage[spl_object_id($span)]);
 
                 if ($usage !== null) {
                     $measured = $usage->measure();
@@ -653,9 +665,6 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
 
                 // Before end() — see the ordering note in TraceRequest.
-                $unit = $this->jobUnits[spl_object_id($span)] ?? null;
-                unset($this->jobUnits[spl_object_id($span)]);
-
                 if ($unit !== null) {
                     $result = $unit->finish($this->telemetry()->tracer()->currentlySampled($span));
 
@@ -668,9 +677,6 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
 
                 $span->end();
-
-                $profile = $this->jobProfiles[spl_object_id($span)] ?? null;
-                unset($this->jobProfiles[spl_object_id($span)]);
 
                 if ($profile !== null) {
                     $this->reportProfile($profile, $span->durationMs(), $job, $queue ?? 'default');
