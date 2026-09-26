@@ -131,7 +131,7 @@ final class ScheduleInstrumentation
 
     private function taskFinished(ScheduledTaskFinished $event): void
     {
-        $this->completeTask(spl_object_id($event->task), 'processed');
+        FailSafe::guard(fn () => $this->completeTask(spl_object_id($event->task), 'processed'));
     }
 
     private function taskFailed(ScheduledTaskFailed $event): void

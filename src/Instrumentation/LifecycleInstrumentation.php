@@ -91,7 +91,9 @@ final class LifecycleInstrumentation
 
     private function migrationStarted(MigrationStarted $event): void
     {
-        $this->started[$this->name($event->migration::class, $event->name)] = hrtime(true);
+        FailSafe::guard(function () use ($event) {
+            $this->started[$this->name($event->migration::class, $event->name)] = hrtime(true);
+        });
     }
 
     private function migrationEnded(MigrationEnded $event): void

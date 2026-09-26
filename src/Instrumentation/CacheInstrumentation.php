@@ -125,15 +125,22 @@ final class CacheInstrumentation implements ManagesRequestState
         if ($spans) {
             $events->listen(RetrievingKey::class, fn (RetrievingKey $event) => $this->begin($event->storeName, $event->key));
             $events->listen(RetrievingManyKeys::class, function (RetrievingManyKeys $event) {
-                foreach (Cast::array($event->keys) as $key) {
-                    $this->begin($event->storeName, Cast::string($key));
-                }
+                // Guarded because the keys are the APPLICATION's: a key
+                // object whose __toString throws would otherwise fail the
+                // cache read it was only being measured for.
+                FailSafe::guard(function () use ($event) {
+                    foreach (Cast::array($event->keys) as $key) {
+                        $this->begin($event->storeName, Cast::string($key));
+                    }
+                });
             });
             $events->listen(WritingKey::class, fn (WritingKey $event) => $this->begin($event->storeName, $event->key));
             $events->listen(WritingManyKeys::class, function (WritingManyKeys $event) {
-                foreach (Cast::array($event->keys) as $key) {
-                    $this->begin($event->storeName, Cast::string($key));
-                }
+                FailSafe::guard(function () use ($event) {
+                    foreach (Cast::array($event->keys) as $key) {
+                        $this->begin($event->storeName, Cast::string($key));
+                    }
+                });
             });
             $events->listen(ForgettingKey::class, fn (ForgettingKey $event) => $this->begin($event->storeName, $event->key));
         }

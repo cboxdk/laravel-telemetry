@@ -199,13 +199,7 @@ final class QueueInstrumentation implements ManagesRequestState
                     // then SIGKILLs the worker, so nothing else will ever close
                     // this attempt. The trace for a timed-out job — exactly the
                     // job you went looking for — was simply absent.
-                    $this->completeJob(
-                        $event->job->resolveName(),
-                        $event->job->getQueue(),
-                        'timed_out',
-                        $event->connectionName === 'sync',
-                        $event->job,
-                    );
+                    $this->closeAttempt($event->job, $event->connectionName, 'timed_out');
                 });
             }
 
@@ -488,12 +482,45 @@ final class QueueInstrumentation implements ManagesRequestState
         //
         // `deferred`, not `released`: `released` already means "threw and
         // will be retried", and a deferral is not a failure.
+        $this->closeAttempt($event->job, $event->connectionName);
+    }
+
+    /**
+     * Close an attempt, reading what it is from the job itself.
+     *
+     * The job is a THIRD-PARTY object — a custom queue driver, a wrapper,
+     * a decorator — and `resolveName()`, `getQueue()` and `isReleased()`
+     * are three calls into it. Evaluating them as arguments put them
+     * outside every guard, so a driver that throws from any of them (or
+     * predates `isReleased()` on the contract) would fail the job with an
+     * exception from the telemetry package. Reading them inside one guard
+     * means a hostile job costs one report and an attempt named
+     * `unknown`, not a failed job.
+     *
+     * One guard, not three: a job that throws from all of them would
+     * otherwise report three times per attempt, and a logging storm is
+     * its own outage.
+     *
+     * The span is closed either way. Skipping the close on failure would
+     * leave it open AND ambient, and everything the worker did next would
+     * become its child — a swallowed error silently rewriting the shape
+     * of every later trace.
+     */
+    private function closeAttempt(object $job, ?string $connectionName, ?string $outcome = null): void
+    {
+        /** @var array{0: string, 1: string|null, 2: bool} $facts */
+        $facts = FailSafe::guard(static fn (): array => [
+            method_exists($job, 'resolveName') ? (string) $job->resolveName() : 'unknown',
+            method_exists($job, 'getQueue') ? $job->getQueue() : null,
+            method_exists($job, 'isReleased') && $job->isReleased(),
+        ]) ?? ['unknown', null, false];
+
         $this->completeJob(
-            job: $event->job->resolveName(),
-            queue: $event->job->getQueue(),
-            outcome: $event->job->isReleased() ? 'deferred' : 'processed',
-            sync: $event->connectionName === 'sync',
-            attempt: $event->job,
+            job: $facts[0],
+            queue: $facts[1],
+            outcome: $outcome ?? ($facts[2] ? 'deferred' : 'processed'),
+            sync: $connectionName === 'sync',
+            attempt: $job,
         );
     }
 
@@ -542,12 +569,7 @@ final class QueueInstrumentation implements ManagesRequestState
             $this->rememberFailureContext($releasedBy);
         }
 
-        $this->completeJob(
-            job: $event->job->resolveName(),
-            queue: $event->job->getQueue(),
-            outcome: 'released',
-            sync: $event->connectionName === 'sync',
-        );
+        $this->closeAttempt($event->job, $event->connectionName, 'released');
     }
 
     private function jobFailed(JobFailed $event): void
@@ -556,13 +578,7 @@ final class QueueInstrumentation implements ManagesRequestState
 
         $this->rememberFailureContext($event->exception);
 
-        $this->completeJob(
-            job: $event->job->resolveName(),
-            queue: $event->job->getQueue(),
-            outcome: 'failed',
-            sync: $event->connectionName === 'sync',
-            attempt: $event->job,
-        );
+        $this->closeAttempt($event->job, $event->connectionName, 'failed');
     }
 
     private function completeJob(string $job, ?string $queue, string $outcome, bool $sync, ?object $attempt = null): void
@@ -739,15 +755,7 @@ final class QueueInstrumentation implements ManagesRequestState
             return;
         }
 
-        if (method_exists($job, 'resolveName') && method_exists($job, 'getQueue')) {
-            $this->completeJob(
-                job: $job->resolveName(),
-                queue: $job->getQueue(),
-                outcome: self::OUTCOME_ABANDONED,
-                sync: $connectionName === 'sync',
-                attempt: $job,
-            );
-        }
+        $this->closeAttempt($job, $connectionName, self::OUTCOME_ABANDONED);
 
         // Still here means completeJob declined: the attempt was marked
         // complete by an outcome event whose teardown then threw and was

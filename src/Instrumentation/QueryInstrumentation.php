@@ -45,6 +45,23 @@ final class QueryInstrumentation
 
     private function queryExecuted(QueryExecuted $event): void
     {
+        FailSafe::guard(fn () => $this->record($event));
+    }
+
+    /**
+     * Everything this listener does, inside one guard.
+     *
+     * Resolving the manager and asking it for the current span used to
+     * happen out here, ahead of the guard below — and this listener fires
+     * for EVERY query in the application. A container binding that throws
+     * (a store driver misconfigured, an app decorating the binding, a lazy
+     * connection that cannot be made) would therefore turn every single
+     * database query into an exception from the telemetry package. There
+     * is no failure in this package with a larger blast radius, and it
+     * was one `make()` outside a try.
+     */
+    private function record(QueryExecuted $event): void
+    {
         // Resolved per event so Telemetry::fake() swaps take effect.
         $telemetry = $this->container->make(TelemetryManager::class);
 
