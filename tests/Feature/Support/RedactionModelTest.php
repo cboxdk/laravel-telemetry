@@ -29,9 +29,15 @@ function redactUrl(string $query): string
 }
 
 it('redacts every spelling of a credential parameter', function (string $name) {
-    $secret = 'SECRETVALUE123abcXYZ0987';
+    // An ordinary lowercase word, deliberately. A mixed-case
+    // alphanumeric secret is caught by the SHAPE rule whatever it is
+    // called, so this test passed with the name matcher switched off
+    // entirely — it proved the other half of the model. The control
+    // below is what keeps that honest.
+    $secret = 'swordfish';
 
-    expect(redactUrl("{$name}={$secret}"))->not->toContain($secret);
+    expect(redactUrl("colour={$secret}"))->toContain($secret)
+        ->and(redactUrl("{$name}={$secret}"))->not->toContain($secret);
 })->with([
     // Plain, and the separators a header-ish spelling uses.
     'api_key', 'apikey', 'api-key', 'x-api-key', 'token', 'secret', 'password',

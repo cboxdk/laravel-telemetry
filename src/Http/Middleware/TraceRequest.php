@@ -238,8 +238,8 @@ final class TraceRequest
             // (exception records, metrics from other instrumentation) to
             // ship, and the suppression to lift before the next request on
             // a long-lived worker.
-            $this->telemetry->flush();
-            $this->telemetry->resetContext();
+            FailSafe::guard(fn () => $this->telemetry->flush());
+            FailSafe::guard(fn () => $this->telemetry->resetContext());
 
             return;
         }
@@ -538,8 +538,11 @@ final class TraceRequest
         // at this request's span, where a later one would record into it.
         $this->phases->flushRequestState();
 
-        $this->telemetry->flush();
-        $this->telemetry->resetContext();
+        // terminate() runs after the response on FPM, where a throw is
+        // only noise in the log — and inside the worker loop on Octane,
+        // where it is not. Guarded for the second case.
+        FailSafe::guard(fn () => $this->telemetry->flush());
+        FailSafe::guard(fn () => $this->telemetry->resetContext());
     }
 
     /**

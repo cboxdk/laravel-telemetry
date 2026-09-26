@@ -28,9 +28,16 @@ it('stays fast on the input that used to take a second', function () {
     // `a.a.a…@b.b.b…` — dots in both the character class and the
     // separator, which is the classic shape. 128KB of it took 374ms
     // before the value cap and 1.9s before the pattern was rewritten.
-    $value = str_repeat('a.', 32_000).'@'.str_repeat('b.', 32_000);
+    //
+    // Sized to fit UNDER the scan ceiling (max_value_length x 16), so
+    // the email pattern actually runs on it. At 128KB the value is
+    // replaced outright without being scanned, and the test measured
+    // the ceiling rather than the pattern — which is the same as not
+    // testing the pattern.
+    $value = str_repeat('a.', 8_000).'@'.str_repeat('b.', 8_000);
 
-    expect(adversarial($value))->toBeLessThan(10.0);
+    expect(strlen($value))->toBeLessThan(4096 * 16)
+        ->and(adversarial($value))->toBeLessThan(10.0);
 });
 
 it('bounds every pathological shape, not just that one', function (string $value) {

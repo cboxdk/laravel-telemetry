@@ -26,5 +26,11 @@ abstract class HostileTestCase extends TestCase
         $app['config']->set('telemetry.instrument.jobs', true);
         $app['config']->set('telemetry.instrument.views', true);
         $app['config']->set('telemetry.instrument.gates', true);
+
+        // Off by default because most applications do not want a span
+        // per artisan invocation — which also meant the whole console
+        // path, the one that runs unattended, was never dispatched at
+        // anything in this suite.
+        $app['config']->set('telemetry.instrument.commands', true);
     }
 }

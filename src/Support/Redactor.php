@@ -361,6 +361,46 @@ final class Redactor implements RedactsTelemetry
      *                                where `code` and `key` mean what they
      *                                say. False for loose prose.
      */
+    /**
+     * Whether these segments spell one of the always-credential names.
+     *
+     * @param  list<string>  $segments
+     */
+    private static function namesACredential(array $segments): bool
+    {
+        $whole = implode('_', $segments);
+        $joined = implode('', $segments);
+
+        foreach (self::CREDENTIAL_PARAMETERS as $credential) {
+            // Whole, as a suffix, or run together. `ACCESSTOKEN` has no
+            // separator and no capital to split on, so only the joined
+            // comparison sees it — and a name shouted in capitals is
+            // what a hand-written query string looks like.
+            $compact = str_replace('_', '', $credential);
+
+            if ($whole === $credential
+                || str_ends_with($whole, '_'.$credential)
+                || $joined === $compact) {
+                return true;
+            }
+
+            // A single run with nothing to split on — `ACCESSTOKEN`,
+            // `myapikey` — matched as a suffix of the run itself.
+            //
+            // Only for a name that had no separator at all (anything
+            // else the checks above already saw) and only for words of
+            // five characters or more: `sig`, `jwt` and `otp` as a bare
+            // suffix would start finding them inside ordinary words, and
+            // a redactor that eats real data is one that gets switched
+            // off.
+            if (count($segments) === 1 && strlen($compact) >= 5 && str_ends_with($joined, $compact)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function parameterIsCredential(string $name, bool $allowAmbiguous = true): bool
     {
         $segments = self::segments($name);
@@ -381,40 +421,26 @@ final class Redactor implements RedactsTelemetry
         // boolean. Matching a credential word anywhere in the name
         // caught all four, which is how the first version of this
         // broke them.
+        // Before stripping anything. `session_id` is on the credential
+        // list precisely BECAUSE of the `id` — a session id in a URL is
+        // the thing session fixation steals — and treating the suffix as
+        // noise first hid the only entry that needs it. The test that
+        // covered this passed anyway, because the secret it used was
+        // caught by the value-shape rule whatever the parameter was
+        // called.
+        if (self::namesACredential($segments)) {
+            return true;
+        }
+
         if (count($segments) > 1 && in_array(end($segments), self::DESCRIPTIVE_SUFFIXES, true)) {
             array_pop($segments);
+
+            if (self::namesACredential($segments)) {
+                return true;
+            }
         }
 
         $whole = implode('_', $segments);
-        $joined = implode('', $segments);
-
-        foreach (self::CREDENTIAL_PARAMETERS as $credential) {
-            // Whole, as a suffix, as any segment, or run together.
-            // `ACCESSTOKEN` has no separator and no capital to split
-            // on, so only the joined comparison sees it — and a name
-            // shouted in capitals is what a hand-written query string
-            // looks like.
-            $compact = str_replace('_', '', $credential);
-
-            if ($whole === $credential
-                || str_ends_with($whole, '_'.$credential)
-                || $joined === $compact) {
-                return true;
-            }
-
-            // A single run with nothing to split on — `ACCESSTOKEN`,
-            // `myapikey` — matched as a suffix of the run itself.
-            //
-            // Only for a name that had no separator at all (anything
-            // else the checks above already saw) and only for words of
-            // five characters or more: `sig`, `jwt` and `otp` as a
-            // bare suffix would start finding them inside ordinary
-            // words, and a redactor that eats real data is one that
-            // gets switched off.
-            if (count($segments) === 1 && strlen($compact) >= 5 && str_ends_with($joined, $compact)) {
-                return true;
-            }
-        }
 
         if (! $allowAmbiguous) {
             return false;

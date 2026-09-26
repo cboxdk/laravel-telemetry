@@ -221,8 +221,12 @@ final class ScheduleInstrumentation
 
         // Isolate each task: flush its telemetry and clear trace context
         // before the next task runs in the same process.
+        //
+        // Guarded, because `schedule:run` runs every task in ONE
+        // process: a throw here does not cost this task's telemetry,
+        // it costs every task after it in tonight's run.
         FailSafe::guard(fn () => $this->telemetry()->flush());
-        $this->telemetry()->resetContext();
+        FailSafe::guard(fn () => $this->telemetry()->resetContext());
     }
 
     /**

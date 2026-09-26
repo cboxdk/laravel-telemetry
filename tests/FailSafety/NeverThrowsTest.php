@@ -35,6 +35,12 @@ use Illuminate\Cache\Events\WritingKey;
 use Illuminate\Cache\Events\WritingManyKeys;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Console\Events\ScheduledTaskFailed;
+use Illuminate\Console\Events\ScheduledTaskFinished;
+use Illuminate\Console\Events\ScheduledTaskSkipped;
+use Illuminate\Console\Events\ScheduledTaskStarting;
+use Illuminate\Console\Scheduling\Event as ScheduledTask;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\DatabaseBusy;
@@ -61,6 +67,19 @@ use Illuminate\Redis\Events\CommandExecuted as RedisCommandExecuted;
 use Illuminate\Redis\Events\CommandFailed as RedisCommandFailed;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Laravel\Horizon\Events\JobsMigrated;
+use Laravel\Horizon\Events\LongWaitDetected;
+use Laravel\Horizon\Events\MasterSupervisorLooped;
+use Laravel\Horizon\Events\MasterSupervisorOutOfMemory;
+use Laravel\Horizon\Events\SupervisorLooped;
+use Laravel\Horizon\Events\SupervisorOutOfMemory;
+use Laravel\Horizon\Events\SupervisorProcessRestarting;
+use Laravel\Horizon\Events\WorkerProcessRestarting;
+use Laravel\Horizon\MasterSupervisor;
+use Laravel\Horizon\Supervisor;
+use Laravel\Horizon\SupervisorOptions;
+use Laravel\Horizon\SupervisorProcess;
+use Laravel\Horizon\WorkerProcess;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 
@@ -219,6 +238,88 @@ function everyInstrumentedEvent(): array
             new CommandStarting('queue:work', new ArrayInput([]), new NullOutput),
             new CommandFinished('queue:work', new ArrayInput([]), new NullOutput, 0),
         ],
+        'schedule' => [
+            new ScheduledTaskStarting(hostileScheduledTask()),
+            new ScheduledTaskFinished(hostileScheduledTask(), 1.5),
+            new ScheduledTaskFailed(hostileScheduledTask(), $throwable),
+            new ScheduledTaskSkipped(hostileScheduledTask()),
+        ],
+        'horizon' => [
+            new SupervisorLooped(hostileSupervisor()),
+            new MasterSupervisorLooped(hostileMasterSupervisor()),
+            new LongWaitDetected('redis', 'emails', 45),
+            new WorkerProcessRestarting(Mockery::mock(WorkerProcess::class)->makePartial()),
+            new SupervisorProcessRestarting(Mockery::mock(SupervisorProcess::class)->makePartial()),
+            new SupervisorOutOfMemory(hostileSupervisor()),
+            new MasterSupervisorOutOfMemory(hostileMasterSupervisor()),
+            new JobsMigrated('redis', 'emails', 12),
+        ],
+    ];
+}
+
+function hostileScheduledTask(): ScheduledTask
+{
+    return app(Schedule::class)->command('inspire')->everyMinute();
+}
+
+function hostileSupervisor(): Supervisor
+{
+    $supervisor = Mockery::mock(Supervisor::class)->makePartial();
+    $supervisor->name = 'supervisor-1';
+    $supervisor->options = new SupervisorOptions('supervisor-1', 'redis', 'default');
+    $supervisor->working = true;
+    $supervisor->shouldReceive('totalProcessCount')->andReturn(3);
+
+    return $supervisor;
+}
+
+function hostileMasterSupervisor(): MasterSupervisor
+{
+    $master = Mockery::mock(MasterSupervisor::class)->makePartial();
+    $master->name = 'master-1';
+    $master->working = true;
+    $master->supervisors = collect([hostileSupervisor()]);
+
+    return $master;
+}
+
+/**
+ * Events that record only local state — a start time, a pending key —
+ * and never call telemetry at all.
+ *
+ * Named rather than tolerated, so the per-event assertion below stays
+ * exact: an event that stops being instrumented moves into this list
+ * deliberately, in a diff someone reads, instead of disappearing into
+ * a group-wide "something happened".
+ *
+ * @return list<class-string>
+ */
+function eventsThatCannotReachTelemetryHere(): array
+{
+    return [
+        // The cache "before" events open a pending timing; the paired
+        // outcome event is what reaches telemetry.
+        RetrievingKey::class,
+        RetrievingManyKeys::class,
+        WritingKey::class,
+        WritingManyKeys::class,
+        ForgettingKey::class,
+        // Same shape: the duration is recorded on MigrationEnded.
+        MigrationStarted::class,
+        // Fires in a `finally` after JobProcessed/JobFailed, and closes
+        // an attempt only when one is still open.
+        JobAttempted::class,
+        // Dispatches are counted in the payload callback, which sees
+        // every dispatch including the ones that never reach a queue.
+        JobQueued::class,
+        // Opens the task's span; the metrics are on the outcome.
+        ScheduledTaskStarting::class,
+        // Not state-only, but inert HERE: CommandStarting could not open
+        // a span against a backend that was already broken, so there is
+        // nothing for this to close. Covered on its own below, where the
+        // command starts healthy and the backend dies underneath it —
+        // which is the order it happens in.
+        CommandFinished::class,
     ];
 }
 
@@ -232,18 +333,56 @@ it('swallows its own failure rather than failing the application', function (str
 
     brokenTelemetry();
 
-    $events = everyInstrumentedEvent()[$group];
+    $unreached = [];
 
-    $caught = swallowed(function () use ($events): void {
-        foreach ($events as $event) {
+    foreach (everyInstrumentedEvent()[$group] as $event) {
+        // Per event, not per group. A group-wide assertion passes as
+        // soon as ONE of a dozen events reaches telemetry and says
+        // nothing about the other eleven — and an event with no
+        // listener at all is exactly what it would hide.
+        //
+        // The throttle is flushed between them for the same reason: two
+        // events handled by the same guard would otherwise report once,
+        // and the second would look unreached.
+        FailSafe::flush();
+
+        $caught = swallowed(function () use ($event): void {
             // No try/catch here on purpose. Anything that escapes fails
             // the test, which is exactly the assertion.
             Event::dispatch($event);
+        });
+
+        if ($caught === [] && ! in_array($event::class, eventsThatCannotReachTelemetryHere(), true)) {
+            $unreached[] = $event::class;
         }
+    }
+
+    expect($unreached)->toBe([], sprintf(
+        'These [%s] events never reached telemetry, so nothing about them was proved: %s',
+        $group,
+        implode(', ', $unreached),
+    ));
+})->with(['cache', 'queue', 'database', 'auth', 'redis', 'lifecycle', 'schedule', 'horizon']);
+
+it('finishes a command whose backend died while it was running', function (): void {
+    // The realistic order, and the one the group run cannot reach: the
+    // command starts against a healthy backend, opens a span, and the
+    // backend is gone by the time it ends. An artisan command that dies
+    // in its own teardown is a failed deploy step or a cron job that
+    // reports failure for work it actually did.
+    $starting = new CommandStarting('queue:work', new ArrayInput([]), new NullOutput);
+    $finished = new CommandFinished('queue:work', new ArrayInput([]), new NullOutput, 0);
+
+    Event::dispatch($starting);
+
+    brokenTelemetry();
+
+    $caught = swallowed(function () use ($finished): void {
+        Event::dispatch($finished);
     });
 
-    expect($caught)->not->toBeEmpty("No handler in [{$group}] even tried to reach telemetry — the dispatch did nothing, so this proves nothing.");
-})->with(['cache', 'queue', 'database', 'auth', 'redis', 'lifecycle']);
+    expect($caught)->not->toBeEmpty('CommandFinished never reached telemetry, so this proves nothing.');
+});
 
 it('survives a query event with a connection that answers nothing', function (): void {
     brokenTelemetry();
