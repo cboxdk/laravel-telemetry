@@ -56,7 +56,8 @@ return [
         'deployment' => env('TELEMETRY_SERVICE_DEPLOYMENT'),
     ],
 
-    // Auto-detect container/k8s/cloud resource attributes (container.id,
+    // Auto-detect host/container/k8s/cloud resource attributes (host.name,
+    // host.arch, container.id,
     // k8s.pod.name, k8s.namespace.name, cloud.region, …) from cgroup
     // facts (via cboxdk/system-metrics), well-known downward-API env vars
     // and OTEL_RESOURCE_ATTRIBUTES. Config service.* keys always win.

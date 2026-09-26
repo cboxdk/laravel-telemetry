@@ -49,6 +49,7 @@ final class ResourceDetector
         self::$cache ??= FailSafe::guard(static function (): array {
             $attributes = [];
 
+            self::mergeHost($attributes);
             self::mergeContainer($attributes);
             self::mergeEnvConventions($attributes);
             self::mergeFaas($attributes);
@@ -74,6 +75,44 @@ final class ResourceDetector
     {
         self::$cache = null;
         self::$coldStart = true;
+    }
+
+    /**
+     * The machine this process is running on.
+     *
+     * Without `host.name` on the resource there is no way to tie a request
+     * to the box that served it, so anything reading the host's own
+     * exporters — node_exporter, a health endpoint — has nothing to join
+     * on. Container, Kubernetes and cloud identity were already detected;
+     * a plain VM or bare-metal host had nothing at all, which is the most
+     * common self-hosted deployment there is.
+     *
+     * Inside a container the hostname is the container (in Kubernetes, the
+     * pod, which is also recorded as `k8s.pod.name`). That is the right
+     * answer from the process's point of view, and an operator whose node
+     * name differs overrides it through `OTEL_RESOURCE_ATTRIBUTES`, which
+     * is merged last and wins.
+     *
+     * @param  array<string, string>  $attributes
+     */
+    private static function mergeHost(array &$attributes): void
+    {
+        $hostname = gethostname();
+
+        if (is_string($hostname) && trim($hostname) !== '') {
+            $attributes['host.name'] = trim($hostname);
+        }
+
+        $arch = php_uname('m');
+
+        if (trim($arch) !== '') {
+            // OTel spells these `amd64` / `arm64`, not the kernel's names.
+            $attributes['host.arch'] = match ($arch) {
+                'x86_64' => 'amd64',
+                'aarch64' => 'arm64',
+                default => $arch,
+            };
+        }
     }
 
     /**

@@ -118,3 +118,34 @@ it('lets an explicit cloud.provider env var win over the aws inference', functio
 
     expect(ResourceDetector::detect()['cloud.provider'])->toBe('custom');
 });
+
+it('names the machine, so a request can be tied to the box that served it', function (): void {
+    ResourceDetector::flush();
+
+    $attributes = ResourceDetector::detect();
+
+    // Without this there is nothing to join a trace to node_exporter on.
+    expect($attributes['host.name'] ?? null)->toBe(gethostname())
+        ->and($attributes['host.arch'] ?? null)->not->toBeNull();
+});
+
+it('spells the architecture the way the semantic conventions do', function (): void {
+    ResourceDetector::flush();
+
+    $arch = ResourceDetector::detect()['host.arch'] ?? '';
+
+    expect($arch)->not->toBe('x86_64')
+        ->and($arch)->not->toBe('aarch64');
+});
+
+it('lets the operator override the detected host name', function (): void {
+    ResourceDetector::flush();
+    putenv('OTEL_RESOURCE_ATTRIBUTES=host.name=node-7');
+
+    // A Kubernetes pod's hostname is the pod, not the node; the standard
+    // env var is merged last for exactly this case.
+    expect(ResourceDetector::detect()['host.name'] ?? null)->toBe('node-7');
+
+    putenv('OTEL_RESOURCE_ATTRIBUTES');
+    ResourceDetector::flush();
+});

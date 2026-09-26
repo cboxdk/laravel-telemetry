@@ -5,6 +5,18 @@ All notable changes to `cboxdk/laravel-telemetry` will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`host.name` and `host.arch` on the resource.** Detection covered
+  container, Kubernetes and cloud identity but never named the machine, so
+  a plain VM or bare-metal host — the most common self-hosted deployment —
+  reported nothing to tie a request to the box that served it. Anything
+  reading that host's own exporters had nothing to join on.
+  `OTEL_RESOURCE_ATTRIBUTES` still wins, which is how a Kubernetes operator
+  substitutes the node for the pod.
+
 ## [2.7.2] - 2026-09-25
 
 ### Fixed
