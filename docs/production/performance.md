@@ -91,7 +91,23 @@ measured with the listener armed and with it absent.
 | Query, inside a sampled trace | **+11.5 µs** — of which ~6 µs is the tallies and the counter, and ~5.5 µs is the detail span. |
 | N+1 detection | **+0.2 µs** — an `xxh3` of the statement. Leave it on. |
 | Outgoing HTTP hop | **+20 µs** — against a network call measured in milliseconds. |
+| Request middleware + terminate | **0.23 ms** (0.04 handle, 0.19 terminate) |
 | Listeners registered on defaults | **84** |
+
+That middleware figure was **79 ms** until this was measured, and all of
+it was one default. `instrument.resources` takes the OS process
+footprint from cboxdk/system-metrics, which reads `/proc/{pid}/stat` on
+Linux — microseconds — and shells out to `ps` everywhere else, at ~28 ms
+a call, twice per request and twice per job. On a Mac this package was
+the dominant cost of every request: fifty-six milliseconds to measure
+something that took two. The footprint is now taken only where taking it
+is cheap; `resources_process` overrides the decision either way.
+
+The request-level figures in `OverheadBenchmarkTest` are a full kernel
+round trip through testbench, which costs ~58 ms with ±10 ms of
+variance. A sub-millisecond delta is not separable there, and it is why
+that benchmark showed nothing while the middleware was costing 79 ms.
+Trust the per-operation table.
 
 The one number worth acting on is the query path. Fifty queries in a
 request is half a millisecond; five hundred — an N+1 you would want to

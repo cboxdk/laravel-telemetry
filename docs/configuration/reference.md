@@ -301,7 +301,8 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.db_connect` | `TELEMETRY_INSTRUMENT_DB_CONNECT` | `true` — `db.connect` span per PDO handshake + `db.client.connection.create_time` histogram. Fires once per connection per request, not per query |
 | `instrument.redis_connect` | `TELEMETRY_INSTRUMENT_REDIS_CONNECT` | `true` — `redis.connect` span per Redis handshake; honours `redis_ignore_connections` and always skips telemetry's own store/spool |
 | `instrument.user` | `TELEMETRY_INSTRUMENT_USER` | `true` — tag request spans with `user.id` + `user.type` (model) + `user.guard` (multi-guard safe; never PII) |
-| `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task; with cboxdk/system-metrics also real RSS + CPU utilization |
+| `instrument.resources` | `TELEMETRY_INSTRUMENT_RESOURCES` | `true` — peak memory + CPU per request/job/task, from PHP built-ins that cost nothing |
+| `instrument.resources_process` | `TELEMETRY_INSTRUMENT_RESOURCES_PROCESS` | unset → decide by platform. Adds real RSS + CPU utilization from cboxdk/system-metrics, which reads `/proc` on Linux (microseconds) and shells out to `ps` elsewhere (~28ms, twice per request). Taken only where it is cheap; set `true`/`false` to override |
 | `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via cboxdk/telemetry-native, or ext-excimer as a fallback; a silent no-op without either. See [Profiling](#profiling) below |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
 | `instrument.views` | `TELEMETRY_INSTRUMENT_VIEWS` | `true` — nested render spans per Blade/PHP view/partial/component (detail-marked); `view.render.count` tally on the root span |

@@ -593,6 +593,22 @@ return [
         // histograms (http.server.memory.peak / cpu.time, queue.job.*).
         'resources' => env('TELEMETRY_INSTRUMENT_RESOURCES', true),
 
+        // Whether to also take the OS process footprint (real RSS and
+        // CPU utilization) from cboxdk/system-metrics, on top of the PHP
+        // built-ins that `resources` always provides.
+        //
+        // null = decide by platform, and the platform matters enormously:
+        // on Linux this reads /proc/{pid}/stat and costs microseconds;
+        // everywhere else the library shells out to `ps`, which is ~28ms
+        // — twice per request and twice per job. On a developer's Mac
+        // that made this package the dominant cost of every request,
+        // fifty-six milliseconds to measure something that took two.
+        //
+        // Set true to take it anyway, false to never take it. When it is
+        // skipped, rssPeakBytes and cpuUtilization are simply absent,
+        // exactly as when system-metrics is not installed.
+        'resources_process' => env('TELEMETRY_INSTRUMENT_RESOURCES_PROCESS'),
+
         // Scheduled task spans + schedule.tasks.{processed,failed,skipped}
         // counters and schedule.task.duration histogram.
         'scheduled_tasks' => env('TELEMETRY_INSTRUMENT_SCHEDULED_TASKS', true),

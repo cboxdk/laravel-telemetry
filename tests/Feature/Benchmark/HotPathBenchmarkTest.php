@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
@@ -14,6 +15,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Redis\Events\CommandExecuted;
 use Illuminate\Support\Facades\Event;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The per-operation costs, which the request benchmark cannot separate.
@@ -203,4 +205,42 @@ it('counts what is listening on defaults', function () {
     fwrite(STDERR, sprintf("\n[benchmark] %-34s %d listeners on default config\n", 'registered listeners', $ours));
 
     expect($ours)->toBeGreaterThan(0);
+});
+
+it('measures the request middleware, without the harness around it', function () {
+    // The request-level benchmark in OverheadBenchmarkTest runs a full
+    // kernel round trip through testbench, which costs ~58ms with ±10ms
+    // of variance — so the package's sub-millisecond share is not
+    // separable there, and the numbers it prints are noise wearing a
+    // delta's clothing. This measures the middleware and its
+    // termination directly, which is all of the per-request cost there
+    // is.
+    // A real manager with a null exporter, NOT Telemetry::fake(): the
+    // fake retains every span for later assertions, so across a loop it
+    // measures the double's bookkeeping growing rather than the
+    // middleware. The first version of this case reported 98ms per
+    // request for exactly that reason.
+    Telemetry::addExporter(new NullExporter);
+
+    // Fully qualified: this file already imports Guzzle's Request for
+    // the hop benchmark above, and the two are not the same thing.
+    $middleware = app(TraceRequest::class);
+    $request = Illuminate\Http\Request::create('/orders', 'GET');
+    $response = new Response('ok');
+
+    $next = static fn (): Response => $response;
+
+    // Fewer iterations than the other cases: terminate() flushes, and
+    // a flush is the one part of a request that is genuinely not cheap
+    // — which is why it happens after the response is sent.
+    $off = perOperationMicros(static fn () => $next($request), 500, 50);
+
+    $on = perOperationMicros(function () use ($middleware, $request, $response, $next): void {
+        $middleware->handle($request, $next);
+        $middleware->terminate($request, $response);
+    }, 500, 50);
+
+    reportDelta('request middleware + terminate', $off, $on);
+
+    expect($on)->toBeFloat();
 });

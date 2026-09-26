@@ -35,7 +35,7 @@ final readonly class ResourceUsage
 
         $trackerId = null;
 
-        if (class_exists(ProcessMetrics::class)) {
+        if (self::processMetricsAreCheap()) {
             $pid = getmypid();
 
             if ($pid !== false) {
@@ -44,6 +44,43 @@ final readonly class ResourceUsage
         }
 
         return new self(self::cpuNow(), is_string($trackerId) ? $trackerId : null);
+    }
+
+    /**
+     * Whether reading the OS process footprint is cheap enough to do
+     * twice per request.
+     *
+     * cboxdk/system-metrics reads `/proc/{pid}/stat` on Linux, which is
+     * a file read and costs microseconds. Everywhere else it shells out
+     * to `ps` — and a subprocess is ~28ms, twice per unit of work,
+     * which on a developer's Mac made this package the dominant cost of
+     * every request and every queue job. Fifty-six milliseconds to
+     * measure something that took two.
+     *
+     * The PHP built-ins below cost nothing and work everywhere, so the
+     * OS footprint is simply skipped where taking it is expensive:
+     * `rssPeakBytes` and `cpuUtilization` come back null, exactly as
+     * they do when the package is not installed at all.
+     *
+     * `telemetry.instrument.resources_process` overrides the decision
+     * either way for anyone who knows their platform better than this
+     * does.
+     */
+    private static function processMetricsAreCheap(): bool
+    {
+        if (! class_exists(ProcessMetrics::class)) {
+            return false;
+        }
+
+        $configured = config('telemetry.instrument.resources_process');
+
+        // Null means "decide for me", which is the default and the only
+        // value that varies by platform.
+        if ($configured !== null) {
+            return Cast::flag($configured);
+        }
+
+        return PHP_OS_FAMILY === 'Linux';
     }
 
     /**
