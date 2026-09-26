@@ -20,12 +20,16 @@ final readonly class ShipResult
      * @param  int  $requeued  entries put back for the next tick (endpoint unreachable)
      * @param  int  $dropped  entries discarded — permanently rejected, and gone
      * @param  list<ExportOutcome>  $failures  one per rejected signal post
+     * @param  bool  $drained  false when the drain stopped on its budget rather
+     *                         than on an empty spool — there is more waiting,
+     *                         and the caller should come back immediately
      */
     public function __construct(
         public int $shipped = 0,
         public int $requeued = 0,
         public int $dropped = 0,
         public array $failures = [],
+        public bool $drained = true,
     ) {}
 
     public function successful(): bool

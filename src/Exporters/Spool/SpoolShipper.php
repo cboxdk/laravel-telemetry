@@ -40,17 +40,37 @@ final class SpoolShipper
         private readonly Closure $post,
     ) {}
 
-    public function ship(int $maxBatch = 200): ShipResult
+    /**
+     * Drain the spool, within a budget.
+     *
+     * The budget is not a tuning knob, it is what keeps the daemon a
+     * daemon. Draining until empty meant one call could run for as long
+     * as the backlog took — and a backlog is exactly what a collector
+     * outage leaves behind. For the whole of that call the daemon does
+     * not flush metrics and does not look at its stop flag, so metrics
+     * stop arriving and SIGTERM is answered by the supervisor's kill
+     * timeout instead of by the process.
+     *
+     * A drain that stops on the budget reports drained: false, and the
+     * caller comes straight back rather than sleeping.
+     *
+     * @param  int  $maxEntries  entries to handle before returning
+     * @param  (Closure(): bool)|null  $shouldStop  asked between batches
+     */
+    public function ship(int $maxBatch = 200, int $maxEntries = 10_000, ?Closure $shouldStop = null): ShipResult
     {
         $shipped = 0;
         $requeued = 0;
         $dropped = 0;
+        $handled = 0;
+        $drained = true;
 
         /** @var list<ExportOutcome> $failures */
         $failures = [];
 
         while (($entries = $this->spool->pop($maxBatch)) !== []) {
             $stop = false;
+            $handled += count($entries);
 
             foreach ($this->groupBySignal($entries) as $signal => $signalEntries) {
                 $result = ($this->post)(self::PATHS[$signal], $this->merge($signal, $signalEntries));
@@ -84,9 +104,15 @@ final class SpoolShipper
             if ($stop) {
                 break;
             }
+
+            if ($handled >= $maxEntries || ($shouldStop !== null && $shouldStop())) {
+                $drained = false;
+
+                break;
+            }
         }
 
-        return new ShipResult($shipped, $requeued, $dropped, $failures);
+        return new ShipResult($shipped, $requeued, $dropped, $failures, $drained);
     }
 
     /**

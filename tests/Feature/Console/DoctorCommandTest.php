@@ -15,6 +15,8 @@ final class FakeDoctorSpool implements Spool
 
     public function push(array $entry): void {}
 
+    public function pushMany(array $entries): void {}
+
     public function pop(int $count): array
     {
         return [];

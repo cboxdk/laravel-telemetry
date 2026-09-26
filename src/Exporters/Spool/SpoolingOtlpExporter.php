@@ -14,7 +14,9 @@ use Cbox\Telemetry\Support\TelemetryBatch;
 /**
  * OTLP with a local buffer: spans and events are serialized at
  * terminate but pushed to the spool instead of the network — the
- * request pays one Redis RPUSH, not an HTTP round-trip. The
+ * request pays two Redis commands — one RPUSH for every signal it
+ * carries, and the LTRIM that caps the list — rather than an HTTP
+ * round-trip to the collector. The
  * `telemetry:flush` command (cron or --daemon) ships them in merged
  * batches.
  *
@@ -42,12 +44,20 @@ final class SpoolingOtlpExporter implements Exporter
 
     public function export(TelemetryBatch $batch): ExportResult
     {
+        $entries = [];
+
         if ($batch->spans !== []) {
-            $this->spool->push(['signal' => 'traces', 'payload' => $this->serializer->traces($batch->spans)]);
+            $entries[] = ['signal' => 'traces', 'payload' => $this->serializer->traces($batch->spans)];
         }
 
         if ($batch->events !== []) {
-            $this->spool->push(['signal' => 'logs', 'payload' => $this->serializer->logs($batch->events)]);
+            $entries[] = ['signal' => 'logs', 'payload' => $this->serializer->logs($batch->events)];
+        }
+
+        // One call, so a request carrying both signals pays one round
+        // trip rather than two — this runs on the response's clock.
+        if ($entries !== []) {
+            $this->spool->pushMany($entries);
         }
 
         if ($batch->metrics !== []) {

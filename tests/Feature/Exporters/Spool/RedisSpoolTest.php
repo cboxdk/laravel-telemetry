@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Exporters\Spool\RedisSpool;
 use Illuminate\Contracts\Redis\Factory;
+use Illuminate\Redis\Events\CommandExecuted;
+use Illuminate\Support\Facades\Event;
 
 uses()->group('redis');
 
@@ -100,4 +102,39 @@ it('stops popping at an empty list', function () {
 
     expect($this->spool->pop(100))->toHaveCount(1)
         ->and($this->spool->pop(100))->toBe([]);
+});
+
+it('costs two commands for a request that spools both signals', function () {
+    // This runs on the response's clock. Two pushes of one entry each,
+    // with a trim after each, was four synchronous round trips per
+    // request — and the docs said "one RPUSH".
+    $commands = [];
+    app(Factory::class)->enableEvents();
+    Event::listen(CommandExecuted::class, function (CommandExecuted $event) use (&$commands): void {
+        $commands[] = $event->command;
+    });
+
+    $this->spool->pushMany([spoolEntry('spans'), spoolEntry('events')]);
+
+    expect($commands)->toBe(['rpush', 'ltrim'])
+        ->and($this->spool->size())->toBe(2);
+});
+
+it('takes a whole batch off the list in one command', function () {
+    // Two hundred LPOPs was two hundred round trips, and the drain
+    // paid them again for the empty tail of every pass.
+    foreach (range(1, 3) as $i) {
+        $this->spool->push(spoolEntry("e{$i}"));
+    }
+
+    $commands = [];
+    app(Factory::class)->enableEvents();
+    Event::listen(CommandExecuted::class, function (CommandExecuted $event) use (&$commands): void {
+        $commands[] = $event->command;
+    });
+
+    $entries = $this->spool->pop(200);
+
+    expect($commands)->toBe(['lpop'])
+        ->and(array_column(array_column($entries, 'payload'), 'id'))->toBe(['e1', 'e2', 'e3']);
 });

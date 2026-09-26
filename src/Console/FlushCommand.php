@@ -157,8 +157,21 @@ final class FlushCommand extends Command
         $lastMetricsFlush = 0.0;
 
         while (! $this->shouldStop) {
+            $backlog = false;
+
             if ($shipper !== null) {
-                $this->watchSpool(FailSafe::guard(fn () => $shipper->ship($maxBatch)));
+                $result = FailSafe::guard(fn () => $shipper->ship(
+                    $maxBatch,
+                    shouldStop: fn (): bool => $this->shouldStop,
+                ));
+
+                $this->watchSpool($result);
+
+                // The drain stopped on its budget, not on an empty
+                // spool. Sleeping now would let a backlog built up
+                // during an outage take hours to clear at one budget
+                // per interval.
+                $backlog = $result !== null && ! $result->drained;
             }
 
             if (microtime(true) - $lastMetricsFlush >= $metricsInterval) {
@@ -171,7 +184,9 @@ final class FlushCommand extends Command
                 $lastMetricsFlush = microtime(true);
             }
 
-            sleep($interval);
+            if (! $backlog) {
+                sleep($interval);
+            }
         }
 
         // One last drain of what arrived during shutdown. Anything the

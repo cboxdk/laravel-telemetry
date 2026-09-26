@@ -42,18 +42,33 @@ final class SqliteSpool implements Spool
 
     public function push(array $entry): void
     {
-        $encoded = json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE);
+        $this->pushMany([$entry]);
+    }
 
-        if (! is_string($encoded)) {
-            return; // unencodable payload — drop rather than poison the queue
+    public function pushMany(array $entries): void
+    {
+        $encoded = [];
+
+        foreach ($entries as $entry) {
+            $json = json_encode($entry, JSON_INVALID_UTF8_SUBSTITUTE);
+
+            if (is_string($json)) {
+                $encoded[] = $json; // an unencodable payload is dropped, not poisoned into the queue
+            }
+        }
+
+        if ($encoded === []) {
+            return;
         }
 
         $this->transaction(function () use ($encoded): void {
-            $this->run(
-                'INSERT INTO telemetry_spool (seq, entry)
-                 VALUES ((SELECT COALESCE(MAX(seq), 0) + 1 FROM telemetry_spool), ?)',
-                [$encoded],
-            );
+            foreach ($encoded as $json) {
+                $this->run(
+                    'INSERT INTO telemetry_spool (seq, entry)
+                     VALUES ((SELECT COALESCE(MAX(seq), 0) + 1 FROM telemetry_spool), ?)',
+                    [$json],
+                );
+            }
 
             // Backpressure: keep the newest $maxItems. The seq range stays
             // contiguous — pushes append, requeues prepend, and both pop

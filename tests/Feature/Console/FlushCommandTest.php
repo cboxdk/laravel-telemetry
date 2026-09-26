@@ -21,6 +21,8 @@ final class ThrowingFlushSpool implements Spool
 {
     public function push(array $entry): void {}
 
+    public function pushMany(array $entries): void {}
+
     public function pop(int $count): array
     {
         throw new RuntimeException('spool backend unreachable');

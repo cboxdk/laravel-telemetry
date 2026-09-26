@@ -16,8 +16,12 @@ final class ArraySpool implements Spool
 
     public function push(array $entry): void
     {
-        $this->entries[] = $entry;
-        $this->entries = array_slice($this->entries, -$this->maxItems);
+        $this->pushMany([$entry]);
+    }
+
+    public function pushMany(array $entries): void
+    {
+        $this->entries = array_slice([...$this->entries, ...$entries], -$this->maxItems);
     }
 
     public function pop(int $count): array
