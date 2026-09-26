@@ -365,8 +365,18 @@ final class TraceRequest
 
             // Body sizes (OTel semconv). Response size is skipped for
             // streamed/binary responses where content isn't a string.
+            //
+            // The request size comes from the header or not at all.
+            // Falling back to getContent() read the whole body into
+            // memory to measure it — for a chunked upload, which is
+            // exactly the case with no Content-Length, that is an
+            // unbounded read on the request path. An absent attribute
+            // costs a reader one number; the read costs the request.
             $requestSize = $request->headers->get('Content-Length');
-            $span->setAttribute('http.request.body.size', $requestSize !== null ? (int) $requestSize : strlen((string) $request->getContent()));
+
+            if ($requestSize !== null && ctype_digit($requestSize)) {
+                $span->setAttribute('http.request.body.size', (int) $requestSize);
+            }
 
             $responseSize = $response->headers->get('Content-Length');
 

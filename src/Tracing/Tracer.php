@@ -33,6 +33,9 @@ final class Tracer
 
     private ?Closure $onBufferFull = null;
 
+    /** Spans refused because the buffer was full and would not drain. */
+    private int $dropped = 0;
+
     /** @var array<string, scalar> ambient dimensions merged into every finished span; a null passed to addContext() removes the key rather than storing one */
     private array $contextAttributes = [];
 
@@ -484,6 +487,28 @@ final class Tracer
     }
 
     /**
+     * Spans this tracer refused because the buffer was full and could
+     * not be drained — surfaced as telemetry.spans.dropped, because a
+     * gap in a trace that nothing reports is a lie.
+     */
+    public function droppedSpans(): int
+    {
+        return $this->dropped;
+    }
+
+    /**
+     * Read the drop count and reset it — the manager turns it into a
+     * counter on each flush.
+     */
+    public function takeDroppedSpans(): int
+    {
+        $dropped = $this->dropped;
+        $this->dropped = 0;
+
+        return $dropped;
+    }
+
+    /**
      * Invoked when the buffer exceeds max size — the manager hooks a
      * flush here so long-running workers can't grow unbounded.
      *
@@ -591,11 +616,25 @@ final class Tracer
             $this->traceStats = [];
         }
 
-        $this->finished[] = $span;
+        if (count($this->finished) >= $this->maxBuffer) {
+            if ($this->onBufferFull !== null) {
+                ($this->onBufferFull)();
+            }
 
-        if (count($this->finished) >= $this->maxBuffer && $this->onBufferFull !== null) {
-            ($this->onBufferFull)();
+            // The drain is a request, not a guarantee: the callback may
+            // be absent (a tracer used directly), or the flush may have
+            // been declined — the circuit is open, the exporter is
+            // failing. Buffering anyway is how an observability library
+            // becomes the reason a worker is OOM-killed, so the span is
+            // dropped and counted instead.
+            if (count($this->finished) >= $this->maxBuffer) {
+                $this->dropped++;
+
+                return;
+            }
         }
+
+        $this->finished[] = $span;
     }
 
     private function lottery(): bool

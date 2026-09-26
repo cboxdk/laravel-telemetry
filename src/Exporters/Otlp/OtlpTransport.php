@@ -29,6 +29,18 @@ class OtlpTransport
     private const MAX_REPORTED_BODY = 500;
 
     /**
+     * Bytes of the response kept.
+     *
+     * A collector answers with a few hundred bytes of JSON. Something
+     * that is not a collector — a proxy error page, a captive portal, a
+     * misconfigured endpoint pointed at a file server — can answer with
+     * anything at all, and the whole of it was being buffered into the
+     * request's memory. We only ever read a partial-success count or an
+     * error message out of it, and 64KiB is far more than either needs.
+     */
+    private const MAX_RESPONSE_BYTES = 65536;
+
+    /**
      * @param  array<string, string>  $headers
      */
     public function __construct(
@@ -76,12 +88,33 @@ class OtlpTransport
             return ExportResult::failed('curl_init failed');
         }
 
+        $rawHeaders = '';
+        $responseBody = '';
+
         curl_setopt_array($handle, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $body,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER => true,
+            CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$rawHeaders): int {
+                $rawHeaders .= $line;
+
+                return strlen($line);
+            },
+            CURLOPT_WRITEFUNCTION => static function ($handle, string $chunk) use (&$responseBody): int {
+                $length = strlen($chunk);
+
+                // Keep the first 64KiB and discard the rest, rather than
+                // returning short — a short write aborts the transfer,
+                // and curl reports that as a network error, which would
+                // trip the circuit breaker on a response that arrived
+                // perfectly well.
+                if (strlen($responseBody) < self::MAX_RESPONSE_BYTES) {
+                    $responseBody .= substr($chunk, 0, self::MAX_RESPONSE_BYTES - strlen($responseBody));
+                }
+
+                return $length;
+            },
             CURLOPT_TIMEOUT_MS => (int) ($this->timeout * 1000),
             CURLOPT_CONNECTTIMEOUT_MS => (int) ($this->connectTimeout * 1000),
             // Explicit, even though these are curl's defaults — telemetry
@@ -92,15 +125,11 @@ class OtlpTransport
 
         $response = curl_exec($handle);
         $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $headerSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
         $error = curl_error($handle);
 
-        if ($response === false || $response === true) {
+        if ($response === false) {
             return ExportResult::retryable("network error: {$error}");
         }
-
-        $rawHeaders = substr($response, 0, $headerSize);
-        $responseBody = substr($response, $headerSize);
 
         if ($status >= 200 && $status < 300) {
             return $this->classifySuccess($responseBody);

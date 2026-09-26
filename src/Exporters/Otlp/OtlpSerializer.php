@@ -101,6 +101,17 @@ final readonly class OtlpSerializer
             $data['parentSpanId'] = $span->parentSpanId;
         }
 
+        // OTLP's own fields for this. Without them a span that hit its
+        // limit is indistinguishable from one that had little to say,
+        // and the operator debugs the wrong thing.
+        if ($span->droppedAttributes() > 0) {
+            $data['droppedAttributesCount'] = $span->droppedAttributes();
+        }
+
+        if ($span->droppedEvents() > 0) {
+            $data['droppedEventsCount'] = $span->droppedEvents();
+        }
+
         if ($span->status() !== SpanStatus::Unset) {
             $data['status'] = array_filter([
                 'code' => $span->status()->value,

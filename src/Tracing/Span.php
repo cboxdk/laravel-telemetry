@@ -18,11 +18,44 @@ use Throwable;
  */
 final class Span
 {
+    /**
+     * Per-span limits, matching the OpenTelemetry SDK defaults.
+     *
+     * A span is built from whatever the application hands it — a loop
+     * that annotates per iteration, a job that adds an event per row —
+     * and nothing downstream bounds it. Held in memory until the
+     * request ends and then serialised whole, an unbounded span is a
+     * memory limit hit inside the observability code, which is the one
+     * place it must never happen.
+     *
+     * A small reserve above each limit is kept for this package's own
+     * error annotation: an exception event is the most valuable thing
+     * on a span, and losing it because a cache instrumentation filled
+     * the list would invert the priority.
+     */
+    private const MAX_ATTRIBUTES = 128;
+
+    private const MAX_EVENTS = 128;
+
+    private const RESERVE = 8;
+
+    /**
+     * Longest attribute value kept. Truncation is marked, so a reader
+     * sees a cut value rather than a wrong one. Redaction has its own,
+     * smaller cap; this one exists for the values redaction never
+     * sees, and for the memory they occupy until it runs.
+     */
+    private const MAX_VALUE_LENGTH = 8192;
+
     /** @var array<string, scalar|null> */
     private array $attributes;
 
     /** @var list<SpanEvent> */
     private array $events = [];
+
+    private int $droppedAttributes = 0;
+
+    private int $droppedEvents = 0;
 
     /** @var list<SpanLink> */
     private array $links;
@@ -124,9 +157,44 @@ final class Span
      */
     public function setAttribute(string $key, mixed $value): self
     {
+        return $this->put($key, $value, reserved: false);
+    }
+
+    /**
+     * @param  scalar|null  $value
+     */
+    private function put(string $key, mixed $value, bool $reserved): self
+    {
+        $limit = self::MAX_ATTRIBUTES + ($reserved ? self::RESERVE : 0);
+
+        if (! array_key_exists($key, $this->attributes) && count($this->attributes) >= $limit) {
+            $this->droppedAttributes++;
+
+            return $this;
+        }
+
+        if (is_string($value) && strlen($value) > self::MAX_VALUE_LENGTH) {
+            $value = mb_strcut($value, 0, self::MAX_VALUE_LENGTH).'… (truncated)';
+        }
+
         $this->attributes[$key] = $value;
 
         return $this;
+    }
+
+    /**
+     * Attributes this span refused, for OTLP's droppedAttributesCount —
+     * a reader must be able to tell a span that had five attributes
+     * from one that had five hundred.
+     */
+    public function droppedAttributes(): int
+    {
+        return $this->droppedAttributes;
+    }
+
+    public function droppedEvents(): int
+    {
+        return $this->droppedEvents;
     }
 
     /**
@@ -135,7 +203,7 @@ final class Span
     public function setAttributes(array $attributes): self
     {
         foreach ($attributes as $key => $value) {
-            $this->attributes[$key] = $value;
+            $this->put($key, $value, reserved: false);
         }
 
         return $this;
@@ -165,7 +233,9 @@ final class Span
     public function mergeMissingAttributes(array $defaults): self
     {
         foreach ($defaults as $key => $value) {
-            $this->attributes[$key] ??= $value;
+            if (! isset($this->attributes[$key])) {
+                $this->put($key, $value, reserved: false);
+            }
         }
 
         return $this;
@@ -201,6 +271,22 @@ final class Span
      */
     public function addEvent(string $name, array $attributes = []): self
     {
+        return $this->record($name, $attributes, reserved: false);
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $attributes
+     */
+    private function record(string $name, array $attributes, bool $reserved): self
+    {
+        $limit = self::MAX_EVENTS + ($reserved ? self::RESERVE : 0);
+
+        if (count($this->events) >= $limit) {
+            $this->droppedEvents++;
+
+            return $this;
+        }
+
         $this->events[] = new SpanEvent($name, (int) (microtime(true) * 1e9), $attributes);
 
         return $this;
@@ -223,7 +309,7 @@ final class Span
 
         if ($this->recordedException !== $id) {
             $this->recordedException = $id;
-            $this->addEvent('exception', ExceptionAttributes::from($exception));
+            $this->record('exception', ExceptionAttributes::from($exception), reserved: true);
         }
 
         if ($fail) {
@@ -231,7 +317,7 @@ final class Span
             // an attribute is the only form a backend can group or filter
             // by — the exception event carries the same class name where
             // only a human reading one span will find it.
-            $this->setAttribute('error.type', $exception::class);
+            $this->put('error.type', $exception::class, reserved: true);
             $this->setStatus(SpanStatus::Error, $exception->getMessage());
         }
 

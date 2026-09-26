@@ -116,6 +116,26 @@ it('sends small batches uncompressed', function () {
     expect($this->server->requests()[0]['encoding'])->toBe('');
 });
 
+it('does not buffer an endpoint that answers with a gigabyte', function () {
+    // Not a collector: a proxy error page, a captive portal, an
+    // endpoint pointed at a file server. Whatever it is, the response
+    // lands in the memory of a live application request, and the only
+    // thing read out of it is an error message.
+    $this->server = StubOtlpServer::start(500, str_repeat('x', 4 * 1024 * 1024));
+
+    // The peak, not the difference: the whole response is freed when
+    // post() returns, so before/after would measure nothing at all and
+    // pass against the unbounded version.
+    $before = memory_get_usage();
+    memory_reset_peak_usage();
+
+    $result = transportFor($this->server)->post('/v1/traces', ['resourceSpans' => []]);
+
+    expect($result->success)->toBeFalse()
+        ->and(memory_get_peak_usage() - $before)->toBeLessThan(1024 * 1024)
+        ->and($result->reason)->toContain('HTTP 500');
+});
+
 function freeLoopbackPort(): int
 {
     $socket = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);

@@ -1047,6 +1047,8 @@ class TelemetryManager
 
         $spans = $this->tracer->drain();
 
+        $this->recordDroppedSpans();
+
         if (! $forceDetails) {
             $spans = $this->applyTailDetailPolicy($spans);
         }
@@ -1335,6 +1337,28 @@ class TelemetryManager
     private function nameOf(Exporter $exporter): string
     {
         return FailSafe::guard(fn (): string => $exporter->name()) ?? $exporter::class;
+    }
+
+    /**
+     * Spans the tracer refused because its buffer was full and would
+     * not drain. Silence here would be the worst kind: a trace with
+     * holes in it that looks complete.
+     */
+    private function recordDroppedSpans(): void
+    {
+        if (! $this->selfMetrics) {
+            return;
+        }
+
+        $dropped = $this->tracer->takeDroppedSpans();
+
+        if ($dropped === 0) {
+            return;
+        }
+
+        FailSafe::guard(fn () => $this->registry
+            ->counter('telemetry.spans.dropped', 'Spans discarded because the buffer was full')
+            ->inc((float) $dropped));
     }
 
     /**
