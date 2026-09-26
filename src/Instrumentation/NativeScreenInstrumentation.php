@@ -156,8 +156,8 @@ final class NativeScreenInstrumentation
 
             if ($openedAt !== null) {
                 $this->telemetry()
-                    ->histogram('screen.view.duration', description: 'Time spent on a native screen', unit: 'ms')
-                    ->record((microtime(true) - $openedAt) * 1000, ['screen' => $screen]);
+                    ->histogram('screen.view.duration', description: 'Time spent on a native screen', unit: 's')
+                    ->record(microtime(true) - $openedAt, ['screen' => $screen]);
             }
 
             $this->telemetry()->flush();
@@ -214,8 +214,8 @@ final class NativeScreenInstrumentation
         } finally {
             FailSafe::guard(function () use ($name, $startedAt): void {
                 $this->telemetry()
-                    ->histogram('screen.view.duration', description: 'Time spent on a native screen', unit: 'ms')
-                    ->record((microtime(true) - $startedAt) * 1000, ['screen' => $name]);
+                    ->histogram('screen.view.duration', description: 'Time spent on a native screen', unit: 's')
+                    ->record(microtime(true) - $startedAt, ['screen' => $name]);
 
                 $this->telemetry()->flush();
             });
@@ -278,8 +278,8 @@ final class NativeScreenInstrumentation
                     $span->end();
 
                     $this->telemetry()
-                        ->histogram('screen.interaction.duration', description: 'Native screen interaction duration', unit: 'ms')
-                        ->record($span->durationMs(), ['screen' => $name, 'type' => $type]);
+                        ->histogram('screen.interaction.duration', description: 'Native screen interaction duration', unit: 's')
+                        ->record($span->durationMs() / 1000, ['screen' => $name, 'type' => $type]);
                 }
 
                 if ($failed) {

@@ -148,3 +148,25 @@ it('records no exemplar when no resolver is configured', function () {
 
     expect($registry->collect()[0]->samples[0]->exemplar)->toBeNull();
 });
+
+it('times in the instrument own unit, not a fixed one', function (): void {
+    // A histogram declared in seconds filled by a helper that always wrote
+    // milliseconds is wrong by a factor of a thousand, and nothing about
+    // the reading looks odd. 20ms must read as 0.02, not 20.
+    $registry = registry();
+
+    $registry->histogram('unit.test.seconds', unit: 's', buckets: [0.01, 0.1, 1.0])
+        ->time(fn () => usleep(20_000));
+
+    $registry->histogram('unit.test.ms', unit: 'ms', buckets: [10.0, 100.0, 1000.0])
+        ->time(fn () => usleep(20_000));
+
+    $families = [];
+
+    foreach ($registry->collect() as $family) {
+        $families[$family->definition->name] = $family->samples[0];
+    }
+
+    expect($families['unit.test.seconds']->sum)->toBeGreaterThan(0.01)->toBeLessThan(1.0)
+        ->and($families['unit.test.ms']->sum)->toBeGreaterThan(10.0)->toBeLessThan(1000.0);
+});

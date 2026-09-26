@@ -22,7 +22,8 @@ use Cbox\Telemetry\Tracing\Span;
 final class NativeReporter
 {
     /** Per-unit time spent inside one native operation, in milliseconds. */
-    private const OPERATION_BUCKETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
+    /** Seconds; the instrument's unit is `s` per the semantic conventions. */
+    private const OPERATION_BUCKETS = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
 
     /**
      * Call this while the span is still open — the aggregates belong to it.
@@ -67,8 +68,8 @@ final class NativeReporter
                 ->inc($aggregate['count'], $labels);
 
             $telemetry
-                ->histogram('runtime.operation.duration', buckets: self::OPERATION_BUCKETS, description: 'Time one unit of work spent inside a native operation', unit: 'ms')
-                ->record($aggregate['total_ms'], $labels);
+                ->histogram('runtime.operation.duration', buckets: self::OPERATION_BUCKETS, description: 'Time one unit of work spent inside a native operation', unit: 's')
+                ->record($aggregate['total_ms'] / 1000, $labels);
         }
 
         // Nesting deeper than the extension's fixed operation stack. That

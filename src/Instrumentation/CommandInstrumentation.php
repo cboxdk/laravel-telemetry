@@ -117,8 +117,8 @@ final class CommandInstrumentation implements ManagesRequestState
             $labels = ['command' => $event->command ?? 'unknown'];
 
             $this->telemetry()
-                ->histogram('command.duration', description: 'Artisan command duration', unit: 'ms')
-                ->record($span->durationMs(), $labels);
+                ->histogram('command.duration', description: 'Artisan command duration', unit: 's')
+                ->record($span->durationMs() / 1000, $labels);
 
             $this->telemetry()
                 ->counter($event->exitCode === 0 ? 'commands.completed' : 'commands.failed', 'Artisan command runs by outcome')

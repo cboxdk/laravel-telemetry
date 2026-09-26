@@ -1273,8 +1273,8 @@ class TelemetryManager
                 default => 'failed',
             };
 
-            $this->registry->histogram('telemetry.export.duration', description: 'Telemetry export duration', unit: 'ms')
-                ->record((microtime(true) - $startedAt) * 1000, $labels);
+            $this->registry->histogram('telemetry.export.duration', description: 'Telemetry export duration', unit: 's')
+                ->record(microtime(true) - $startedAt, $labels);
 
             $this->registry->counter('telemetry.export.count', 'Telemetry export attempts by outcome')
                 ->inc(1, $labels + ['outcome' => $outcome]);

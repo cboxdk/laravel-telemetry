@@ -167,8 +167,8 @@ final class ScheduleInstrumentation
             $span->end();
 
             $this->telemetry()
-                ->histogram('schedule.task.duration', description: 'Scheduled task run duration', unit: 'ms')
-                ->record($span->durationMs(), $labels);
+                ->histogram('schedule.task.duration', description: 'Scheduled task run duration', unit: 's')
+                ->record($span->durationMs() / 1000, $labels);
 
             $this->telemetry()
                 ->counter("schedule.tasks.{$outcome}", 'Scheduled task runs by outcome')

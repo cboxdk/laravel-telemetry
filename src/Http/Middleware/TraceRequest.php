@@ -486,8 +486,8 @@ final class TraceRequest
                     ->record((float) $measured['memoryPeakBytes'], $labels);
 
                 $this->telemetry
-                    ->histogram('http.server.cpu.time', description: 'CPU time per request', unit: 'ms')
-                    ->record($measured['cpuTimeMs'], $labels);
+                    ->histogram('http.server.cpu.time', description: 'CPU time per request', unit: 's')
+                    ->record($measured['cpuTimeMs'] / 1000, $labels);
             }
         });
 

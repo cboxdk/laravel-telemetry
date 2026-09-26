@@ -289,8 +289,8 @@ final class QueueInstrumentation implements ManagesRequestState
                 $attributes['messaging.wait_time_ms'] = round($waitMs, 2);
 
                 $this->telemetry()
-                    ->histogram('queue.job.wait_time', description: 'Time from dispatch until the attempt started', unit: 'ms')
-                    ->record($waitMs, [
+                    ->histogram('queue.job.wait_time', description: 'Time from dispatch until the attempt started', unit: 's')
+                    ->record($waitMs / 1000, [
                         'job.name' => $event->job->resolveName(),
                         'queue' => $event->job->getQueue() ?? 'default',
                     ]);
@@ -497,8 +497,8 @@ final class QueueInstrumentation implements ManagesRequestState
                         ->record((float) $measured['memoryPeakBytes'], $labels);
 
                     $this->telemetry()
-                        ->histogram('queue.job.cpu.time', description: 'CPU time per job', unit: 'ms')
-                        ->record($measured['cpuTimeMs'], $labels);
+                        ->histogram('queue.job.cpu.time', description: 'CPU time per job', unit: 's')
+                        ->record($measured['cpuTimeMs'] / 1000, $labels);
                 }
 
                 // Before end() — see the ordering note in TraceRequest.
@@ -526,8 +526,8 @@ final class QueueInstrumentation implements ManagesRequestState
                 }
 
                 $this->telemetry()
-                    ->histogram('queue.job.duration', description: 'Queue job processing duration', unit: 'ms')
-                    ->record($span->durationMs(), $labels);
+                    ->histogram('queue.job.duration', description: 'Queue job processing duration', unit: 's')
+                    ->record($span->durationMs() / 1000, $labels);
             }
 
             // No counter for an attempt Laravel reported no outcome for.
