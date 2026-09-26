@@ -49,7 +49,7 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
             'system.cpu.load_average',
             fn (): array => $this->loadAverage(),
             description: 'System load average',
-            unit: '1',
+            unit: '{run_queue_item}',
         );
 
         $registry->gauge(
@@ -88,8 +88,8 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
         }
 
         return [
-            [(float) $storage->usedBytes(), ['state' => 'used']],
-            [(float) $storage->availableBytes(), ['state' => 'free']],
+            [(float) $storage->usedBytes(), ['system.filesystem.state' => 'used']],
+            [(float) $storage->availableBytes(), ['system.filesystem.state' => 'free']],
         ];
     }
 
@@ -105,8 +105,8 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
         }
 
         return [
-            [(float) $network->totalBytesReceived(), ['direction' => 'receive']],
-            [(float) $network->totalBytesSent(), ['direction' => 'transmit']],
+            [(float) $network->totalBytesReceived(), ['network.io.direction' => 'receive']],
+            [(float) $network->totalBytesSent(), ['network.io.direction' => 'transmit']],
         ];
     }
 
@@ -122,10 +122,10 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
         }
 
         return [
-            [(float) $memory->usedBytes, ['state' => 'used']],
-            [(float) $memory->freeBytes, ['state' => 'free']],
-            [(float) $memory->cachedBytes, ['state' => 'cached']],
-            [(float) $memory->buffersBytes, ['state' => 'buffers']],
+            [(float) $memory->usedBytes, ['system.memory.state' => 'used']],
+            [(float) $memory->freeBytes, ['system.memory.state' => 'free']],
+            [(float) $memory->cachedBytes, ['system.memory.state' => 'cached']],
+            [(float) $memory->buffersBytes, ['system.memory.state' => 'buffers']],
         ];
     }
 
@@ -141,7 +141,7 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
         }
 
         return [
-            [$memory->usedPercentage() / 100, ['state' => 'used']],
+            [$memory->usedPercentage() / 100, ['system.memory.state' => 'used']],
         ];
     }
 

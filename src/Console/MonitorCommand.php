@@ -183,12 +183,12 @@ final class MonitorCommand extends Command
 
         if (($memory = $metrics::memory()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.memory.usage', description: 'Memory in use by state', unit: 'By');
-            $gauge->set((float) $memory->usedBytes, $host + ['state' => 'used']);
-            $gauge->set((float) $memory->freeBytes, $host + ['state' => 'free']);
-            $gauge->set((float) $memory->cachedBytes, $host + ['state' => 'cached']);
+            $gauge->set((float) $memory->usedBytes, $host + ['system.memory.state' => 'used']);
+            $gauge->set((float) $memory->freeBytes, $host + ['system.memory.state' => 'free']);
+            $gauge->set((float) $memory->cachedBytes, $host + ['system.memory.state' => 'cached']);
 
             $telemetry->gauge('system.memory.utilization', description: 'Fraction of memory in use (0-1)', unit: '1')
-                ->set($memory->usedPercentage() / 100, $host + ['state' => 'used']);
+                ->set($memory->usedPercentage() / 100, $host + ['system.memory.state' => 'used']);
         }
 
         if (($load = $metrics::loadAverage()->getValueOr(null)) !== null) {
@@ -200,14 +200,14 @@ final class MonitorCommand extends Command
 
         if (($storage = $metrics::storage()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.filesystem.usage', description: 'Filesystem bytes by state', unit: 'By');
-            $gauge->set((float) $storage->usedBytes(), $host + ['state' => 'used']);
-            $gauge->set((float) $storage->availableBytes(), $host + ['state' => 'free']);
+            $gauge->set((float) $storage->usedBytes(), $host + ['system.filesystem.state' => 'used']);
+            $gauge->set((float) $storage->availableBytes(), $host + ['system.filesystem.state' => 'free']);
         }
 
         if (($network = $metrics::network()->getValueOr(null)) !== null) {
             $gauge = $telemetry->gauge('system.network.io', description: 'Cumulative network bytes by direction (use rate())', unit: 'By');
-            $gauge->set((float) $network->totalBytesReceived(), $host + ['direction' => 'receive']);
-            $gauge->set((float) $network->totalBytesSent(), $host + ['direction' => 'transmit']);
+            $gauge->set((float) $network->totalBytesReceived(), $host + ['network.io.direction' => 'receive']);
+            $gauge->set((float) $network->totalBytesSent(), $host + ['network.io.direction' => 'transmit']);
         }
     }
 

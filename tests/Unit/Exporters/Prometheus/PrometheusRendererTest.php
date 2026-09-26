@@ -52,14 +52,28 @@ it('suffixes the name with the unit, before _total', function () {
         ),
         // Unitless stays bare.
         new MetricFamily(
-            new MetricDefinition('cache.size', MetricType::Gauge, unit: '1'),
+            // A gauge of a dimensionless `1` is a ratio in the OTLP
+            // translation, and gets the suffix. A count is not: it wants a
+            // braced annotation unit, which carries no suffix at all.
+            new MetricDefinition('memory.utilization', MetricType::Gauge, unit: '1'),
+            [new Sample([], 0.9)],
+        ),
+        new MetricFamily(
+            new MetricDefinition('cache.entries', MetricType::Gauge, unit: '{entry}'),
             [new Sample([], 9.0)],
+        ),
+        new MetricFamily(
+            // Only a gauge: a dimensionless counter is a count, not a ratio.
+            new MetricDefinition('retries', MetricType::Counter, unit: '1'),
+            [new Sample([], 4.0)],
         ),
     ]);
 
     expect($output)->toContain("memory_peak_bytes 1024\n")
         ->toContain("job_time_milliseconds_total 3\n")
-        ->toContain("cache_size 9\n");
+        ->toContain("memory_utilization_ratio 0.9\n")
+        ->toContain("cache_entries 9\n")
+        ->toContain("retries_total 4\n");
 });
 
 it('accumulates histogram buckets into cumulative le form', function () {

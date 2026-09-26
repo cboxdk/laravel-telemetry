@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Exporters\Prometheus;
 
 use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
+use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Sample;
@@ -259,7 +260,7 @@ final class PrometheusRenderer
      */
     private function familyName(MetricFamily $family): string
     {
-        return $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+        return $family->definition->prometheusName().$this->suffixFor($family->definition);
     }
 
     /**
@@ -267,17 +268,33 @@ final class PrometheusRenderer
      */
     private function renderedName(MetricFamily $family): string
     {
-        $name = $family->definition->prometheusName().$this->unitSuffix($family->definition->unit);
+        $name = $family->definition->prometheusName().$this->suffixFor($family->definition);
 
         return $family->type() === MetricType::Counter ? $name.'_total' : $name;
     }
 
     /**
      * The unit as a Prometheus name suffix. OTel/UCUM unit → Prometheus base
-     * unit word (`ms` → `_milliseconds`, `By` → `_bytes`); unknown or unitless
-     * ('1', '', 'count') get nothing. Placed before `_total`/`_bucket`, so a
-     * `ms` counter reads `<name>_milliseconds_total`.
+     * unit word (`ms` → `_milliseconds`, `By` → `_bytes`); unknown or
+     * unitless ('', 'count') get nothing. Placed before `_total`/`_bucket`,
+     * so a `ms` counter reads `<name>_milliseconds_total`.
+     *
+     * The unitless `1` is deliberately absent here: the OTLP translation
+     * gives it `_ratio`, but only on a gauge — a counter or histogram of
+     * dimensionless things is a count, not a ratio. {@see ratioSuffix()}.
      */
+    /**
+     * The suffix for a whole family, including the gauge-only `_ratio`.
+     */
+    private function suffixFor(MetricDefinition $definition): string
+    {
+        if ($definition->unit === '1' && $definition->type === MetricType::Gauge) {
+            return '_ratio';
+        }
+
+        return $this->unitSuffix($definition->unit);
+    }
+
     private function unitSuffix(string $unit): string
     {
         return match ($unit) {
