@@ -6,3 +6,7 @@
 
 # Local cbox sandbox scaffolding
 /.cbox
+
+# The load-test application's scratch directories, created on first run.
+/loadtest/workbench/bootstrap/cache/*
+/loadtest/workbench/storage/

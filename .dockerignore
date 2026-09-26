@@ -1,0 +1,11 @@
+# The load-test image copies the source in, so keep the context to
+# what the application actually needs to run.
+.git
+.github
+node_modules
+tests
+docs
+resources/grafana
+loadtest/workbench/storage/logs
+sbom.json
+*.md

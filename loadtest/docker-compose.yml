@@ -1,0 +1,48 @@
+# The rig the numbers in docs/production/performance.md should come
+# from: the production PHP base image — php-fpm and nginx, opcache on,
+# the cbox_telemetry extension available — plus a real Redis for the
+# metric store and a real OTLP collector to post to.
+#
+#   docker compose -f loadtest/docker-compose.yml up -d --build
+#   loadtest/run.sh --target fpm redis otlp
+#
+# Rebuild with NATIVE=on (or auto) to measure what the native profiler
+# costs:
+#
+#   NATIVE=on docker compose -f loadtest/docker-compose.yml up -d --build
+#
+# Everything else about the package is set by environment on `app`, so
+# a run changes one variable and nothing else.
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: loadtest/Dockerfile
+      args:
+        NATIVE: "${NATIVE:-off}"
+        PHP_IMAGE: "${PHP_IMAGE:-ghcr.io/cboxdk/php-baseimages/php-fpm-nginx:8.5-bookworm-dev}"
+    ports: ["8931:80"]
+    environment:
+      NGINX_WEBROOT: /app/loadtest/public
+      TELEMETRY_ENABLED: "${TELEMETRY_ENABLED:-1}"
+      TELEMETRY_STORE: "${TELEMETRY_STORE:-array}"
+      TELEMETRY_EXPORTERS: "${TELEMETRY_EXPORTERS:-}"
+      TELEMETRY_OTLP_ENDPOINT: "http://collector:4318"
+      TELEMETRY_OTLP_SPOOL: "${TELEMETRY_OTLP_SPOOL:-0}"
+      TELEMETRY_TRACES_SAMPLE_RATE: "${TELEMETRY_TRACES_SAMPLE_RATE:-1.0}"
+      REDIS_HOST: redis
+    depends_on: [redis, collector]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # A real collector, so the export path is a real HTTP round trip
+  # rather than a fake. It throws the data away on purpose: this rig
+  # measures what it costs the APPLICATION to ship telemetry, not what
+  # it costs a backend to store it.
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel.yaml:ro

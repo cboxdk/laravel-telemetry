@@ -1,0 +1,17 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  # Throws it away on purpose: this rig measures what it costs the
+  # application to ship telemetry, not what it costs a backend to keep
+  # it. A collector that wrote to disk would be measuring the disk.
+  nop:
+
+service:
+  pipelines:
+    traces:  {receivers: [otlp], exporters: [nop]}
+    metrics: {receivers: [otlp], exporters: [nop]}
+    logs:    {receivers: [otlp], exporters: [nop]}
