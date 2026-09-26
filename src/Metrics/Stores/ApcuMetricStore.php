@@ -49,7 +49,7 @@ final class ApcuMetricStore implements MetricStore
         $series = Labels::encode($labels);
 
         $this->index($definition, $series);
-        apcu_store($this->valueKey(MetricType::Gauge, $definition->name, $series), $this->toInt($value));
+        apcu_store($this->valueKey($this->scalarType($definition), $definition->name, $series), $this->toInt($value));
     }
 
     public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
@@ -57,7 +57,17 @@ final class ApcuMetricStore implements MetricStore
         $series = Labels::encode($labels);
 
         $this->index($definition, $series);
-        $this->addFloat($this->valueKey(MetricType::Gauge, $definition->name, $series), $delta);
+        $this->addFloat($this->valueKey($this->scalarType($definition), $definition->name, $series), $delta);
+    }
+
+    /**
+     * The storage namespace for a scalar push write: the definition's own
+     * type, so an up-down counter or a counter written as an absolute
+     * value comes back out declared as one.
+     */
+    private function scalarType(MetricDefinition $definition): MetricType
+    {
+        return $definition->type === MetricType::Histogram ? MetricType::Gauge : $definition->type;
     }
 
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
@@ -136,7 +146,7 @@ final class ApcuMetricStore implements MetricStore
     {
         $families = [];
 
-        foreach ([MetricType::Counter, MetricType::Gauge] as $type) {
+        foreach ([MetricType::Counter, MetricType::UpDownCounter, MetricType::Gauge] as $type) {
             foreach ($this->names($type) as $name) {
                 $definition = $this->definition($type, $name);
 

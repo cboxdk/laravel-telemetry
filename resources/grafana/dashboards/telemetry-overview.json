@@ -535,7 +535,7 @@
       "targets": [
         {
           "refId": "Q17",
-          "expr": "system_memory_utilization_ratio{state=\"used\"} * 100",
+          "expr": "system_memory_utilization_ratio{system_memory_state=\"used\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",

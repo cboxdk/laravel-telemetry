@@ -10,8 +10,9 @@ use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Metrics\Instruments\Counter;
 use Cbox\Telemetry\Metrics\Instruments\Gauge;
 use Cbox\Telemetry\Metrics\Instruments\Histogram;
-use Cbox\Telemetry\Metrics\Instruments\ObservableGauge;
+use Cbox\Telemetry\Metrics\Instruments\Observable;
 use Cbox\Telemetry\Metrics\MetricFamily;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Support\ExportOutcome;
@@ -124,15 +125,45 @@ class TelemetryManager
      * Without a callback: a push gauge (`->set(42)`).
      * With a callback: an observable gauge evaluated at scrape time.
      *
-     * @return ($callback is null ? Gauge : ObservableGauge)
+     * @return ($callback is null ? Gauge : Observable)
      */
     public function gauge(
         string $name,
         ?Closure $callback = null,
         string $description = '',
         string $unit = '',
-    ): Gauge|ObservableGauge {
+    ): Gauge|Observable {
         return $this->registry->gauge($name, $callback, $description, $unit);
+    }
+
+    /**
+     * A push instrument of any scalar shape — `gauge()` without a
+     * callback, with the instrument type spelled out. Use it when the
+     * absolute value you are setting is a sum rather than a level.
+     */
+    public function pushed(
+        string $name,
+        MetricType $type = MetricType::Gauge,
+        string $description = '',
+        string $unit = '',
+    ): Gauge {
+        return $this->registry->pushed($name, $type, $description, $unit);
+    }
+
+    /**
+     * An observed reading of any shape — the callback form of `gauge()`,
+     * with the instrument type spelled out. Use it when what you are
+     * reading is a sum rather than a level: bytes in use add across hosts,
+     * a fraction does not.
+     */
+    public function observable(
+        string $name,
+        Closure $callback,
+        MetricType $type = MetricType::Gauge,
+        string $description = '',
+        string $unit = '',
+    ): Observable {
+        return $this->registry->observable($name, $callback, $type, $description, $unit);
     }
 
     /**

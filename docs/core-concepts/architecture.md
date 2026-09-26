@@ -13,7 +13,7 @@ Your app / Cbox packages
   ▼
 TelemetryManager
   ├── Registry ──► MetricStore (redis | apcu | array)   ← push instruments
-  │        └────► ObservableGauge callbacks             ← pull instruments
+  │        └────► Observable callbacks             ← pull instruments
   ├── Tracer  ──► in-memory span buffer (capped)
   └── events  ──► in-memory event buffer
   │

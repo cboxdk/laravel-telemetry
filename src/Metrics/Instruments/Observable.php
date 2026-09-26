@@ -10,7 +10,7 @@ use Cbox\Telemetry\Metrics\Sample;
 use Closure;
 
 /**
- * A pull gauge — a callback evaluated at scrape/flush time.
+ * A pull instrument — a callback evaluated at scrape/flush time.
  *
  * Nothing is ever stored; the callback queries the source of truth on
  * demand. A single callback may return one value or many series:
@@ -21,8 +21,16 @@ use Closure;
  *         [12, ['queue' => 'default']],
  *         [3,  ['queue' => 'mail']],
  *     ]);
+ *
+ * The instrument TYPE lives on the definition, not in this class name. An
+ * observed reading can be a gauge (a fraction, a temperature), a
+ * non-monotonic sum (bytes of memory in use — it goes up and down, but
+ * summing across hosts is meaningful) or a monotonic sum (bytes a NIC has
+ * carried since boot). Those are three different things downstream: only
+ * the last one may be rate()'d, and only a gauge may be averaged. Reading
+ * them all the same way does not make them the same metric.
  */
-final readonly class ObservableGauge
+final readonly class Observable
 {
     public function __construct(
         private MetricDefinition $definition,

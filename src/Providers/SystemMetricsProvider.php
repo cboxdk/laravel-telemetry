@@ -9,6 +9,7 @@ use Cbox\SystemMetrics\DTO\Metrics\LoadAverageSnapshot;
 use Cbox\SystemMetrics\DTO\Metrics\Memory\MemorySnapshot;
 use Cbox\SystemMetrics\SystemMetrics;
 use Cbox\Telemetry\Contracts\TelemetryProvider;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Registry;
 
 /**
@@ -29,11 +30,22 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
         return 'cbox.system-metrics';
     }
 
+    /** semconv's three load-average metrics, and the snapshot field each reads. */
+    private const LOAD_AVERAGE_WINDOWS = [
+        '1m' => 'oneMinute',
+        '5m' => 'fiveMinutes',
+        '15m' => 'fifteenMinutes',
+    ];
+
     public function register(Registry $registry): void
     {
-        $registry->gauge(
+        // semconv: an UpDownCounter, not a gauge. Bytes in use are a sum
+        // that happens to go down — they add across hosts, and a gauge
+        // would let a backend average them instead.
+        $registry->observable(
             'system.memory.usage',
             fn (): array => $this->memoryUsage(),
+            MetricType::UpDownCounter,
             description: 'Memory in use by state',
             unit: 'By',
         );
@@ -45,24 +57,36 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
             unit: '1',
         );
 
-        $registry->gauge(
-            'system.cpu.load_average',
-            fn (): array => $this->loadAverage(),
-            description: 'System load average',
-            unit: '{run_queue_item}',
-        );
+        // semconv names the three windows as three metrics rather than
+        // one with a `period` label, and the UI and alerts that consume
+        // them are ours. One query per window is the cost; being the same
+        // series every other exporter in the room emits is the payoff.
+        foreach (self::LOAD_AVERAGE_WINDOWS as $window => $index) {
+            $registry->gauge(
+                'system.cpu.load_average.'.$window,
+                fn (): array => $this->loadAverage($index),
+                description: "System load average over {$window}",
+                unit: '{thread}',
+            );
+        }
 
-        $registry->gauge(
+        $registry->observable(
             'system.filesystem.usage',
             fn (): array => $this->filesystemUsage(),
+            MetricType::UpDownCounter,
             description: 'Filesystem bytes by state',
             unit: 'By',
         );
 
-        $registry->gauge(
+        // semconv: a monotonic Counter. It already WAS cumulative — saying
+        // so is what gets it a `_total` suffix, lets rate() handle a
+        // reboot's reset instead of drawing a cliff, and stops anyone
+        // averaging a number that only ever grows.
+        $registry->observable(
             'system.network.io',
             fn (): array => $this->networkIo(),
-            description: 'Cumulative network bytes by direction (use rate() in PromQL)',
+            MetricType::Counter,
+            description: 'Network bytes by direction since boot',
             unit: 'By',
         );
 
@@ -148,7 +172,10 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
     /**
      * @return list<array{0: float, 1: array<string, string>}>
      */
-    private function loadAverage(): array
+    /**
+     * @return list<array{0: float, 1: array<string, string>}>
+     */
+    private function loadAverage(string $index): array
     {
         $load = SystemMetrics::loadAverage()->getValueOr(null);
 
@@ -156,11 +183,11 @@ final readonly class SystemMetricsProvider implements TelemetryProvider
             return [];
         }
 
-        return [
-            [$load->oneMinute, ['period' => '1m']],
-            [$load->fiveMinutes, ['period' => '5m']],
-            [$load->fifteenMinutes, ['period' => '15m']],
-        ];
+        return [[match ($index) {
+            'oneMinute' => $load->oneMinute,
+            'fiveMinutes' => $load->fiveMinutes,
+            default => $load->fifteenMinutes,
+        }, []]];
     }
 
     /**

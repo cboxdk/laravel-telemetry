@@ -12,7 +12,7 @@ conventions**. Lowercase, dot-namespaced, described, with units:
 ```text
 http.server.request.duration    s      (semconv: seconds, not ms)
 http.client.request.duration    s      (semconv: seconds, not ms)
-queue.job.duration              ms
+queue.job.duration              s
 queue.jobs.processed
 system.memory.usage             By
 system.cpu.utilization          1      (fraction 0-1)
@@ -40,9 +40,42 @@ Prometheus names are derived automatically — dots become underscores and
 counters get `_total`:
 
 ```text
-http_server_request_duration_bucket{le="100"}
+http_server_request_duration_seconds_bucket{le="0.1"}
 queue_jobs_processed_total
 ```
+
+## Shape is part of the name
+
+A metric's *type* travels with it and decides what arithmetic a backend is
+allowed to do. Getting it wrong produces a number that is individually
+correct and collectively a lie.
+
+```text
+Counter         monotonic; may be rate()'d      system.network.io
+UpDownCounter   a sum that can go down          system.memory.usage
+Gauge           a level, not a sum              system.cpu.utilization
+Histogram       a distribution                  http.server.request.duration
+```
+
+Bytes of memory in use are the clearest case. They are a **sum**: add them
+across ten hosts and you have the fleet's memory, which is the question you
+actually have. Recorded as a gauge, a backend is entitled to average them
+instead, and the answer is a tenth of the truth. Conversely, only a counter
+may be `rate()`'d, and only a counter's reset is understood as a reboot
+rather than a cliff.
+
+Declare it with `Telemetry::observable()` for a reading taken at scrape
+time, or `Telemetry::pushed()` for one written into the shared store:
+
+```php
+Telemetry::observable('system.memory.usage', $read, MetricType::UpDownCounter, unit: 'By');
+Telemetry::pushed('system.network.io', MetricType::Counter, unit: 'By');
+```
+
+Prometheus has only four types and no up-down counter, so it receives a
+gauge — the same lossy mapping the OTLP-to-Prometheus translation makes.
+The distinction survives where it can: in the OTLP payload, as
+`isMonotonic: false`.
 
 ## Your own metrics
 

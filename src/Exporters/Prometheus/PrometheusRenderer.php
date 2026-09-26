@@ -63,7 +63,7 @@ final class PrometheusRenderer
                 $output[] = '# HELP '.$familyName.' '.$this->escapeHelp($help);
             }
 
-            $output[] = '# TYPE '.$familyName.' '.$family->type()->value;
+            $output[] = '# TYPE '.$familyName.' '.$this->prometheusType($family->type());
 
             if ($openMetrics && $family->definition->unit !== '' && $this->unitSuffix($family->definition->unit) !== '') {
                 // OpenMetrics allows the UNIT metadata line and requires it to
@@ -288,11 +288,28 @@ final class PrometheusRenderer
      */
     private function suffixFor(MetricDefinition $definition): string
     {
-        if ($definition->unit === '1' && $definition->type === MetricType::Gauge) {
+        // A non-monotonic sum lands on a Prometheus gauge, so it earns the
+        // suffix too; a counter or histogram of dimensionless things is a
+        // count and must not.
+        if ($definition->unit === '1' && in_array($definition->type, [MetricType::Gauge, MetricType::UpDownCounter], true)) {
             return '_ratio';
         }
 
         return $this->unitSuffix($definition->unit);
+    }
+
+    /**
+     * Prometheus has no up-down counter. The OTLP translation maps a
+     * non-monotonic sum onto a gauge — which is the right lossy answer for
+     * a text format that only knows four types, and why the OTLP exporter
+     * is where the distinction survives.
+     */
+    private function prometheusType(MetricType $type): string
+    {
+        return match ($type) {
+            MetricType::UpDownCounter => MetricType::Gauge->value,
+            default => $type->value,
+        };
     }
 
     private function unitSuffix(string $unit): string

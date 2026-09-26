@@ -146,6 +146,14 @@ final readonly class OtlpSerializer
                 'isMonotonic' => true,
                 'dataPoints' => $this->numberDataPoints($family, $now),
             ]],
+            // A sum that may go down. `isMonotonic: false` is the whole
+            // difference, and it is the flag that tells a backend these
+            // series may be added across hosts but never rate()'d.
+            MetricType::UpDownCounter => $metric + ['sum' => [
+                'aggregationTemporality' => 2,
+                'isMonotonic' => false,
+                'dataPoints' => $this->numberDataPoints($family, $now),
+            ]],
             MetricType::Gauge => $metric + ['gauge' => [
                 'dataPoints' => $this->numberDataPoints($family, $now),
             ]],

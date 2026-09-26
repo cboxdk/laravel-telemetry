@@ -55,7 +55,13 @@ final class RedisMetricStore implements MetricStore
 
     public function setGauge(MetricDefinition $definition, array $labels, float $value): void
     {
-        $key = $this->familyKey(MetricType::Gauge, $definition->name);
+        // The DEFINITION's type, not a hardcoded Gauge. A push instrument
+        // whose value is read whole rather than accumulated may still be
+        // declared an up-down counter or a counter — a daemon reading a
+        // host's memory writes an absolute number, and what that number
+        // IS does not change because of how it reached the store. Keying
+        // by the declared type is what lets it come back out as one.
+        $key = $this->familyKey($this->scalarType($definition), $definition->name);
 
         $this->initialize($definition, $key);
         $this->connection()->hset($key, Labels::encode($labels), (string) $value);
@@ -63,7 +69,7 @@ final class RedisMetricStore implements MetricStore
 
     public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
     {
-        $key = $this->familyKey(MetricType::Gauge, $definition->name);
+        $key = $this->familyKey($this->scalarType($definition), $definition->name);
 
         $this->initialize($definition, $key);
         $this->connection()->hincrbyfloat($key, Labels::encode($labels), $delta);
@@ -184,7 +190,7 @@ final class RedisMetricStore implements MetricStore
     {
         $families = [];
 
-        foreach ([MetricType::Counter, MetricType::Gauge] as $type) {
+        foreach ([MetricType::Counter, MetricType::UpDownCounter, MetricType::Gauge] as $type) {
             foreach ($this->names($type) as $name) {
                 $family = $this->collectScalarFamily($type, $name);
 
@@ -387,6 +393,16 @@ final class RedisMetricStore implements MetricStore
     private function connection(): Connection
     {
         return $this->redis->connection($this->connection);
+    }
+
+    /**
+     * The storage namespace for a scalar push write. Histogram
+     * definitions never reach the gauge writers, but a wrong definition
+     * must not land histogram data in a scalar family.
+     */
+    private function scalarType(MetricDefinition $definition): MetricType
+    {
+        return $definition->type === MetricType::Histogram ? MetricType::Gauge : $definition->type;
     }
 
     private function familyKey(MetricType $type, string $name): string

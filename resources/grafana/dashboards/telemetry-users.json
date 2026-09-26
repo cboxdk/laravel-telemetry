@@ -151,7 +151,7 @@
   ],
   "panels": [
     {
-      "id": 219,
+      "id": 221,
       "type": "table",
       "title": "Requests for user $user ($usertype)",
       "datasource": {
@@ -191,7 +191,7 @@
       }
     },
     {
-      "id": 220,
+      "id": 222,
       "type": "table",
       "title": "Errors hit by user $user ($usertype)",
       "datasource": {
@@ -231,7 +231,7 @@
       }
     },
     {
-      "id": 221,
+      "id": 223,
       "type": "table",
       "title": "Session journey \u2014 every request in visit $sessionhash",
       "datasource": {
@@ -272,7 +272,7 @@
       "description": "session.hash from any request span follows the visitor across requests \u2014 the anonymous-user story user.id can't tell."
     },
     {
-      "id": 222,
+      "id": 224,
       "type": "table",
       "title": "Memory hogs (> $minmb MB)",
       "datasource": {
@@ -312,7 +312,7 @@
       }
     },
     {
-      "id": 223,
+      "id": 225,
       "type": "text",
       "title": "Tip",
       "gridPos": {

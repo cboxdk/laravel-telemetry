@@ -77,7 +77,7 @@ final class SqliteMetricStore implements MetricStore
         $this->run(
             'INSERT INTO telemetry_metric_series (type, name, series, value) VALUES (?, ?, ?, ?)
              ON CONFLICT(type, name, series) DO UPDATE SET value = excluded.value',
-            [MetricType::Gauge->value, $definition->name, Labels::encode($labels), $value],
+            [$this->scalarType($definition)->value, $definition->name, Labels::encode($labels), $value],
         );
     }
 
@@ -88,7 +88,7 @@ final class SqliteMetricStore implements MetricStore
         $this->run(
             'INSERT INTO telemetry_metric_series (type, name, series, value) VALUES (?, ?, ?, ?)
              ON CONFLICT(type, name, series) DO UPDATE SET value = value + excluded.value',
-            [MetricType::Gauge->value, $definition->name, Labels::encode($labels), $delta],
+            [$this->scalarType($definition)->value, $definition->name, Labels::encode($labels), $delta],
         );
     }
 
@@ -238,6 +238,16 @@ final class SqliteMetricStore implements MetricStore
                 [$definition->name, $series],
             );
         }
+    }
+
+    /**
+     * The `type` column for a scalar push write: the definition's own
+     * type, so a value set whole still exports as the instrument it was
+     * declared to be. `scalarFamily()` reads back by the same column.
+     */
+    private function scalarType(MetricDefinition $definition): MetricType
+    {
+        return $definition->type === MetricType::Histogram ? MetricType::Gauge : $definition->type;
     }
 
     private function scalarFamily(MetricDefinition $definition, ?int $since): ?MetricFamily

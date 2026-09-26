@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Cbox\Telemetry\Exceptions\InstrumentTypeMismatch;
 use Cbox\Telemetry\Exceptions\InvalidMetricName;
 use Cbox\Telemetry\Metrics\Instruments\Gauge;
-use Cbox\Telemetry\Metrics\Instruments\ObservableGauge;
+use Cbox\Telemetry\Metrics\Instruments\Observable;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
@@ -36,7 +36,7 @@ it('returns a push gauge without a callback and an observable with one', functio
     $registry = registry();
 
     expect($registry->gauge('cache.keys'))->toBeInstanceOf(Gauge::class)
-        ->and($registry->gauge('queue.depth', fn () => 42))->toBeInstanceOf(ObservableGauge::class);
+        ->and($registry->gauge('queue.depth', fn () => 42))->toBeInstanceOf(Observable::class);
 });
 
 it('collects push metrics and observable gauges together', function () {

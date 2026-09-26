@@ -263,7 +263,7 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
     stat("Jobs ok / min", f'sum(rate(queue_jobs_processed_total{{{SVC}}}[5m])) * 60', 12, 1, w=3, decimals=0),
     stat("Jobs failed (5m)", f'sum(increase(queue_jobs_failed_total{{{SVC}}}[5m]))', 15, 1, w=3, bg=True, decimals=0, thresholds=warn_at(1), zero=True),
     stat("Tasks failed (1h)", f'sum(increase(schedule_tasks_failed_total{{{SVC}}}[1h]))', 18, 1, w=3, decimals=0, thresholds=warn_at(1), zero=True),
-    stat("Host memory", 'system_memory_utilization_ratio{state="used"} * 100', 21, 1, w=3, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
+    stat("Host memory", 'system_memory_utilization_ratio{system_memory_state="used"} * 100', 21, 1, w=3, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
     timeseries("Requests by status", [target(f'sum by (http_response_status_code) (rate({REQ}_count{{{SVC}}}[$__rate_interval])) * 60', '{{http_response_status_code}}')], 0, 5, unit="reqpm", stacked=True, regex_colors=STATUS_COLORS),
     timeseries("Latency percentiles", [
         target(f'histogram_quantile(0.50, sum by (le) (rate({REQ}_bucket{{{SVC}}}[$__rate_interval])))', 'p50'),
@@ -455,13 +455,13 @@ D["mail"] = dashboard("cbox-tel-mail", "Telemetry / Mail & Notifications", [
 # ── 11 · System ──────────────────────────────────────────────────────
 D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
     stat("CPU", f'system_cpu_utilization_ratio{{{SVC}}} * 100', 0, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 70}, {"color": "red", "value": 90}])),
-    stat("Memory", 'system_memory_utilization_ratio{state="used"} * 100', 6, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
-    stat("Load 1m", 'system_cpu_load_average_ratio{period="1m"}', 12, 0, w=6),
-    stat("Disk used", 'system_filesystem_usage_bytes{state="used"} / (system_filesystem_usage_bytes{state="used"} + system_filesystem_usage_bytes{state="free"}) * 100', 18, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
+    stat("Memory", 'system_memory_utilization_ratio{system_memory_state="used"} * 100', 6, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
+    stat("Load 1m", 'system_cpu_load_average_1m', 12, 0, w=6),
+    stat("Disk used", 'system_filesystem_usage_bytes{system_filesystem_state="used"} / (system_filesystem_usage_bytes{system_filesystem_state="used"} + system_filesystem_usage_bytes{system_filesystem_state="free"}) * 100', 18, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
     row("Host", 4),
-    timeseries("Memory by state", [target('system_memory_usage_bytes', '{{state}}')], 0, 5, unit="bytes", stacked=True, colors={"used": "orange", "free": "green", "cached": "blue"}),
-    timeseries("Load averages", [target('system_cpu_load_average_ratio', '{{period}}')], 12, 5),
-    timeseries("Network I/O rate", [target('rate(system_network_io_bytes[$__rate_interval])', '{{direction}}')], 0, 13, unit="Bps"),
+    timeseries("Memory by state", [target('system_memory_usage_bytes', '{{system_memory_state}}')], 0, 5, unit="bytes", stacked=True, colors={"used": "orange", "free": "green", "cached": "blue"}),
+    timeseries("Load averages", [target('system_cpu_load_average_1m', '1m'), target('system_cpu_load_average_5m', '5m'), target('system_cpu_load_average_15m', '15m')], 12, 5),
+    timeseries("Network I/O rate", [target('rate(system_network_io_bytes_total[$__rate_interval])', '{{network_io_direction}}')], 0, 13, unit="Bps"),
     timeseries("Monitored process groups", [target('process_memory_rss_bytes', '{{process}}')], 12, 13, unit="bytes",
                 description="telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."),
     row("Workers", 21),

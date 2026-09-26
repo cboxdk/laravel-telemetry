@@ -123,3 +123,20 @@ it('serializes events as trace-correlated log records', function () {
         ->and($record['traceId'])->toBe('0af7651916cd43dd8448eb211c80319c')
         ->and($record['attributes'][0])->toBe(['key' => 'workers', 'value' => ['intValue' => '5']]);
 });
+
+it('serializes an up-down counter as a non-monotonic sum', function () {
+    // `isMonotonic: false` is the whole difference, and the only thing
+    // that tells a backend these may be added across hosts but not rate()'d.
+    $payload = serializer()->metrics([
+        new MetricFamily(
+            new MetricDefinition('system.memory.usage', MetricType::UpDownCounter, 'Memory in use', 'By'),
+            [new Sample(['system.memory.state' => 'used'], 512.0)],
+        ),
+    ]);
+
+    $metric = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'][0];
+
+    expect($metric)->toHaveKey('sum')
+        ->and($metric['sum']['isMonotonic'])->toBeFalse()
+        ->and($metric['sum']['aggregationTemporality'])->toBe(2);
+});

@@ -405,3 +405,29 @@ it('renders a large family without quadratic collision checking', function () {
     expect(substr_count($output, '# TYPE '))->toBe(10_000)
         ->and($elapsed)->toBeLessThan(2.0);
 });
+
+it('renders an up-down counter as a gauge, with no _total', function () {
+    // Prometheus has no up-down counter; the OTLP translation maps a
+    // non-monotonic sum onto a gauge. The distinction is not lost — it
+    // survives in the OTLP payload, which is where it can.
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('system.memory.usage', MetricType::UpDownCounter, 'Memory in use', 'By'),
+            [new Sample(['system.memory.state' => 'used'], 512.0)],
+        ),
+    ]);
+
+    expect($output)->toContain('# TYPE system_memory_usage_bytes gauge')
+        ->not->toContain('_total');
+});
+
+it('gives a dimensionless up-down counter the _ratio suffix, like the gauge it becomes', function () {
+    $output = (new PrometheusRenderer)->render([
+        new MetricFamily(
+            new MetricDefinition('pool.saturation', MetricType::UpDownCounter, 'How full', '1'),
+            [new Sample([], 0.5)],
+        ),
+    ]);
+
+    expect($output)->toContain("pool_saturation_ratio 0.5\n");
+});

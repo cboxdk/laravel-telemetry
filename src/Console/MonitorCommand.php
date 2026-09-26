@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Console;
 use Cbox\SystemMetrics\DTO\Metrics\Cpu\CpuSnapshot;
 use Cbox\SystemMetrics\ProcessMetrics;
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
@@ -182,7 +183,11 @@ final class MonitorCommand extends Command
         }
 
         if (($memory = $metrics::memory()->getValueOr(null)) !== null) {
-            $gauge = $telemetry->gauge('system.memory.usage', description: 'Memory in use by state', unit: 'By');
+            // semconv shapes, matching the scrape-time provider exactly.
+            // The same metric name declaring two different instrument
+            // types depending on which collector wrote it would be worse
+            // than either choice.
+            $gauge = $telemetry->pushed('system.memory.usage', MetricType::UpDownCounter, 'Memory in use by state', 'By');
             $gauge->set((float) $memory->usedBytes, $host + ['system.memory.state' => 'used']);
             $gauge->set((float) $memory->freeBytes, $host + ['system.memory.state' => 'free']);
             $gauge->set((float) $memory->cachedBytes, $host + ['system.memory.state' => 'cached']);
@@ -192,20 +197,25 @@ final class MonitorCommand extends Command
         }
 
         if (($load = $metrics::loadAverage()->getValueOr(null)) !== null) {
-            $gauge = $telemetry->gauge('system.cpu.load_average', description: 'System load average', unit: '1');
-            $gauge->set($load->oneMinute, $host + ['period' => '1m']);
-            $gauge->set($load->fiveMinutes, $host + ['period' => '5m']);
-            $gauge->set($load->fifteenMinutes, $host + ['period' => '15m']);
+            // Three metrics, as semconv names them — and unit `{thread}`,
+            // not `1`. A load average was never dimensionless, and `1`
+            // earned it a `_ratio` suffix on a number that routinely
+            // reads 4.
+            foreach (['1m' => $load->oneMinute, '5m' => $load->fiveMinutes, '15m' => $load->fifteenMinutes] as $window => $value) {
+                $telemetry
+                    ->gauge('system.cpu.load_average.'.$window, description: "System load average over {$window}", unit: '{thread}')
+                    ->set($value, $host);
+            }
         }
 
         if (($storage = $metrics::storage()->getValueOr(null)) !== null) {
-            $gauge = $telemetry->gauge('system.filesystem.usage', description: 'Filesystem bytes by state', unit: 'By');
+            $gauge = $telemetry->pushed('system.filesystem.usage', MetricType::UpDownCounter, 'Filesystem bytes by state', 'By');
             $gauge->set((float) $storage->usedBytes(), $host + ['system.filesystem.state' => 'used']);
             $gauge->set((float) $storage->availableBytes(), $host + ['system.filesystem.state' => 'free']);
         }
 
         if (($network = $metrics::network()->getValueOr(null)) !== null) {
-            $gauge = $telemetry->gauge('system.network.io', description: 'Cumulative network bytes by direction (use rate())', unit: 'By');
+            $gauge = $telemetry->pushed('system.network.io', MetricType::Counter, 'Network bytes by direction since boot', 'By');
             $gauge->set((float) $network->totalBytesReceived(), $host + ['network.io.direction' => 'receive']);
             $gauge->set((float) $network->totalBytesSent(), $host + ['network.io.direction' => 'transmit']);
         }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
+use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -253,9 +254,14 @@ it('samples host and process metrics via telemetry:monitor --once', function () 
 
     $families = collect(Telemetry::collect())->keyBy(fn ($family) => $family->name());
 
-    expect($families)->toHaveKeys(['system.memory.usage', 'system.cpu.load_average', 'process.count'])
+    expect($families)->toHaveKeys(['system.memory.usage', 'system.cpu.load_average.1m', 'process.count'])
         ->and($families['process.count']->samples[0]->labels['process'])->toBe('php-tests')
-        ->and($families['process.count']->samples[0]->value)->toBeGreaterThanOrEqual(1.0);
+        ->and($families['process.count']->samples[0]->value)->toBeGreaterThanOrEqual(1.0)
+        // The daemon and the scrape-time provider must declare the same
+        // shapes for the same names, or one collection mode silently
+        // contradicts the other.
+        ->and($families['system.memory.usage']->type())->toBe(MetricType::UpDownCounter)
+        ->and($families['system.cpu.load_average.1m']->type())->toBe(MetricType::Gauge);
 
     // Disk + network land when the platform source supports them.
     if (isset($families['system.filesystem.usage'])) {

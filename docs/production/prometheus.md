@@ -95,7 +95,8 @@ Its gauges carry a `host` label. They have to: the store is shared by the
 fleet, so without one every host would overwrite the same series, and the
 `host.name` resource is attached by whoever *exports* — which under
 `onOneServer` is not whoever measured. Aggregate across the fleet with
-`sum by (state) (system_memory_usage)` and drill in with `{host="..."}`.
+`sum by (system_memory_state) (system_memory_usage_bytes)` and drill in with
+`{host="..."}`.
 
 ## Route caching
 

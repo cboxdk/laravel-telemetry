@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Facade;
 
 /**
  * @method static \Cbox\Telemetry\Metrics\Instruments\Counter counter(string $name, string $description = '', string $unit = '')
- * @method static \Cbox\Telemetry\Metrics\Instruments\Gauge|\Cbox\Telemetry\Metrics\Instruments\ObservableGauge gauge(string $name, \Closure|null $callback = null, string $description = '', string $unit = '')
+ * @method static \Cbox\Telemetry\Metrics\Instruments\Gauge|\Cbox\Telemetry\Metrics\Instruments\Observable gauge(string $name, \Closure|null $callback = null, string $description = '', string $unit = '')
+ * @method static \Cbox\Telemetry\Metrics\Instruments\Gauge pushed(string $name, \Cbox\Telemetry\Metrics\MetricType $type = \Cbox\Telemetry\Metrics\MetricType::Gauge, string $description = '', string $unit = '')
+ * @method static \Cbox\Telemetry\Metrics\Instruments\Observable observable(string $name, \Closure $callback, \Cbox\Telemetry\Metrics\MetricType $type = \Cbox\Telemetry\Metrics\MetricType::Gauge, string $description = '', string $unit = '')
  * @method static \Cbox\Telemetry\Metrics\Instruments\Histogram histogram(string $name, list<float>|null $buckets = null, string $description = '', string $unit = '')
  * @method static mixed span(string $name, \Closure|null $callback = null, array<string, scalar|null> $attributes = [], \Cbox\Telemetry\Tracing\SpanKind $kind = \Cbox\Telemetry\Tracing\SpanKind::Internal)
  * @method static void event(string $name, array<string, scalar|null> $attributes = [])
