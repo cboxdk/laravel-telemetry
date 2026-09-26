@@ -167,6 +167,22 @@ final class TelemetryFake extends TelemetryManager
     }
 
     /**
+     * The total of everything recorded into a histogram series.
+     *
+     * `histogramCount()` answers how many observations there were;
+     * this answers what they added up to, which is what a test asserting
+     * a converted or derived value actually needs.
+     *
+     * @param  array<string, scalar|null>  $labels
+     */
+    public function histogramSum(string $name, array $labels = []): float
+    {
+        $sample = $this->matchSample($this->samples($name, MetricType::Histogram), $labels);
+
+        return $sample instanceof HistogramSample ? $sample->sum : 0.0;
+    }
+
+    /**
      * Every metric series recorded so far — the metric counterpart to
      * `recordedSpans()`/`recordedEvents()`.
      *

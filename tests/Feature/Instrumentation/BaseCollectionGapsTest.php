@@ -138,6 +138,7 @@ it('counts dispatched jobs and measures queue wait time on the worker side', fun
     // Worker-side wait time from a payload carrying dispatched_at:
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\Waited');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([
@@ -225,6 +226,7 @@ it('enriches user attribution through the opt-in resolver', function () {
 it('self-reports worker memory after each job for leak tracking', function () {
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\LeakyJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);

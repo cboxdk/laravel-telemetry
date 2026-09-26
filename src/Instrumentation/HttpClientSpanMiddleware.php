@@ -16,6 +16,7 @@ use GuzzleHttp\TransferStats;
 use Illuminate\Contracts\Container\Container;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\UriInterface;
 use Throwable;
 
 /**
@@ -124,9 +125,37 @@ final class HttpClientSpanMiddleware
                 'http.request.method' => HttpMethod::normalize($request->getMethod()),
                 'http.request.method_original' => HttpMethod::original($request->getMethod()),
                 'server.address' => $host,
+                'server.port' => self::port($uri),
+                'url.scheme' => $uri->getScheme() !== '' ? $uri->getScheme() : null,
                 'url.path' => $path,
+                // Required by semconv, and the attribute that turns "we
+                // called stripe.com 400 times" into "we called THIS". The
+                // redaction engine is what makes it safe to carry: it
+                // strips URL userinfo and redacts sensitive query
+                // parameters by decoded name, on every value, before any
+                // exporter sees it.
+                'url.full' => (string) $uri,
             ], static fn ($value) => $value !== null),
         );
+    }
+
+    /**
+     * The port, when it is not the scheme's own. semconv wants it, and a
+     * default port repeated on every span is noise that says nothing.
+     */
+    private static function port(UriInterface $uri): ?int
+    {
+        $port = $uri->getPort();
+
+        if ($port !== null) {
+            return $port;
+        }
+
+        return match ($uri->getScheme()) {
+            'https' => 443,
+            'http' => 80,
+            default => null,
+        };
     }
 
     /**
@@ -264,6 +293,9 @@ final class HttpClientSpanMiddleware
             ->record($span->durationMs() / 1000, array_filter([
                 'http.request.method' => (string) ($span->attributes()['http.request.method'] ?? HttpMethod::OTHER),
                 'server.address' => $label,
+                // Required by semconv and bounded by construction: a
+                // handful of ports, not a dimension that can grow.
+                'server.port' => isset($span->attributes()['server.port']) ? (string) $span->attributes()['server.port'] : null,
                 // Omitted when there was no response. `0` is not a status
                 // code; a connection refused and a server answering zero
                 // are different events, and only one of them is real.
@@ -272,6 +304,65 @@ final class HttpClientSpanMiddleware
                 // always-present empty label would double the series count
                 // of every healthy endpoint for nothing.
                 'error.type' => $errorType,
+            ], static fn (?string $value): bool => $value !== null));
+
+        $this->recordConnectionSetup($telemetry, $span, $label);
+    }
+
+    /**
+     * How long it took to GET a connection, as its own histogram.
+     *
+     * The request duration cannot answer this. A call that took 300ms
+     * might have spent 290 of them on a TLS handshake to a machine three
+     * regions away, or 290 waiting for the far end to think — the same
+     * number, opposite fixes. The phases are already on the span, but a
+     * span is a sample: to say "this one host's setup to this one
+     * endpoint is twenty times everybody else's", which is what a
+     * mis-provisioned zone looks like, you need every observation, and
+     * that means a metric.
+     *
+     * Only for connections actually established. A reused one reports a
+     * setup of zero, and folding those in would drag every percentile
+     * toward zero in proportion to how well pooling is working — the
+     * healthier the client, the more it would hide.
+     */
+    private function recordConnectionSetup(TelemetryManager $telemetry, Span $span, string $host): void
+    {
+        $attributes = $span->attributes();
+
+        if (($attributes['http.client.connection_reused'] ?? null) !== false) {
+            return;
+        }
+
+        $setupMs = 0.0;
+
+        foreach (['http.client.dns_ms', 'http.client.tcp_ms', 'http.client.tls_ms', 'http.client.connect_ms'] as $phase) {
+            $value = $attributes[$phase] ?? null;
+
+            if (is_int($value) || is_float($value)) {
+                $setupMs += (float) $value;
+            }
+        }
+
+        if ($setupMs <= 0.0) {
+            return;
+        }
+
+        $telemetry
+            ->histogram(
+                'http.client.connection.duration',
+                buckets: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+                description: 'Time to establish an outgoing HTTP connection (DNS + TCP + TLS)',
+                unit: 's',
+            )
+            ->record($setupMs / 1000, array_filter([
+                'server.address' => $host,
+                'url.scheme' => isset($attributes['url.scheme']) ? (string) $attributes['url.scheme'] : null,
+                // Which HTTP version, because a fleet half on h2 and half
+                // falling back to 1.1 is its own answer.
+                'network.protocol.version' => isset($attributes['network.protocol.version'])
+                    ? (string) $attributes['network.protocol.version']
+                    : null,
             ], static fn (?string $value): bool => $value !== null));
     }
 

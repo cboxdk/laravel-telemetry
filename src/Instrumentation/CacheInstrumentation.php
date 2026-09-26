@@ -9,8 +9,13 @@ use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Closure;
+use Illuminate\Cache\Events\CacheFailedOver;
 use Illuminate\Cache\Events\CacheFlushed;
+use Illuminate\Cache\Events\CacheFlushFailed;
 use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Cache\Events\CacheLocksFlushed;
+use Illuminate\Cache\Events\CacheLocksFlushFailed;
 use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Cache\Events\ForgettingKey;
 use Illuminate\Cache\Events\KeyForgetFailed;
@@ -23,6 +28,7 @@ use Illuminate\Cache\Events\WritingKey;
 use Illuminate\Cache\Events\WritingManyKeys;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
+use Throwable;
 
 /**
  * Cache instrumentation, two independent modes:
@@ -82,6 +88,40 @@ final class CacheInstrumentation implements ManagesRequestState
                 ->inc(1, ['operation' => 'flush', 'store' => $event->storeName ?? 'default']) : null);
         });
 
+        // Failures of the operations that are supposed to be invisible.
+        //
+        // A cache that failed over answered the request — the fallback
+        // worked, nothing threw, no error rate moved — and the only trace
+        // of the primary store dying is this. It is the purest form of
+        // the problem this package exists for: a dependency is gone and
+        // the application is too well written to notice.
+        //
+        // A flush or a lock-flush that failed is the other direction: the
+        // operation was supposed to remove something and did not, so what
+        // shows up later is stale data, or two jobs that were meant to be
+        // mutually exclusive running at once. Neither reads as a cache
+        // problem by the time you see it.
+        $this->listenIfPresent($events, CacheFailedOver::class, fn (object $event): array => [
+            'cache.operation' => 'failover',
+            'store' => $this->storeOf($event),
+            'error.type' => property_exists($event, 'exception') && $event->exception instanceof Throwable ? $event->exception::class : 'unknown',
+        ]);
+
+        $this->listenIfPresent($events, CacheFlushFailed::class, fn (object $event): array => [
+            'cache.operation' => 'flush_failed',
+            'store' => $this->storeOf($event),
+        ]);
+
+        $this->listenIfPresent($events, CacheLocksFlushed::class, fn (object $event): array => [
+            'cache.operation' => 'locks_flushed',
+            'store' => $this->storeOf($event),
+        ]);
+
+        $this->listenIfPresent($events, CacheLocksFlushFailed::class, fn (object $event): array => [
+            'cache.operation' => 'locks_flush_failed',
+            'store' => $this->storeOf($event),
+        ]);
+
         if ($spans) {
             $events->listen(RetrievingKey::class, fn (RetrievingKey $event) => $this->begin($event->storeName, $event->key));
             $events->listen(RetrievingManyKeys::class, function (RetrievingManyKeys $event) {
@@ -97,6 +137,53 @@ final class CacheInstrumentation implements ManagesRequestState
             });
             $events->listen(ForgettingKey::class, fn (ForgettingKey $event) => $this->begin($event->storeName, $event->key));
         }
+    }
+
+    /**
+     * Listen for an event that may not exist on this Laravel version, and
+     * record it as a counter plus an annotation.
+     *
+     * The package supports two majors and these arrived in the newer one.
+     * A `listen()` on a missing class is harmless — nothing ever
+     * dispatches it — but the closure's parameter type would be, so the
+     * handler takes `object` and reads what it needs defensively.
+     *
+     * @param  Closure(object): array<string, scalar|null>  $attributes
+     */
+    private function listenIfPresent(Dispatcher $events, string $event, Closure $attributes): void
+    {
+        if (! class_exists($event)) {
+            return;
+        }
+
+        $events->listen($event, function (object $fired) use ($attributes) {
+            FailSafe::guard(function () use ($fired, $attributes) {
+                $labels = $attributes($fired);
+                $store = (string) ($labels['store'] ?? 'default');
+
+                if (in_array($store, $this->ignoreStores, true)) {
+                    return;
+                }
+
+                $telemetry = $this->telemetry();
+
+                // These are rare and decisive, so unlike the hit/miss
+                // counters they are recorded whether or not the volume
+                // counters are switched on. Nobody turns cache metrics
+                // off in order to stop hearing that their cache died.
+                $telemetry->counter('cache.operations', 'Cache operations by outcome')
+                    ->inc(1, ['operation' => $labels['cache.operation'] ?? 'unknown', 'store' => $store]);
+
+                $telemetry->event('cache.'.($labels['cache.operation'] ?? 'unknown'), $labels);
+            });
+        });
+    }
+
+    private function storeOf(object $event): string
+    {
+        $store = property_exists($event, 'storeName') ? $event->storeName : null;
+
+        return is_string($store) && $store !== '' ? $store : 'default';
     }
 
     private function begin(?string $store, string $key): void

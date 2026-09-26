@@ -79,6 +79,7 @@ it('reports worker memory as a bounded distribution, not a series per pid', func
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -103,6 +104,7 @@ it('reports worker memory as a bounded distribution, not a series per pid', func
     // and completion is latched per attempt so reusing this one counts once.
     $second = Mockery::mock(Job::class);
     $second->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $second->shouldReceive('isReleased')->andReturn(false);
     $second->shouldReceive('getQueue')->andReturn('default');
     $second->shouldReceive('attempts')->andReturn(1);
     $second->shouldReceive('payload')->andReturn([]);
@@ -127,6 +129,7 @@ it('closes out and ships a job killed by its timeout', function () {
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\SlowJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -169,6 +172,7 @@ it('hands a failed job\'s dimensions to whoever reports THAT exception', functio
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\SelfFailingJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -198,6 +202,7 @@ it('does not give one failure\'s dimensions to a different exception', function 
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\SelfFailingJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -230,6 +235,7 @@ it('does the same for an attempt released for retry', function () {
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\\Jobs\\RetryingJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -270,6 +276,7 @@ it('counts one attempt once, even when Laravel reports it failed and processed',
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfFailingJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);

@@ -17,17 +17,29 @@ use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanLink;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Closure;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Queue\Events\JobAttempted;
+use Illuminate\Queue\Events\JobDebounced;
 use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobInterrupted;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobReleasedAfterException;
+use Illuminate\Queue\Events\JobRetryRequested;
 use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Queue\Events\QueueBusy;
+use Illuminate\Queue\Events\QueueFailedOver;
+use Illuminate\Queue\Events\UniqueJobSkipped;
+use Illuminate\Queue\Events\WorkerInterrupted;
+use Illuminate\Queue\Events\WorkerPausing;
+use Illuminate\Queue\Events\WorkerQueuePaused;
+use Illuminate\Queue\Events\WorkerQueueResumed;
+use Illuminate\Queue\Events\WorkerResuming;
+use Illuminate\Queue\Events\WorkerStarting;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Queue\QueueManager;
 use Throwable;
@@ -238,7 +250,98 @@ final class QueueInstrumentation implements ManagesRequestState
                     ->gauge('queue.size', description: 'Queue depth reported by queue:monitor', unit: '{jobs}')
                     ->set((float) $event->size, ['connection' => $event->connection, 'queue' => $event->queue]));
             });
+
+            // A connection that failed over. The dispatch succeeded, so
+            // nothing upstream noticed — and the jobs are now on a queue
+            // nobody is watching. Same shape as the cache failover: the
+            // application handled it too well to tell anyone.
+            $this->tally($events, QueueFailedOver::class, 'failed_over', static fn (object $e): array => [
+                'connection' => is_string($e->connectionName ?? null) ? $e->connectionName : 'default',
+                'error.type' => ($e->exception ?? null) instanceof Throwable ? $e->exception::class : 'unknown',
+            ]);
+
+            // Work that did not happen, and does not look like a failure.
+            // A unique lock or a debounce window suppressing every
+            // dispatch is indistinguishable from an idle queue, right up
+            // until someone asks why the emails stopped.
+            $this->tally($events, UniqueJobSkipped::class, 'unique_skipped', $this->jobLabels(...));
+            $this->tally($events, JobDebounced::class, 'debounced', $this->jobLabels(...));
+
+            // An attempt a signal cut short. The worker was told to stop
+            // mid-job; the job is neither processed nor failed, and
+            // without this the attempt simply vanishes.
+            $this->tally($events, JobInterrupted::class, 'interrupted', $this->jobLabels(...));
+
+            // Operator-requested replay, which is not an automatic retry
+            // and should not be read as one.
+            $this->tally($events, JobRetryRequested::class, 'retry_requested', static fn (object $e): array => [
+                'connection' => 'unknown',
+                'queue' => 'unknown',
+            ]);
+
+            // Why processing stopped and started. Horizon has its own
+            // state for this; a plain worker has nothing, so a queue that
+            // went quiet at 02:00 is a mystery rather than a maintenance
+            // pause.
+            foreach ([
+                WorkerStarting::class => 'starting',
+                WorkerPausing::class => 'pausing',
+                WorkerResuming::class => 'resuming',
+                WorkerQueuePaused::class => 'queue_paused',
+                WorkerQueueResumed::class => 'queue_resumed',
+                WorkerInterrupted::class => 'interrupted',
+            ] as $event => $transition) {
+                $this->tally($events, $event, $transition, static fn (object $e): array => [
+                    'connection' => is_string($e->connectionName ?? null) ? $e->connectionName : 'default',
+                    'queue' => is_string($e->queue ?? null) ? $e->queue : 'default',
+                ], counter: 'queue.worker.transitions', label: 'transition');
+            }
         }
+    }
+
+    /**
+     * Labels for an event that carries a `job` — the ones that do not all
+     * carry it the same way, so this reads defensively.
+     *
+     * @return array<string, scalar|null>
+     */
+    private function jobLabels(object $event): array
+    {
+        $job = $event->job ?? null;
+
+        return [
+            'job.name' => is_object($job) && method_exists($job, 'resolveName') ? $job->resolveName() : 'unknown',
+            'queue' => is_object($job) && method_exists($job, 'getQueue') ? ($job->getQueue() ?? 'default') : 'default',
+        ];
+    }
+
+    /**
+     * Count an event that may not exist on this Laravel version.
+     *
+     * The package supports two majors and several of these arrived in the
+     * newer one. Listening for a class that does not exist is harmless —
+     * nothing dispatches it — but a typed closure parameter would not be,
+     * so the handler takes `object`.
+     *
+     * @param  Closure(object): array<string, scalar|null>  $labels
+     */
+    private function tally(
+        Dispatcher $events,
+        string $event,
+        string $outcome,
+        Closure $labels,
+        string $counter = 'queue.jobs',
+        string $label = 'outcome',
+    ): void {
+        if (! class_exists($event)) {
+            return;
+        }
+
+        $events->listen($event, function (object $fired) use ($labels, $counter, $label, $outcome) {
+            FailSafe::guard(fn () => $this->telemetry()
+                ->counter($counter, 'Queue lifecycle events')
+                ->inc(1, [...$labels($fired), $label => $outcome]));
+        });
     }
 
     private function jobProcessing(JobProcessing $event): void
@@ -376,10 +479,19 @@ final class QueueInstrumentation implements ManagesRequestState
 
     private function jobProcessed(JobProcessed $event): void
     {
+        // A job its middleware put back — rate limited, overlapping,
+        // debounced — is released DURING fire(), and Laravel raises
+        // JobProcessed before JobReleased regardless. Counting it as
+        // processed credited the queue with work it deliberately did not
+        // do: a rate limiter throttling everything to a trickle looked
+        // like a healthy throughput of very fast jobs.
+        //
+        // `deferred`, not `released`: `released` already means "threw and
+        // will be retried", and a deferral is not a failure.
         $this->completeJob(
             job: $event->job->resolveName(),
             queue: $event->job->getQueue(),
-            outcome: 'processed',
+            outcome: $event->job->isReleased() ? 'deferred' : 'processed',
             sync: $event->connectionName === 'sync',
             attempt: $event->job,
         );

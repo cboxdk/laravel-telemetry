@@ -14,6 +14,7 @@ function fakeJob(int $attempts = 1, string $uuid = 'fake-job-uuid'): Job
 {
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\FlakyJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('payload')->andReturn([]);
     $job->shouldReceive('attempts')->andReturn($attempts);

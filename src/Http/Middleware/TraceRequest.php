@@ -398,7 +398,23 @@ final class TraceRequest
                 'http.request.method' => HttpMethod::normalize($request->method()),
                 'http.route' => $route,
                 'http.response.status_code' => (string) $response->getStatusCode(),
+                // Required by semconv, and two values wide: it is how you
+                // find the requests that never got to HTTPS.
+                'url.scheme' => $request->getScheme(),
             ];
+
+            // semconv requires `error.type` on a request that failed. A
+            // 5xx already has a status code saying so; what the code
+            // cannot say is WHICH exception produced it, and that is the
+            // difference between one broken dependency and fifty
+            // unrelated bugs.
+            $thrown = $span->attributes()['error.type'] ?? null;
+
+            if (is_string($thrown) && $thrown !== '') {
+                $labels['error.type'] = $thrown;
+            } elseif ($response->getStatusCode() >= 500) {
+                $labels['error.type'] = (string) $response->getStatusCode();
+            }
 
             // Domain as a metric dimension. The ROUTE's domain pattern
             // ("{tenant}.app.example") wins over the concrete host, so

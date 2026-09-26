@@ -144,6 +144,7 @@ it('restores dispatcher context and origin on the worker side', function () {
 
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\SendInvoice');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('billing');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([

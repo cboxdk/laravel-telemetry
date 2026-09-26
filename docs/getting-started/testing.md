@@ -40,6 +40,8 @@ it('tracks the order', function () {
 | `assertEventNotEmitted($name)` | |
 | `assertMetricLabelValues($name, $label, $values)` | the label's observed values, exactly |
 
+Reading values: `counterValue`, `gaugeValue`, `histogramCount`, `histogramSum`.
+
 On `recordedMetrics()` (below): `assertLabelValues`, `assertSeriesCount`,
 `assertCardinalityBelow`, `assertLabelCardinalityBelow`.
 

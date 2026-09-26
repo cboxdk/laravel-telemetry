@@ -217,6 +217,7 @@ it('refuses to open a second unit inside an open one', function () {
 it('opens a queue unit for a job running in a worker', function () {
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -369,6 +370,7 @@ it('keeps no profile for a trace that resampled itself away', function () {
 it('closes a unit for an attempt that never reported an outcome', function () {
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\SelfReleasingJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);
@@ -399,12 +401,14 @@ it('closes a unit for an attempt that never reported an outcome', function () {
 it('leaves the outer job unit alone when a sync child finishes', function () {
     $outer = Mockery::mock(Job::class);
     $outer->shouldReceive('resolveName')->andReturn('App\Jobs\OuterJob');
+    $outer->shouldReceive('isReleased')->andReturn(false);
     $outer->shouldReceive('getQueue')->andReturn('default');
     $outer->shouldReceive('attempts')->andReturn(1);
     $outer->shouldReceive('payload')->andReturn([]);
 
     $child = Mockery::mock(Job::class);
     $child->shouldReceive('resolveName')->andReturn('App\Jobs\SyncChildJob');
+    $child->shouldReceive('isReleased')->andReturn(false);
     $child->shouldReceive('getQueue')->andReturn('sync');
     $child->shouldReceive('attempts')->andReturn(1);
     $child->shouldReceive('payload')->andReturn([]);
@@ -578,6 +582,7 @@ it('labels an unknown unit type the way the extension does', function () {
 it('keeps the unit open while the job runs', function () {
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\AnyJob');
+    $job->shouldReceive('isReleased')->andReturn(false);
     $job->shouldReceive('getQueue')->andReturn('default');
     $job->shouldReceive('attempts')->andReturn(1);
     $job->shouldReceive('payload')->andReturn([]);

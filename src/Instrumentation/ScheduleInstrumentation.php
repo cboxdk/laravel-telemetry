@@ -13,6 +13,7 @@ use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Console\Events\ScheduledBackgroundTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Console\Events\ScheduledTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskSkipped;
@@ -57,6 +58,36 @@ final class ScheduleInstrumentation
         $events->listen(ScheduledTaskFinished::class, $this->taskFinished(...));
         $events->listen(ScheduledTaskFailed::class, $this->taskFailed(...));
         $events->listen(ScheduledTaskSkipped::class, $this->taskSkipped(...));
+
+        if (class_exists(ScheduledBackgroundTaskFinished::class)) {
+            $events->listen(ScheduledBackgroundTaskFinished::class, $this->backgroundTaskFinished(...));
+        }
+    }
+
+    /**
+     * A `runInBackground()` task, reported by the parent process when the
+     * child exits.
+     *
+     * The spans above skip these deliberately: the work happens in
+     * another process, so there is no duration here to measure and no
+     * context to attach it to. But whether it SUCCEEDED is knowable —
+     * it is the child's exit code — and until now a background task
+     * failing every night produced no signal at all. A counter, no
+     * invented timing.
+     */
+    private function backgroundTaskFinished(ScheduledBackgroundTaskFinished $event): void
+    {
+        FailSafe::guard(function () use ($event) {
+            $exit = $event->task->exitCode;
+            $outcome = $exit === null ? 'unknown' : ($exit === 0 ? 'processed' : 'failed');
+
+            $this->telemetry()
+                ->counter("schedule.background_tasks.{$outcome}", 'Background scheduled task runs by outcome')
+                ->inc(1, [
+                    'task' => $this->taskName($event->task),
+                    'schedule.task.exit_code' => (string) ($exit ?? 'unknown'),
+                ]);
+        });
     }
 
     private function taskStarting(ScheduledTaskStarting $event): void

@@ -6,13 +6,17 @@ namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
+use Closure;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Events\DatabaseBusy;
+use Illuminate\Database\Events\DatabaseRefreshed;
 use Illuminate\Database\Events\MigrationEnded;
 use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\Events\MigrationSkipped;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Database\Events\MigrationStarted;
+use Illuminate\Database\Events\SchemaLoaded;
 use Illuminate\Foundation\Events\MaintenanceModeDisabled;
 use Illuminate\Foundation\Events\MaintenanceModeEnabled;
 
@@ -47,6 +51,25 @@ final class LifecycleInstrumentation
             $events->listen(MigrationStarted::class, $this->migrationStarted(...));
             $events->listen(MigrationEnded::class, $this->migrationEnded(...));
             $events->listen(MigrationsEnded::class, $this->migrationsEnded(...));
+
+            // A migration deliberately not run, a schema dump installed
+            // instead of a migration history, and the destructive reset.
+            // Each one changes the schema without leaving a
+            // `db.migration.ran` behind, so "what changed at 14:32"
+            // answers "nothing" for exactly the changes most likely to
+            // have caused whatever happened at 14:32.
+            $this->annotate($events, MigrationSkipped::class, 'db.migration.skipped', static fn (object $e): array => [
+                'db.migration.name' => is_string($e->migrationName ?? null) ? $e->migrationName : 'unknown',
+            ]);
+
+            $this->annotate($events, SchemaLoaded::class, 'db.schema.loaded', static fn (object $e): array => [
+                'laravel.db.connection' => is_string($e->connectionName ?? null) ? $e->connectionName : 'default',
+            ]);
+
+            $this->annotate($events, DatabaseRefreshed::class, 'db.refreshed', static fn (object $e): array => [
+                'laravel.db.connection' => is_string($e->database ?? null) ? $e->database : 'default',
+                'db.refresh.seeding' => (bool) ($e->seeding ?? false),
+            ]);
         }
 
         if ($maintenance) {
@@ -163,6 +186,24 @@ final class LifecycleInstrumentation
         // Anonymous migration classes carry the file they were declared in
         // after a null byte; the path is the only readable part.
         return basename(explode("\0", $name)[0], '.php');
+    }
+
+    /**
+     * Emit an annotation for an event that may not exist on this Laravel
+     * version. Listening for a missing class is harmless — nothing
+     * dispatches it — but a typed closure parameter would not be.
+     *
+     * @param  Closure(object): array<string, scalar|null>  $attributes
+     */
+    private function annotate(Dispatcher $events, string $event, string $name, Closure $attributes): void
+    {
+        if (! class_exists($event)) {
+            return;
+        }
+
+        $events->listen($event, function (object $fired) use ($name, $attributes) {
+            FailSafe::guard(fn () => $this->telemetry()->event($name, $attributes($fired)));
+        });
     }
 
     private function telemetry(): TelemetryManager

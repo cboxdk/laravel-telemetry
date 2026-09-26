@@ -227,6 +227,11 @@ final class Span
         }
 
         if ($fail) {
+            // semconv asks for `error.type` on anything that failed, and
+            // an attribute is the only form a backend can group or filter
+            // by — the exception event carries the same class name where
+            // only a human reading one span will find it.
+            $this->setAttribute('error.type', $exception::class);
             $this->setStatus(SpanStatus::Error, $exception->getMessage());
         }
 
