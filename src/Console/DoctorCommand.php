@@ -14,6 +14,7 @@ use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\Redactor;
+use Cbox\Telemetry\Support\SharedState;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -61,6 +62,7 @@ final class DoctorCommand extends Command
         $this->components->info('Telemetry is enabled.');
 
         $healthy = $this->checkStore();
+        $this->checkCooldownState();
         $this->checkCacheCollision();
         $this->checkRedaction();
         $this->checkProfiling();
@@ -146,6 +148,37 @@ final class DoctorCommand extends Command
      * informational, not a failure — the setup still works, it's just
      * one `cache:clear` away from an empty dashboard.
      */
+    /**
+     * Whether the circuit breaker and the report throttle mean anything
+     * on this SAPI.
+     *
+     * Both suppress work for a cooldown after a failure. Without shared
+     * memory the cooldown is per-process, and under PHP-FPM that is per
+     * request — so a dead collector is rediscovered, and its connect
+     * timeout paid, on every single request. Worth a warning: it is
+     * invisible until the day it matters.
+     */
+    private function checkCooldownState(): void
+    {
+        if (SharedState::isShared()) {
+            $this->components->twoColumnDetail('Failure cooldowns', '<fg=green>shared across the pool (APCu)</>');
+
+            return;
+        }
+
+        if (PHP_SAPI === 'cli') {
+            $this->components->twoColumnDetail('Failure cooldowns', 'per-process — correct for a long-lived worker');
+
+            return;
+        }
+
+        $this->components->twoColumnDetail('Failure cooldowns', '<fg=yellow>per-request — install ext-apcu</>');
+        $this->components->warn(
+            'Without APCu the OTLP circuit breaker and the report throttle reset every request, '
+            .'so an unreachable collector costs each request its connect timeout.',
+        );
+    }
+
     private function checkCacheCollision(): void
     {
         $store = Cast::string(config('telemetry.store'), 'redis');

@@ -58,14 +58,14 @@ it('keys on where it was thrown, not on the message', function () {
 });
 
 it('does not grow its map without bound', function () {
-    $tracked = new ReflectionProperty(FailSafe::class, 'lastReported');
+    $tracked = new ReflectionProperty(FailSafe::class, 'reported');
     $cap = (new ReflectionClassConstant(FailSafe::class, 'MAX_TRACKED'))->getValue();
 
     // Distinct throw sites are bounded by the code, but a pathological
     // one could iterate; the map resets rather than growing in a worker
     // that lives for days.
     for ($i = 0; $i < $cap + 10; $i++) {
-        $tracked->setValue(null, $tracked->getValue() + ['synthetic-'.$i => time()]);
+        $tracked->setValue(null, $tracked->getValue() + ['synthetic-'.$i => true]);
     }
 
     FailSafe::guard(static fn () => throw new RuntimeException('one more'));

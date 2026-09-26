@@ -8,6 +8,7 @@ use Cbox\Telemetry\Http\Middleware\TraceRequest;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\MySqlConnection;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -53,9 +54,23 @@ function soakRequest(TraceRequest $middleware, Connection $connection, int $i): 
 }
 
 /**
- * A plain object, not a Mockery double: Mockery retains every mock it
- * creates until close(), so ten thousand of them measured the test
- * framework's bookkeeping at 8.9KB a job and called it a leak.
+ * A real connection, not a Mockery double.
+ *
+ * Mockery records every call made to a double so `shouldHaveReceived`
+ * can assert on it later, and never releases them. Fifty thousand
+ * recorded getName()/getDriverName() calls measured at 17MB and looked
+ * exactly like a leak in this package. The connection never opens a
+ * PDO: the resolver is never called, because nothing here queries.
+ */
+function soakConnection(): Connection
+{
+    return new MySqlConnection(static fn () => null, 'shop', '', ['name' => 'mysql', 'driver' => 'mysql']);
+}
+
+/**
+ * A plain object, not a Mockery double, for the same reason: ten
+ * thousand job doubles measured the test framework's bookkeeping at
+ * 8.9KB a job and called it a leak.
  */
 function soakJobDouble(int $i): Job
 {
@@ -237,9 +252,7 @@ it('does not grow or slow down over ten thousand requests', function () {
     Telemetry::addExporter(new NullExporter);
 
     $middleware = app(TraceRequest::class);
-    $connection = Mockery::mock(Connection::class);
-    $connection->shouldReceive('getName')->andReturn('mysql');
-    $connection->shouldReceive('getDriverName')->andReturn('mysql');
+    $connection = soakConnection();
 
     $result = soak(static fn (int $i) => soakRequest($middleware, $connection, $i), 10_000);
 

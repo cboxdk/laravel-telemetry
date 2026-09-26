@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Exporters\Otlp;
 
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Support\ExportResult;
+use Cbox\Telemetry\Support\SharedState;
 use Cbox\Telemetry\Support\SignalSet;
 use Cbox\Telemetry\Support\TelemetryBatch;
 
@@ -21,11 +22,16 @@ final class OtlpExporter implements Exporter
 {
     /**
      * Circuit breaker: after a retryable failure, exports are skipped
-     * until this timestamp. Static so it survives across requests within
-     * a long-lived FPM/Octane worker — a dead collector costs each worker
-     * one timeout, not one per request.
+     * until a deadline held in SharedState, so a dead collector costs
+     * the pool one timeout per cooldown window rather than one timeout
+     * per request. A plain static would be reset by PHP-FPM between
+     * requests, which is precisely the case the breaker exists for.
+     *
+     * One key, not one per endpoint: the state is shared by the workers
+     * of a pool, and a pool runs one application with one configured
+     * endpoint.
      */
-    private static int $openUntil = 0;
+    private const CIRCUIT_KEY = 'otlp:circuit';
 
     private const DEFAULT_COOLDOWN_SECONDS = 30;
 
@@ -50,30 +56,55 @@ final class OtlpExporter implements Exporter
      */
     public static function circuitOpen(): bool
     {
-        return time() < self::$openUntil;
+        return time() < SharedState::deadline(self::CIRCUIT_KEY);
     }
 
     public function export(TelemetryBatch $batch): ExportResult
     {
-        if (time() < self::$openUntil) {
+        if (self::circuitOpen()) {
             return ExportResult::retryable('circuit open — recent transport failure');
         }
 
         $results = [];
 
-        if ($batch->spans !== []) {
-            $results[] = $this->transport->post('/v1/traces', $this->serializer->traces($batch->spans));
-        }
+        foreach ($this->requests($batch) as [$path, $payload]) {
+            $result = $this->transport->post($path, $payload);
+            $results[] = $result;
 
-        if ($batch->metrics !== []) {
-            $results[] = $this->transport->post('/v1/metrics', $this->serializer->metrics($batch->metrics));
-        }
-
-        if ($batch->events !== []) {
-            $results[] = $this->transport->post('/v1/logs', $this->serializer->logs($batch->events));
+            // Stop at the first transport-level failure. A batch carries
+            // up to three signals and the collector they all go to has
+            // just proved unreachable; sending the rest would pay the
+            // connect timeout again for a result we already know.
+            if (! $result->success && $result->retryable) {
+                break;
+            }
         }
 
         return $this->combine($results);
+    }
+
+    /**
+     * The signals in a batch, in the order they are posted.
+     *
+     * @return list<array{0: string, 1: array<string, mixed>}>
+     */
+    private function requests(TelemetryBatch $batch): array
+    {
+        $requests = [];
+
+        if ($batch->spans !== []) {
+            $requests[] = ['/v1/traces', $this->serializer->traces($batch->spans)];
+        }
+
+        if ($batch->metrics !== []) {
+            $requests[] = ['/v1/metrics', $this->serializer->metrics($batch->metrics)];
+        }
+
+        if ($batch->events !== []) {
+            $requests[] = ['/v1/logs', $this->serializer->logs($batch->events)];
+        }
+
+        return $requests;
     }
 
     /**
@@ -88,7 +119,10 @@ final class OtlpExporter implements Exporter
         foreach ($results as $result) {
             if (! $result->success) {
                 if ($result->retryable) {
-                    self::$openUntil = time() + ($result->retryAfterSeconds ?? self::DEFAULT_COOLDOWN_SECONDS);
+                    SharedState::remember(
+                        self::CIRCUIT_KEY,
+                        time() + ($result->retryAfterSeconds ?? self::DEFAULT_COOLDOWN_SECONDS),
+                    );
                 }
 
                 return $result;
@@ -109,6 +143,6 @@ final class OtlpExporter implements Exporter
      */
     public static function resetCircuit(): void
     {
-        self::$openUntil = 0;
+        SharedState::forget(self::CIRCUIT_KEY);
     }
 }

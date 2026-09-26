@@ -39,12 +39,12 @@ use Throwable;
  */
 final class FailSafe
 {
-    /** Seconds between reports of the same failure in one process. */
+    /** Seconds between reports of the same failure. */
     private const REPEAT_AFTER_SECONDS = 60;
 
     /**
      * Distinct failures tracked before the map resets. Reached only by
-     * something pathological — a failure whose message varies per call —
+     * something pathological — a failure whose origin varies per call —
      * and resetting is better than growing in a worker that lives for
      * days.
      */
@@ -54,8 +54,16 @@ final class FailSafe
 
     private static bool $handling = false;
 
-    /** @var array<string, int> failure key → unix time last reported */
-    private static array $lastReported = [];
+    /**
+     * Keys this process has reported, so flush() can clear them. The
+     * window itself lives in SharedState — a static would be discarded
+     * by PHP-FPM between requests, making the throttle "once per
+     * request", which is not a throttle at all on the paths that need
+     * one most.
+     *
+     * @var array<string, true>
+     */
+    private static array $reported = [];
 
     /**
      * @template T
@@ -81,7 +89,7 @@ final class FailSafe
         // A new handler has seen nothing yet. Without this a test, or an
         // application swapping the handler at runtime, would silently
         // receive nothing for a minute.
-        self::$lastReported = [];
+        self::flush();
     }
 
     /**
@@ -95,34 +103,62 @@ final class FailSafe
      */
     public static function flush(): void
     {
-        self::$lastReported = [];
+        foreach (array_keys(self::$reported) as $key) {
+            SharedState::forget($key);
+        }
+
+        self::$reported = [];
     }
 
     /**
-     * Once per distinct failure per minute.
+     * Once per distinct failure per minute, across the whole pool.
      *
-     * Keyed by where it was thrown and what it was, not by message: a
-     * message often carries the key, the host or the id that varied,
-     * and keying on it would defeat the throttle exactly when the
-     * failure is high-volume.
+     * Keyed by what was thrown, where it was thrown, and which of our
+     * own guards it surfaced through — not by message: a message often
+     * carries the key, the host or the id that varied, and keying on it
+     * would defeat the throttle exactly when the failure is
+     * high-volume. Including our own frame keeps two different
+     * instrumentations that fail on the same vendor line from silencing
+     * each other, which a throw-site-only key does.
      */
     private static function shouldReport(Throwable $e): bool
     {
-        $key = $e::class.'@'.$e->getFile().':'.$e->getLine();
-        $now = time();
-        $last = self::$lastReported[$key] ?? null;
+        $key = 'report:'.substr(hash('xxh128', implode('@', [
+            $e::class,
+            $e->getFile().':'.$e->getLine(),
+            self::origin($e),
+        ])), 0, 16);
 
-        if ($last !== null && $now - $last < self::REPEAT_AFTER_SECONDS) {
+        if (time() < SharedState::deadline($key)) {
             return false;
         }
 
-        if (count(self::$lastReported) >= self::MAX_TRACKED) {
-            self::$lastReported = [];
+        if (count(self::$reported) >= self::MAX_TRACKED) {
+            self::flush();
         }
 
-        self::$lastReported[$key] = $now;
+        self::$reported[$key] = true;
+        SharedState::remember($key, time() + self::REPEAT_AFTER_SECONDS);
 
         return true;
+    }
+
+    /**
+     * The first frame belonging to this package — the guard the failure
+     * came through. Falls back to the throw site for a failure raised
+     * outside any of our own calls.
+     */
+    private static function origin(Throwable $e): string
+    {
+        foreach ($e->getTrace() as $frame) {
+            $class = $frame['class'] ?? null;
+
+            if (is_string($class) && str_starts_with($class, 'Cbox\\Telemetry\\')) {
+                return $class.'::'.($frame['function'] ?? '?');
+            }
+        }
+
+        return '';
     }
 
     private static function handle(Throwable $e): void
