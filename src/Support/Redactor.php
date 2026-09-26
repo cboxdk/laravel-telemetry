@@ -795,23 +795,23 @@ final class Redactor implements RedactsTelemetry
             return $this->replacement;
         }
 
-        // Length first, and this is the one place in the pipeline where
-        // any value is bounded at all: Span::setAttribute stores what it
-        // is given, so an application that puts a megabyte in an
-        // attribute gets a megabyte through redaction, into the batch,
-        // and at a collector that will likely reject the whole thing.
+        // Redact first, truncate after. The other order is what I
+        // shipped and it was wrong: cutting at a fixed byte can remove
+        // the very character a rule needs. Pad so that
+        // `https://alice:hunter2` ends exactly at the boundary and the
+        // `@` that identifies it as userinfo is on the far side — the
+        // password then survives in full, in the output, with a
+        // `(truncated)` marker after it. The secret being short is the
+        // whole problem; my comment claimed the opposite.
         //
-        // It also makes the rest of this method affordable. Every
-        // pattern here scans the value, and several of them scale worse
-        // than linearly on a pathological one — 128KB of `a.a.a…@b.b.b…`
-        // took 374ms, at flush, on a string an attacker can put in a
-        // validation message.
-        //
-        // Before redaction rather than after, deliberately. A secret
-        // longer than this is not a realistic secret, and truncating
-        // AFTER would mean carrying the whole cost to protect against
-        // one that does not exist.
-        $value = $this->cap($value);
+        // Cost is bounded by a ceiling instead. A value past it is not
+        // scanned, because scanning it is where the pathological cases
+        // live — it is replaced outright, which is the fail-closed
+        // answer and the only safe one for something nobody can read
+        // anyway.
+        if ($this->maxValueLength > 0 && strlen($value) > $this->scanCeiling()) {
+            return $this->replacement;
+        }
 
         foreach ($this->patterns as $pattern => $replacement) {
             if (! $this->patternCompiles($pattern)) {
@@ -850,15 +850,16 @@ final class Redactor implements RedactsTelemetry
             $value = FailSafe::guard(fn (): string => ($this->custom)($key, $value) ?? $value) ?? $value;
         }
 
-        return $value;
+        return $this->cap($value);
     }
 
     /**
      * Bound a value's length, marking where it was cut.
      *
-     * The marker matters: a silently truncated value looks like a
-     * complete one, and somebody will eventually debug for an hour
-     * against a string that ends in the middle of the answer.
+     * Applied AFTER redaction, so a rule can never be defeated by the
+     * cut. The marker matters too: a silently truncated value looks
+     * like a complete one, and somebody will eventually debug for an
+     * hour against a string that ends in the middle of the answer.
      */
     private function cap(string $value): string
     {
@@ -867,6 +868,20 @@ final class Redactor implements RedactsTelemetry
         }
 
         return substr($value, 0, $this->maxValueLength).'… (truncated)';
+    }
+
+    /**
+     * How long a value may be and still be worth scanning.
+     *
+     * Sixteen times the export cap: generous enough that nothing real
+     * hits it, small enough that the quadratic corners of the pattern
+     * set stay in microseconds. Past it the value is replaced rather
+     * than scanned or truncated, because a half-scanned secret is a
+     * leak and an unscanned one is worse.
+     */
+    private function scanCeiling(): int
+    {
+        return $this->maxValueLength * 16;
     }
 
     /** @var array<string, bool> */

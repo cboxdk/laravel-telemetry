@@ -213,29 +213,73 @@ class TelemetryServiceProvider extends ServiceProvider
             return $tracer;
         });
 
-        $this->app->singleton(TelemetryManager::class, function (Application $app) {
-            $manager = new TelemetryManager(
-                enabled: (bool) $app->make('config')->get('telemetry.enabled'),
-                registry: $app->make(Registry::class),
-                tracer: $app->make(Tracer::class),
-                resource: $this->buildResource($app),
-                maxBufferedEvents: Cast::int($app->make('config')->get('telemetry.events.max_buffer'), 5000),
-                tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
-                slowRequestMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_request_ms'), 1000),
-                slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
-                redactor: $app->make(RedactsTelemetry::class),
-                selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
-            );
-
-            foreach ($this->buildExporters($app) as $exporter) {
-                $manager->addExporter($exporter);
-            }
-
-            return $manager;
-        });
+        // Wrapped, because everything else in this package assumes the
+        // manager can be had.
+        //
+        // TraceRequest takes it by constructor injection, so the
+        // container resolves it before `handle()` and its guards exist;
+        // the deferred filesystem and broadcasting extenders resolve it
+        // when the application asks for a disk or a broadcaster; the
+        // queue payload callback resolves it on dispatch, which
+        // PendingDispatch::__destruct() can reach. A binding that
+        // throws therefore fails a request, a disk, or a dispatch —
+        // guarding thirty-one call sites would be thirty-one chances to
+        // miss one.
+        //
+        // If telemetry cannot be constructed, telemetry is off. That is
+        // the same policy as every guard in the package, applied at the
+        // one place that makes it true everywhere: a disabled manager is
+        // a supported, tested state, and it needs nothing that can fail
+        // — a null store, a tracer that samples nothing, no exporters.
+        $this->app->singleton(TelemetryManager::class, fn (Application $app): TelemetryManager => FailSafe::guard(
+            fn (): TelemetryManager => $this->buildManager($app),
+        ) ?? self::disabledManager());
 
         $this->app->alias(TelemetryManager::class, 'telemetry');
 
+        $this->registerNativeRuntime();
+    }
+
+    /**
+     * A manager that records nothing and can always be built.
+     *
+     * Deliberately constructed by hand rather than resolved: the point
+     * is to need nothing from the container, because the container is
+     * what just failed.
+     */
+    private static function disabledManager(): TelemetryManager
+    {
+        return new TelemetryManager(
+            enabled: false,
+            registry: new Registry(new NullMetricStore, []),
+            tracer: new Tracer(sampleRate: 0.0),
+        );
+    }
+
+    private function buildManager(Application $app): TelemetryManager
+    {
+        $manager = new TelemetryManager(
+            enabled: (bool) $app->make('config')->get('telemetry.enabled'),
+            registry: $app->make(Registry::class),
+            tracer: $app->make(Tracer::class),
+            resource: $this->buildResource($app),
+            maxBufferedEvents: Cast::int($app->make('config')->get('telemetry.events.max_buffer'), 5000),
+            tailDetails: $app->make('config')->get('telemetry.traces.details.mode', 'always') === 'tail',
+            slowRequestMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_request_ms'), 1000),
+            slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
+            redactor: $app->make(RedactsTelemetry::class),
+            selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
+        );
+
+        foreach ($this->buildExporters($app) as $exporter) {
+            $manager->addExporter($exporter);
+        }
+
+        return $manager;
+    }
+
+    private function registerNativeRuntime(): void
+    {
         // The optional cbox_telemetry extension. Bound even when it is
         // absent — as the null implementation, so every call site is the
         // same code with and without it, and "without it" stays testable.

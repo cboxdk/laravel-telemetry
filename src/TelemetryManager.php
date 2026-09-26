@@ -1056,9 +1056,17 @@ class TelemetryManager
 
         // The redaction engine — the last hands on every attribute value
         // before an exporter sees it.
+        //
+        // A redactor that THREW is a redactor that did not redact, so
+        // the batch is dropped rather than exported. This used to fall
+        // back to the original, which meant a bug in a custom
+        // RedactsTelemetry — or in this package's own — shipped
+        // passwords to a third-party backend. Losing a batch costs a
+        // gap in a dashboard; the other costs a disclosure, and only
+        // one of those can be undone.
         if ($this->redactor !== null) {
-            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? $spans;
-            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? $events;
+            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? [];
+            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? [];
         }
 
         if ($spans === [] && $events === []) {
@@ -1092,7 +1100,7 @@ class TelemetryManager
         }
 
         if ($this->redactor !== null) {
-            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? $spans;
+            $spans = FailSafe::guard(fn (): array => $this->redactor->spans($spans)) ?? [];
         }
 
         $this->flushing = true;
@@ -1119,7 +1127,7 @@ class TelemetryManager
         }
 
         if ($this->redactor !== null) {
-            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? $events;
+            $events = FailSafe::guard(fn (): array => $this->redactor->events($events)) ?? [];
         }
 
         $this->flushing = true;

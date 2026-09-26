@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use Cbox\SystemMetrics\SystemMetrics;
+use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\TelemetryServiceProvider;
+use Cbox\Telemetry\Tracing\Tracer;
 use Illuminate\Container\Container;
 
 /**
@@ -63,6 +66,10 @@ it('builds no metric store, and opens nothing, while booting', function () {
     // in an application that may never record a metric.
     $resolved = (new ReflectionProperty(Container::class, 'resolved'))->getValue($this->app);
 
+    // Fully-qualified names matter here more than usual: without the
+    // imports above these were `Tests\Feature\Registry` and friends,
+    // which are in no container, so three of the four assertions
+    // passed by naming classes that do not exist.
     expect(array_keys($resolved))
         ->not->toContain(Registry::class)
         ->not->toContain(MetricStore::class)

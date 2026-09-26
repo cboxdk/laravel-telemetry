@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
@@ -59,6 +60,7 @@ use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Redis\Events\CommandExecuted as RedisCommandExecuted;
 use Illuminate\Redis\Events\CommandFailed as RedisCommandFailed;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 
@@ -90,6 +92,26 @@ function brokenTelemetry(): void
 
     app()->bind(TelemetryManager::class, static function (): TelemetryManager {
         throw new RuntimeException('the telemetry backend is on fire');
+    });
+}
+
+/**
+ * Break what the manager is BUILT from, rather than the manager itself.
+ *
+ * Rebinding the manager to a thrower replaces the provider's own
+ * fail-safe wrapper, so it tests the handlers' guards and nothing else.
+ * The realistic failure is a dependency: a store whose extension is
+ * missing, a redactor with a broken config, a connection that cannot
+ * be made. That is what has to leave the application standing.
+ */
+function brokenTelemetryDependency(): void
+{
+    app()->forgetInstance(TelemetryManager::class);
+    app()->forgetInstance(MetricStore::class);
+    Telemetry::clearResolvedInstances();
+
+    app()->bind(MetricStore::class, static function (): MetricStore {
+        throw new RuntimeException('the metric store cannot be built here');
     });
 }
 
@@ -235,4 +257,38 @@ it('survives a query event with a connection that answers nothing', function ():
     });
 
     expect($caught)->not->toBeEmpty();
+});
+
+it('serves the request when the manager cannot be built at all', function (): void {
+    // The failure the event-dispatch suite above cannot see. TraceRequest
+    // takes the manager by CONSTRUCTOR injection, so the container
+    // resolves it before `handle()` and every guard inside it — a
+    // binding that throws fails the request before this package has had
+    // a chance to swallow anything.
+    //
+    // Same for the deferred filesystem and broadcasting extenders, and
+    // for the queue payload callback, which PendingDispatch::__destruct()
+    // can reach. Thirty-one guarded call sites do not help when the
+    // constructor is the thing that throws.
+    Route::middleware('web')->get('/orders', fn () => 'ok');
+
+    brokenTelemetryDependency();
+
+    $this->get('/orders')->assertOk()->assertSee('ok');
+});
+
+it('records nothing rather than half of something when the manager is broken', function (): void {
+    // "Telemetry is off" is the policy, so the fallback must be inert
+    // rather than partly wired — a manager that still holds an exporter
+    // would ship empty batches forever.
+    brokenTelemetryDependency();
+
+    expect(app(TelemetryManager::class)->enabled())->toBeFalse();
+
+    // And every ordinary call on it has to be safe, because the whole
+    // package will keep calling one.
+    app(TelemetryManager::class)->counter('orders.created')->inc();
+    app(TelemetryManager::class)->flush();
+
+    expect(app(TelemetryManager::class)->collect())->toBe([]);
 });

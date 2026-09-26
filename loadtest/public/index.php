@@ -19,6 +19,7 @@ declare(strict_types=1);
  * built-in server is a property of the server.
  */
 
+use Cbox\Telemetry\TelemetryServiceProvider;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -35,7 +36,7 @@ putenv('APP_KEY=base64:'.base64_encode(str_repeat('a', 32)));
 
 $app = Testbench::create(
     basePath: __DIR__.'/../workbench',
-    options: ['extra' => ['providers' => [Cbox\Telemetry\TelemetryServiceProvider::class]]],
+    options: ['extra' => ['providers' => [TelemetryServiceProvider::class]]],
 );
 
 $app->make(Kernel::class)->bootstrap();

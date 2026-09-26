@@ -68,3 +68,34 @@ it('can have the cap turned off by an operator who means it', function () {
     expect(Redactor::fromConfig(['max_value_length' => 0] + config('telemetry.redaction'))
         ->value('log.context.message', $long))->toBe($long);
 });
+
+it('does not let the truncation boundary split a secret', function () {
+    // Codex found this in the commit that introduced the cap. Pad so
+    // `https://alice:hunter2` ends exactly at the boundary and the `@`
+    // that identifies it as userinfo falls on the far side: cutting
+    // first removed the evidence, and the password came out in full
+    // with a `(truncated)` marker after it.
+    //
+    // The secret being SHORT is the whole problem. My comment claimed
+    // the opposite — that a secret longer than the cap is unrealistic —
+    // which is true and beside the point.
+    $cap = 4096;
+    $credential = 'https://alice:hunter2';
+    $padding = str_repeat('x', $cap - strlen($credential));
+
+    $out = Redactor::fromConfig(config('telemetry.redaction'))
+        ->value('log.context.message', $padding.$credential.'@api.test/charges');
+
+    expect($out)->not->toContain('hunter2');
+});
+
+it('replaces a value too long to scan rather than scanning half of it', function () {
+    // Past the ceiling the value is not truncated, it is replaced. A
+    // half-scanned secret is a leak and an unscanned one is worse, and
+    // nobody was going to read a 64KB attribute anyway.
+    $out = Redactor::fromConfig(config('telemetry.redaction'))
+        ->value('log.context.message', str_repeat('x', 4096 * 16 + 1).'password=hunter2');
+
+    expect($out)->toBe('[REDACTED]')
+        ->not->toContain('hunter2');
+});
