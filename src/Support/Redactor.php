@@ -332,6 +332,17 @@ final class Redactor implements RedactsTelemetry
      *
      * @var list<string>
      */
+    /**
+     * Trailing words that describe a parameter instead of naming it,
+     * and are dropped before the credential words are looked for.
+     *
+     * `aws_access_key_id` is an access key. `token_count` is not a
+     * token, which is why `count` is not here.
+     *
+     * @var list<string>
+     */
+    public const DESCRIPTIVE_SUFFIXES = ['id', 'value', 'header', 'param'];
+
     public const CREDENTIAL_QUALIFIERS = [
         'private', 'secret', 'api', 'access', 'auth', 'client', 'app',
         'encryption', 'signing', 'consumer', 'shared', 'master',
@@ -352,72 +363,135 @@ final class Redactor implements RedactsTelemetry
      */
     public static function parameterIsCredential(string $name, bool $allowAmbiguous = true): bool
     {
-        // Decode and strip only when there is something to decode or strip:
-        // almost every name is plain, and this runs once per pair.
+        $segments = self::segments($name);
+
+        if ($segments === []) {
+            return false;
+        }
+
+        // A trailing word that describes the parameter rather than
+        // naming it. `aws_access_key_id` IS an access key; the `id` is
+        // noise, and stripping it is what lets the suffix rules see
+        // the word that matters.
+        //
+        // Deliberately four words and not "any trailing segment": the
+        // suite already protects `token_count`, `secret_count`,
+        // `api_key_name` and `signature_required`, which are a count
+        // of tokens, a count of secrets, the NAME of a key and a
+        // boolean. Matching a credential word anywhere in the name
+        // caught all four, which is how the first version of this
+        // broke them.
+        if (count($segments) > 1 && in_array(end($segments), self::DESCRIPTIVE_SUFFIXES, true)) {
+            array_pop($segments);
+        }
+
+        $whole = implode('_', $segments);
+        $joined = implode('', $segments);
+
+        foreach (self::CREDENTIAL_PARAMETERS as $credential) {
+            // Whole, as a suffix, as any segment, or run together.
+            // `ACCESSTOKEN` has no separator and no capital to split
+            // on, so only the joined comparison sees it — and a name
+            // shouted in capitals is what a hand-written query string
+            // looks like.
+            $compact = str_replace('_', '', $credential);
+
+            if ($whole === $credential
+                || str_ends_with($whole, '_'.$credential)
+                || $joined === $compact) {
+                return true;
+            }
+
+            // A single run with nothing to split on — `ACCESSTOKEN`,
+            // `myapikey` — matched as a suffix of the run itself.
+            //
+            // Only for a name that had no separator at all (anything
+            // else the checks above already saw) and only for words of
+            // five characters or more: `sig`, `jwt` and `otp` as a
+            // bare suffix would start finding them inside ordinary
+            // words, and a redactor that eats real data is one that
+            // gets switched off.
+            if (count($segments) === 1 && strlen($compact) >= 5 && str_ends_with($joined, $compact)) {
+                return true;
+            }
+        }
+
+        if (! $allowAmbiguous) {
+            return false;
+        }
+
+        foreach (self::AMBIGUOUS_PARAMETERS as $ambiguous) {
+            if ($whole === $ambiguous) {
+                return true;
+            }
+
+            // At the END, behind a word that settles it — and the
+            // end is after the descriptive suffix has been dropped,
+            // which is what lets `AWSAccessKeyId` through as
+            // `aws access key`.
+            //
+            // Not anywhere in the name: `api_key_name` is the NAME of
+            // a key rather than a key, and a rule that looked at every
+            // position took it.
+            $last = count($segments) - 1;
+
+            if ($last > 0
+                && $segments[$last] === $ambiguous
+                && in_array($segments[$last - 1], self::CREDENTIAL_QUALIFIERS, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A parameter name reduced to its words.
+     *
+     * Every spelling of the same parameter has to arrive here as the
+     * same list, because an application does not control what a
+     * third-party API calls its token and an attacker picks the
+     * spelling deliberately. All of these are `access token`:
+     *
+     *     access_token   access-token   access.token
+     *     accessToken    x-accessToken  ACCESSTOKEN
+     *     access+token   access%20token token[0]
+     *
+     * `+` and a literal space because PHP parses both as a separator
+     * in a query string, `%xx` because the decoded name is the one the
+     * receiving application reads, and the bracket truncation because
+     * `token[a][b]` is the parameter `token` while
+     * `filters[postal_code]` is the parameter `filters`.
+     *
+     * @return list<string>
+     */
+    private static function segments(string $name): array
+    {
         if (str_contains($name, '%')) {
             $name = rawurldecode($name);
         }
 
-        $original = $name;
-        $name = strtolower($name);
-
-        // Truncate at the FIRST bracket rather than stripping trailing levels
-        // with a regex. `(?:\[[^\]]*\])+$` is quadratic on a name that opens
-        // brackets and never closes them — 20k of them took 67ms and 100k over
-        // a second, with no PCRE error to trip the fail-closed guard, so it
-        // was a denial of service reachable from a query string. The root name
-        // is what matters anyway: `token[a][b]` is `token`, and
-        // `filters[postal_code]` is `filters`.
+        // At the FIRST bracket, not by stripping trailing levels with
+        // a regex: `(?:\[[^\]]*\])+$` is quadratic on a name that
+        // opens brackets and never closes them — 100k of them took
+        // over a second, with no PCRE error to trip the fail-closed
+        // guard, which made it a denial of service reachable from a
+        // query string.
         $bracket = strpos($name, '[');
 
         if ($bracket !== false) {
             $name = substr($name, 0, $bracket);
         }
 
-        // `-` and `.` separate a name the way `_` does, so a header-ish
-        // spelling counts: `x-api-key` is `x_api_key`.
-        $name = strtr($name, ['-' => '_', '.' => '_']);
+        // Split on a capital BEFORE lowercasing, and regardless of
+        // whether the name already has separators: `x-accessToken` has
+        // both, and bailing out on the `-` left the camel hump unsplit.
+        $split = preg_replace('/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/', '_', $name);
 
-        // And so does a capital. `accessToken` is the same parameter as
-        // `access_token` to every application that reads it, and was not
-        // to this function — which mattered because camelCase is what a
-        // JavaScript-facing API uses, and those are exactly the URLs an
-        // application does not control.
-        //
-        // Done on the ORIGINAL spelling, since $name is lowercased above.
-        $name = self::splitCamelCase($name, $original);
+        $name = strtolower(is_string($split) ? $split : $name);
+        $name = strtr($name, ['-' => '_', '.' => '_', '+' => '_', ' ' => '_']);
 
-        if ($allowAmbiguous) {
-            foreach (self::AMBIGUOUS_PARAMETERS as $ambiguous) {
-                if ($name === $ambiguous) {
-                    return true;
-                }
-
-                // As a suffix ONLY behind a qualifier that settles it.
-                // `private_key` is a credential and `sort_key` is a sort
-                // order; `client_code` is an OAuth code and `postal_code`
-                // is an address. Matching every suffix caught all four,
-                // which is how the first version of this broke a test
-                // written to protect exactly those two.
-                if (! str_ends_with($name, '_'.$ambiguous)) {
-                    continue;
-                }
-
-                $qualifier = substr($name, 0, -strlen($ambiguous) - 1);
-
-                if (in_array($qualifier, self::CREDENTIAL_QUALIFIERS, true)) {
-                    return true;
-                }
-            }
-        }
-
-        foreach (self::CREDENTIAL_PARAMETERS as $credential) {
-            if ($name === $credential || str_ends_with($name, '_'.$credential)) {
-                return true;
-            }
-        }
-
-        return false;
+        return array_values(array_filter(explode('_', $name), static fn (string $part): bool => $part !== ''));
     }
 
     /**
@@ -586,26 +660,6 @@ final class Redactor implements RedactsTelemetry
         return preg_match('/[a-z]/', $value) === 1
             && preg_match('/[A-Z]/', $value) === 1
             && preg_match('/[0-9]/', $value) === 1;
-    }
-
-    /**
-     * `accessToken` → `access_token`, using the original spelling to see
-     * the capitals that lowercasing has already removed.
-     *
-     * Only when the lowercased name has no separators of its own: a name
-     * that already says `x-api-key` needs nothing, and re-splitting
-     * `AWSAccessKeyId` into `a_w_s_access_key_id` would be worse than
-     * leaving it — which is why runs of capitals stay together.
-     */
-    private static function splitCamelCase(string $name, string $original): string
-    {
-        if (str_contains($name, '_') || $original === strtolower($original)) {
-            return $name;
-        }
-
-        $split = preg_replace('/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/', '_', $original);
-
-        return is_string($split) ? strtolower($split) : $name;
     }
 
     /**
@@ -915,9 +969,21 @@ final class Redactor implements RedactsTelemetry
             return false;
         }
 
-        $normalized = strtolower($key);
+        // Split a capital into a separator first, for the same reason
+        // the parameter matcher does: `stripe.accessToken` and
+        // `log.context.clientSecret` are the same keys as their
+        // snake_case spellings to everyone except a matcher that only
+        // knows `[._-]`, and camelCase is what a structured log
+        // context from a JavaScript-facing service looks like.
+        $split = preg_replace('/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/', '_', $key);
+        $normalized = strtolower(is_string($split) ? $split : $key);
 
-        if (in_array($normalized, array_map(strtolower(...), $this->safeKeys), true)) {
+        // The exemption list is matched on the key AS WRITTEN too, so
+        // an app that exempted `my.knownSafe.bucket` is not caught out
+        // by the normalisation above.
+        $exempt = array_map(strtolower(...), $this->safeKeys);
+
+        if (in_array($normalized, $exempt, true) || in_array(strtolower($key), $exempt, true)) {
             return false;
         }
 

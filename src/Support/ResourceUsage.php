@@ -119,7 +119,12 @@ final readonly class ResourceUsage
      */
     public static function currentRssBytes(): ?int
     {
-        if (! class_exists(ProcessMetrics::class)) {
+        // The same platform check as start() and measure(). It was
+        // missing here, and this is called after every asynchronous
+        // job — so a queue worker on a platform without /proc shelled
+        // out to `ps` once per job while the request path had already
+        // been fixed not to.
+        if (! self::processMetricsAreCheap()) {
             return null;
         }
 

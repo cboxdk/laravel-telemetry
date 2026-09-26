@@ -154,3 +154,45 @@ it('can be replaced outright by binding the contract', function () {
     expect(app(RedactsTelemetry::class)->spans([]))->toBe([])
         ->and(app(RedactsTelemetry::class)->keyIsSensitive('anything'))->toBeTrue();
 });
+
+it('reads every spelling of a parameter name as the same parameter', function (string $name) {
+    // An application does not control what a third-party API calls its
+    // token, and an attacker picks the spelling deliberately. All of
+    // these reached an independent review's probe intact.
+    expect(Redactor::parameterIsCredential($name))->toBeTrue();
+})->with([
+    'accessToken%5B0%5D',   // brackets survived the camel split
+    'x-accessToken',        // a separator made the splitter give up
+    'ACCESSTOKEN',          // nothing to split on at all
+    'AWSAccessKeyId',       // the credential word is not the suffix
+    'access+token',         // PHP parses + as a separator
+    'access%20token',       // and a literal space
+    'apiKey',
+    'x-api-key',
+    'token%5Ba%5D%5Bb%5D',
+]);
+
+it('still keeps the parameters an application is made of', function (string $name) {
+    // Loosening the matcher is only safe if it stays shut on these.
+    expect(Redactor::parameterIsCredential($name))->toBeFalse();
+})->with([
+    'sortkey', 'postalcode', 'barcode', 'design', 'statuscode',
+    'limit', 'page', 'username', 'nickname', 'postal_code', 'sort_key',
+    // A count of tokens, a count of secrets, the NAME of a key, and a
+    // boolean. Matching a credential word anywhere in the name took
+    // all four — the suite caught it, which is what it is for.
+    'token_count', 'secret_count', 'api_key_name', 'signature_required',
+    'order_id', 'country_code', 'order_state',
+]);
+
+it('reads camelCase attribute keys as sensitive too', function () {
+    // The parameter matcher and the KEY matcher are separate passes,
+    // and only one of them had learnt this.
+    $redactor = Redactor::fromConfig(config('telemetry.redaction'));
+
+    expect($redactor->keyIsSensitive('stripe.accessToken'))->toBeTrue()
+        ->and($redactor->keyIsSensitive('log.context.clientSecret'))->toBeTrue()
+        // And not a word that merely contains one.
+        ->and($redactor->keyIsSensitive('cache.key'))->toBeFalse()
+        ->and($redactor->keyIsSensitive('http.route'))->toBeFalse();
+});

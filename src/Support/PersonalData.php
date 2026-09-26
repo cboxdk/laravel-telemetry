@@ -38,12 +38,27 @@ namespace Cbox\Telemetry\Support;
 final class PersonalData
 {
     /**
-     * The detectors whose subject is a run of digits, and which are
-     * therefore worth skipping wholesale on a value that has none.
+     * The fewest digits a value must contain before a detector can
+     * possibly match, so the expensive pattern is skipped on values
+     * that cannot hold its subject.
      *
-     * @var list<string>
+     * Per detector, not one shared gate. The shared `\d{3}` gate was
+     * wrong in both directions: it skipped `41 11 11 11 11 11 11 11`,
+     * a perfectly valid card with separators and never three digits in
+     * a row, and it ran the IPv4 matcher on values with nine digits
+     * and no dots. Counting digits once is linear and cannot produce
+     * either mistake.
+     *
+     * @var array<string, int>
      */
-    private const NUMERIC_DETECTORS = ['credit_card', 'iban', 'us_ssn', 'dk_cpr', 'ip', 'phone'];
+    private const MINIMUM_DIGITS = [
+        'credit_card' => 13,
+        'iban' => 12,
+        'dk_cpr' => 10,
+        'us_ssn' => 9,
+        'phone' => 5,
+        'ip' => 4,
+    ];
 
     /**
      * The built-in detectors, in the order they run.
@@ -77,15 +92,13 @@ final class PersonalData
      */
     public static function scrub(string $value, array $detectors, string $replacement): string
     {
-        // One gate for the four numeric detectors, because they are
-        // four full patterns over every value and most values have no
-        // number in them worth looking at. The shortest identifier
-        // here is nine digits, so three in a row is the cheapest test
-        // that cannot produce a false negative.
-        $numeric = preg_match('/\d{3}/', $value) === 1;
+        // One linear count, then a per-detector threshold. Most values
+        // have no digits at all and skip every numeric detector on a
+        // single integer comparison.
+        $digits = preg_match_all('/\d/', $value) ?: 0;
 
         foreach ($detectors as $detector) {
-            if (! $numeric && in_array($detector, self::NUMERIC_DETECTORS, true)) {
+            if ($digits < (self::MINIMUM_DIGITS[$detector] ?? 0)) {
                 continue;
             }
 
@@ -110,24 +123,27 @@ final class PersonalData
             return $value;
         }
 
-        // Labels, not "dots and letters". `[A-Za-z0-9.-]+\.[A-Za-z]{2,}`
-        // puts `.` in both the class and the separator, so every dot is
-        // a place the engine can backtrack to — 8KB of `a.a.a…@b.b.b…`
-        // took 140ms, on a string an attacker can put in a validation
-        // message. Matching a label at a time removes the ambiguity, and
-        // the possessive quantifiers remove the backtracking outright.
-        // And a lookbehind, which is the half that actually mattered.
-        // Possessive quantifiers stop the engine backtracking WITHIN a
-        // match; they do not stop it trying every starting position, and
-        // with a leading character class every character is one. On
-        // `a.a.a…@b.b.b…` that is quadratic — 8KB took 122ms and 32KB
-        // took 1.9 SECONDS, at flush, on a string an attacker can put in
-        // a validation message. Refusing to start inside a local part
-        // makes it linear.
-        return self::replace(
-            '/(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@(?:[A-Za-z0-9-]++\.)++[A-Za-z]{2,}+/',
+        // The domain is matched as labels with no trailing dot, and
+        // whether it ends in a real TLD is decided in PHP rather than
+        // by the pattern. A possessive `(?:label\.)++[A-Za-z]{2,}`
+        // consumed the final dot of `alice@example.com.` and could not
+        // give it back, so an address at the end of a sentence went
+        // straight through.
+        //
+        // The lookbehind is what keeps this linear: possessive
+        // quantifiers stop backtracking within a match, not the engine
+        // trying every starting position, and with a leading character
+        // class every character is one.
+        return self::replaceCallback(
+            '/(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]++@[A-Za-z0-9-]++(?:\.[A-Za-z0-9-]++)*+/',
             $value,
             $replacement,
+            static function (string $match): bool {
+                $domain = substr($match, strrpos($match, '@') + 1);
+                $tld = substr($domain, (int) strrpos($domain, '.') + 1);
+
+                return str_contains($domain, '.') && strlen($tld) >= 2 && ctype_alpha($tld);
+            },
         );
     }
 
@@ -154,11 +170,20 @@ final class PersonalData
      */
     private static function iban(string $value, string $replacement): string
     {
+        // Spaces and lower case, because that is how an IBAN is
+        // written down by a human and pasted into a form — the
+        // compact-uppercase-only matcher missed both
+        // `DK50 0040 0440 1162 43` and `dk5000400440116243`.
         return self::replaceCallback(
-            '/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/',
+            // The two forms an IBAN is legally written in, spelled
+            // out rather than one loose pattern: an optional space
+            // inside the repetition ate the separator and ran on into
+            // the next word, so `DK5000400440116243 failed` became one
+            // candidate that failed mod-97 and redacted nothing.
+            '/\b[A-Za-z]{2}\d{2}(?:[A-Za-z0-9]{10,30}|(?:[ ][A-Za-z0-9]{4}){2,7}(?:[ ][A-Za-z0-9]{1,3})?)\b/',
             $value,
             $replacement,
-            static fn (string $match): bool => self::mod97($match),
+            static fn (string $match): bool => self::mod97(strtoupper(str_replace(' ', '', $match))),
         );
     }
 
@@ -192,8 +217,14 @@ final class PersonalData
             static function (string $match): bool {
                 $day = (int) substr($match, 0, 2);
                 $month = (int) substr($match, 2, 2);
+                $year = (int) substr($match, 4, 2);
 
-                return $day >= 1 && $day <= 31 && $month >= 1 && $month <= 12;
+                // checkdate, not a range check: `310299` passed a
+                // day<=31 test and February has never had 31 days.
+                // Both centuries, because the number carries only two
+                // digits of year and a leap day is valid in one of
+                // them — 2000 was a leap year, 1900 was not.
+                return checkdate($month, $day, 2000 + $year) || checkdate($month, $day, 1900 + $year);
             },
         );
     }
@@ -204,15 +235,21 @@ final class PersonalData
             '/\b\d{1,3}(?:\.\d{1,3}){3}\b/',
             $value,
             $replacement,
-            static fn (string $match): bool => filter_var($match, FILTER_VALIDATE_IP) !== false,
+            static fn (string $match): bool => filter_var($match, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false,
         );
 
         if (! str_contains($value, ':')) {
             return $value;
         }
 
+        // Compressed forms too: `2001:db8::1` has no run of at least
+        // two groups on both sides of the `::` and the old pattern
+        // required one, so the shortest and most common way of writing
+        // an IPv6 address was the one it missed. Candidates are loose
+        // and filter_var is the authority, which is the same division
+        // of labour the checksummed detectors use.
         return self::replaceCallback(
-            '/\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b/',
+            '/(?<![:.\w])(?:[A-Fa-f0-9]{0,4}:){2,7}[A-Fa-f0-9]{0,4}(?![:.\w])/',
             $value,
             $replacement,
             static fn (string $match): bool => filter_var($match, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false,
@@ -220,8 +257,8 @@ final class PersonalData
     }
 
     /**
-     * E.164 only — a leading `+`, a country code, eight to fourteen
-     * more digits. Bare national numbers are not attempted: they are
+     * E.164 only — a `+`, a country code, and eight to fourteen more
+     * digits. Bare national numbers are not attempted: they are
      * indistinguishable from order ids, and a detector that eats those
      * is the one that gets switched off.
      */
@@ -231,7 +268,22 @@ final class PersonalData
             return $value;
         }
 
-        return self::replace('/(?<![\w+])\+[1-9]\d{1,3}[ .-]?(?:\(?\d{1,4}\)?[ .-]?){1,4}\d{2,4}\b/', $value, $replacement);
+        // Atomic, and the length checked in PHP. The old pattern's
+        // `(?:\(?\d{1,4}\)?[ .-]?){1,4}` backtracked hard on a near
+        // miss — 9ms on a single value of repeated `+1234567890…x`,
+        // which an attacker can put in as many attributes as they like
+        // — and it matched `+12345`, which is shorter than the eight
+        // digits its own docblock promised.
+        return self::replaceCallback(
+            '/(?<![\w+])\+[1-9][\d .-]{7,20}\d/',
+            $value,
+            $replacement,
+            static function (string $match): bool {
+                $digits = preg_match_all('/\d/', $match) ?: 0;
+
+                return $digits >= 9 && $digits <= 15;
+            },
+        );
     }
 
     private static function replace(string $pattern, string $value, string $replacement): string
