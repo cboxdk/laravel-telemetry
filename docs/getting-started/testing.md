@@ -31,7 +31,9 @@ it('tracks the order', function () {
 | `assertCounterIncremented($name, ?$labels)` | labels match exactly |
 | `assertCounterNotIncremented($name)` | |
 | `assertGaugeSet($name, ?$labels)` | push gauges |
+| `assertGaugeNotSet($name)` | |
 | `assertHistogramRecorded($name, ?$labels)` | |
+| `assertHistogramNotRecorded($name)` | |
 | `assertSpanRecorded($name, ?$callback)` | callback receives each `Span` |
 | `assertSpanNotRecorded($name)` | |
 | `assertEventEmitted($name, ?$callback)` | callback receives each `TelemetryEvent` |

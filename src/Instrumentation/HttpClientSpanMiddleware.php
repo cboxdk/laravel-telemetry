@@ -171,6 +171,22 @@ final class HttpClientSpanMiddleware
             $span->setAttribute('http.response.status_code', $status);
         }
 
+        // semconv: `error.type` is required on any HTTP client span or
+        // metric that failed, and it is what makes a dependency that has
+        // gone away legible. A connection refused never produces a status
+        // code, so without this the only difference between "the host is
+        // down" and "we never called it" is the absence of a row.
+        $errorType = match (true) {
+            $error !== null => $error::class,
+            $rejected => 'rejected',
+            $status !== null && $status >= 400 => (string) $status,
+            default => null,
+        };
+
+        if ($errorType !== null) {
+            $span->setAttribute('error.type', $errorType);
+        }
+
         if ($error !== null) {
             $span->recordException($error);
             $span->setStatus(SpanStatus::Error, $error->getMessage());
@@ -182,7 +198,7 @@ final class HttpClientSpanMiddleware
 
         $span->end();
 
-        $this->recordDuration($span, $status);
+        $this->recordDuration($span, $status, $errorType);
     }
 
     private function correctDestination(Span $span, RequestInterface $sent): void
@@ -227,7 +243,7 @@ final class HttpClientSpanMiddleware
         $span->updateName(HttpMethod::forSpanName($sent->getMethod()).' '.$host);
     }
 
-    private function recordDuration(Span $span, ?int $status): void
+    private function recordDuration(Span $span, ?int $status, ?string $errorType = null): void
     {
         $telemetry = $this->telemetry();
 
@@ -245,11 +261,15 @@ final class HttpClientSpanMiddleware
         // a call that followed two redirects made three of them.
         $telemetry
             ->histogram('http.client.request.duration', buckets: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 10], description: 'Outgoing HTTP request duration', unit: 's')
-            ->record($span->durationMs() / 1000, [
+            ->record($span->durationMs() / 1000, array_filter([
                 'http.request.method' => (string) ($span->attributes()['http.request.method'] ?? HttpMethod::OTHER),
                 'server.address' => $label,
                 'http.response.status_code' => (string) ($status ?? 0),
-            ]);
+                // Only present when the call failed, per semconv — an
+                // always-present empty label would double the series count
+                // of every healthy endpoint for nothing.
+                'error.type' => $errorType,
+            ], static fn (?string $value): bool => $value !== null));
     }
 
     private function telemetry(): TelemetryManager

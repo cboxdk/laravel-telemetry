@@ -113,6 +113,14 @@ final class TelemetryFake extends TelemetryManager
         }
     }
 
+    public function assertGaugeNotSet(string $name): void
+    {
+        Assert::assertEmpty(
+            $this->samples($name, MetricType::Gauge),
+            "Gauge [{$name}] was unexpectedly set.",
+        );
+    }
+
     /**
      * @param  array<string, scalar|null>  $labels
      */
@@ -138,6 +146,14 @@ final class TelemetryFake extends TelemetryManager
                 "Histogram [{$name}] recorded values, but never with labels ".json_encode($labels).'.',
             );
         }
+    }
+
+    public function assertHistogramNotRecorded(string $name): void
+    {
+        Assert::assertEmpty(
+            $this->samples($name, MetricType::Histogram),
+            "Histogram [{$name}] unexpectedly recorded a value.",
+        );
     }
 
     /**

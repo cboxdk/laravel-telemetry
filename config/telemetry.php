@@ -632,6 +632,19 @@ return [
         'redis' => env('TELEMETRY_INSTRUMENT_REDIS', false),
         'redis_ignore_connections' => null,
 
+        // redis.commands.failed counter + an errored client span per Redis
+        // command that raised. On by default, and separate from `redis`
+        // above, because the two answer different questions: per-command
+        // spans are for profiling Redis, failures are for finding out that
+        // Redis is why everything else is failing. That signal has to be
+        // on before the incident, not switched on during it.
+        //
+        // Laravel dispatches CommandExecuted and CommandFailed from one
+        // switch, so this does cost an event dispatch per Redis command
+        // even when nothing fails — the listener is a single in_array and
+        // a return. Set to false on a hot path that cannot afford it.
+        'redis_failures' => env('TELEMETRY_INSTRUMENT_REDIS_FAILURES', true),
+
         // db.connect / redis.connect spans + the
         // db.client.connection.create_time histogram.
         //
@@ -651,6 +664,26 @@ return [
         // the package's own store and spool connections.
         'db_connect' => env('TELEMETRY_INSTRUMENT_DB_CONNECT', true),
         'redis_connect' => env('TELEMETRY_INSTRUMENT_REDIS_CONNECT', true),
+
+        // Application lifecycle, not request path. Each fires a handful of
+        // times a day and each explains a chart that would otherwise only
+        // raise questions.
+        //
+        // migrations       db.migration.duration histogram +
+        //                  db.migrations.started / db.migration.ran /
+        //                  db.migrations.finished events. A schema change
+        //                  is the most common answer to "what changed at
+        //                  14:32", and a migration that holds a lock for
+        //                  four minutes is invisible without the histogram.
+        // maintenance_mode app.maintenance_mode events, so a planned
+        //                  window reads as a window and not an outage.
+        // connection_pool  db.connections.busy counter + event, from
+        //                  Laravel's DatabaseBusy. Separates "the database
+        //                  is slow" from "we ran out of connections to ask
+        //                  it with" — opposite fixes, identical symptoms.
+        'migrations' => env('TELEMETRY_INSTRUMENT_MIGRATIONS', true),
+        'maintenance_mode' => env('TELEMETRY_INSTRUMENT_MAINTENANCE_MODE', true),
+        'connection_pool' => env('TELEMETRY_INSTRUMENT_CONNECTION_POOL', true),
 
         // Gate/policy checks: authorization.checks{ability, result}
         // counter + gate.check.count / gate.denied.count root-span

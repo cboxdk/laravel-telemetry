@@ -60,3 +60,33 @@ it('also honours an operator-supplied ignore list alongside the reserved keys', 
         ->and($opened)->not->toContain('sessions')
         ->and($opened)->not->toContain('client');
 });
+
+it('opens no connection when only failures are wanted', function () {
+    // Boot hygiene: the retro-fit loop is I/O, and hearing about a dead
+    // Redis node must not cost every application a connection per
+    // configured store at boot.
+    config()->set('database.redis', [
+        'default' => ['host' => '127.0.0.1', 'port' => 6379, 'database' => 0],
+        'sessions' => ['host' => '127.0.0.1', 'port' => 6379, 'database' => 1],
+    ]);
+
+    $opened = [];
+
+    $redis = Mockery::mock(RedisManager::class);
+    $redis->shouldReceive('enableEvents')->andReturnNull();
+    $redis->shouldReceive('connection')->andReturnUsing(function ($name) use (&$opened) {
+        $opened[] = $name;
+
+        return Mockery::mock();
+    });
+
+    $this->app->instance('redis', $redis);
+
+    (new RedisInstrumentation($this->app))->register(
+        $this->app->make('events'),
+        commands: false,
+        failures: true,
+    );
+
+    expect($opened)->toBeEmpty();
+});

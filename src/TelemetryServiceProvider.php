@@ -43,6 +43,7 @@ use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
 use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
 use Cbox\Telemetry\Instrumentation\InstrumentedControllerDispatcher;
 use Cbox\Telemetry\Instrumentation\InstrumentedRedisManager;
+use Cbox\Telemetry\Instrumentation\LifecycleInstrumentation;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
 use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
@@ -961,7 +962,10 @@ class TelemetryServiceProvider extends ServiceProvider
             (new BusInstrumentation($this->app))->register($events);
         }
 
-        if ($config->get('telemetry.instrument.redis', false)) {
+        $redisCommands = (bool) $config->get('telemetry.instrument.redis', false);
+        $redisFailures = (bool) $config->get('telemetry.instrument.redis_failures', true);
+
+        if ($redisCommands || $redisFailures) {
             // The package's own connections are ALWAYS ignored — self-
             // instrumentation would loop (telemetry writes generating
             // spans generating writes). An explicit ignore list is
@@ -975,7 +979,15 @@ class TelemetryServiceProvider extends ServiceProvider
             ]));
 
             $this->app->singleton(RedisInstrumentation::class);
-            $this->app->make(RedisInstrumentation::class)->register($events, $ignored);
+            $this->app->make(RedisInstrumentation::class)->register($events, $ignored, $redisCommands, $redisFailures);
+        }
+
+        $migrations = (bool) $config->get('telemetry.instrument.migrations', true);
+        $maintenance = (bool) $config->get('telemetry.instrument.maintenance_mode', true);
+        $pool = (bool) $config->get('telemetry.instrument.connection_pool', true);
+
+        if ($migrations || $maintenance || $pool) {
+            (new LifecycleInstrumentation($this->app))->register($events, $migrations, $maintenance, $pool);
         }
 
         if ($config->get('telemetry.instrument.gates', true)) {
