@@ -138,6 +138,11 @@ it('can be replaced outright by binding the contract', function () {
 
         public function redactUsing(?Closure $custom): void {}
 
+        public function value(string $key, string $value): string
+        {
+            return '[GONE]';
+        }
+
         public function keyIsSensitive(string $key): bool
         {
             return true;
@@ -158,7 +163,8 @@ it('can be replaced outright by binding the contract', function () {
     });
 
     expect(app(RedactsTelemetry::class)->spans([]))->toBe([])
-        ->and(app(RedactsTelemetry::class)->keyIsSensitive('anything'))->toBeTrue();
+        ->and(app(RedactsTelemetry::class)->keyIsSensitive('anything'))->toBeTrue()
+        ->and(app(RedactsTelemetry::class)->value('url.full', 'https://x.test'))->toBe('[GONE]');
 });
 
 it('reads every spelling of a parameter name as the same parameter', function (string $name) {

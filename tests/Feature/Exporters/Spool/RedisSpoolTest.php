@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Exporters\Spool\RedisSpool;
 use Illuminate\Contracts\Redis\Factory;
+use Illuminate\Redis\Connections\Connection;
 use Illuminate\Redis\Events\CommandExecuted;
 use Illuminate\Support\Facades\Event;
 
@@ -141,18 +142,47 @@ it('takes a whole batch off the list in one command', function () {
 
 it('does not mistake a refused batch pop for an empty spool', function () {
     // phpredis answers both an empty list and a command it could not
-    // run with false. Reading "could not run" as "empty" would make the
-    // spool look permanently drained on Redis before 6.2 — silent,
-    // total data loss, and the daemon reporting success throughout.
-    $spool = new RedisSpool(app(Factory::class), 'default', $this->key, maxItems: 100);
+    // run with false. Reading "could not run" as "empty" would make
+    // the spool look permanently drained on Redis before 6.2 — silent,
+    // total data loss with the daemon reporting success throughout.
+    //
+    // Driven through a connection that refuses the count form, which
+    // is the premise: setting a flag would prove nothing.
+    $factory = new class(app(Factory::class)) implements Factory
+    {
+        public function __construct(private readonly Factory $inner) {}
+
+        public function connection($name = null)
+        {
+            return new class($this->inner->connection($name)) extends Connection
+            {
+                public function __construct(private readonly Connection $inner) {}
+
+                public function command($method, array $parameters = [])
+                {
+                    // An old server: the count form is not understood.
+                    if ($method === 'lpop' && count($parameters) > 1) {
+                        return false;
+                    }
+
+                    return $this->inner->command($method, $parameters);
+                }
+
+                public function createSubscription($channels, Closure $callback, $method = 'subscribe') {}
+
+                public function client()
+                {
+                    return $this->inner->client();
+                }
+            };
+        }
+    };
+
+    $spool = new RedisSpool($factory, 'default', $this->key, maxItems: 100);
 
     foreach (range(1, 3) as $i) {
         $spool->push(spoolEntry("e{$i}"));
     }
-
-    // Force the ambiguous answer by pretending the count form failed.
-    $batchPop = new ReflectionProperty(RedisSpool::class, 'batchPop');
-    $batchPop->setValue($spool, true);
 
     $entries = $spool->pop(200);
 

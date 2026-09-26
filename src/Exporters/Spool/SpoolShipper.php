@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Exporters\Spool;
 
 use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportResult;
+use Cbox\Telemetry\Support\SharedState;
 use Closure;
 
 /**
@@ -31,6 +32,9 @@ final class SpoolShipper
     private const PATHS = ['traces' => '/v1/traces', 'logs' => '/v1/logs'];
 
     private const ROOTS = ['traces' => 'resourceSpans', 'logs' => 'resourceLogs'];
+
+    /** Where a Retry-After the backend asked for is remembered. */
+    private const COOLDOWN_KEY = 'spool:cooldown';
 
     /**
      * @param  Closure(string, array<string, mixed>): ExportResult  $post  path, payload => result
@@ -62,6 +66,11 @@ final class SpoolShipper
     {
         $deadline = $maxSeconds > 0.0 ? microtime(true) + $maxSeconds : 0.0;
 
+        // A cooldown the backend itself asked for, still running.
+        if (time() < SharedState::deadline(self::COOLDOWN_KEY)) {
+            return new ShipResult(drained: false);
+        }
+
         $shipped = 0;
         $requeued = 0;
         $dropped = 0;
@@ -71,15 +80,58 @@ final class SpoolShipper
         /** @var list<ExportOutcome> $failures */
         $failures = [];
 
-        while (($entries = $this->spool->pop($maxBatch)) !== []) {
+        while (true) {
+            // Before popping, so a drain that is already out of budget
+            // takes nothing off the list — entries in flight when a
+            // supervisor loses patience are the ones at risk.
+            if ($this->spent($deadline, $handled, $maxEntries, $shouldStop)) {
+                $drained = false;
+
+                break;
+            }
+
+            $entries = $this->spool->pop($maxBatch);
+
+            if ($entries === []) {
+                break;
+            }
+
             $stop = false;
             $handled += count($entries);
 
             foreach ($this->groupBySignal($entries) as $signal => $signalEntries) {
+                // Checked before each POST, not only between batches. A
+                // batch carries two signals and a POST can take the
+                // whole HTTP timeout, so a budget consulted once per
+                // batch is two timeouts wide — and after SIGTERM those
+                // are spent past the supervisor's patience, on entries
+                // already taken off the list.
+                // Time and the stop flag only — not the entry count.
+                // These entries are already off the list, and the
+                // count budget's job is to decide whether to take
+                // MORE, which the check above the pop does.
+                if ($stop || $this->spent($deadline, 0, PHP_INT_MAX, $shouldStop)) {
+                    $this->spool->requeue($signalEntries);
+                    $requeued += count($signalEntries);
+                    $drained = false;
+                    $stop = true;
+
+                    continue;
+                }
+
                 $result = ($this->post)(self::PATHS[$signal], $this->merge($signal, $signalEntries));
 
                 if ($result->success) {
                     $shipped += count($signalEntries);
+
+                    // Accepted, but not cleanly: the backend rejected
+                    // items, or its answer could not be read. Counting
+                    // that as a clean delivery is how a partial loss
+                    // goes unreported by the one command that watches
+                    // the spool.
+                    if ($result->rejected > 0 || $result->reason !== null) {
+                        $failures[] = ExportOutcome::of("otlp {$signal}", $result);
+                    }
 
                     continue;
                 }
@@ -97,6 +149,14 @@ final class SpoolShipper
                     $requeued += count($signalEntries);
                     $stop = true;
 
+                    // And honour what it asked for. Retry-After is the
+                    // backend saying how long it needs; coming back on
+                    // the next tick regardless is what turns an
+                    // overloaded collector into a hammered one.
+                    if (($result->retryAfterSeconds ?? 0) > 0) {
+                        SharedState::remember(self::COOLDOWN_KEY, time() + (int) $result->retryAfterSeconds);
+                    }
+
                     continue;
                 }
 
@@ -108,21 +168,26 @@ final class SpoolShipper
                 break;
             }
 
-            // Entries AND wall clock. An entry budget bounds the work
-            // but not the time it takes: ten thousand entries at two
-            // seconds a POST is a hundred seconds in which the daemon
-            // flushes no metrics, and after SIGTERM it is a hundred
-            // seconds past the supervisor's grace period.
-            if ($handled >= $maxEntries
-                || ($deadline > 0.0 && microtime(true) >= $deadline)
-                || ($shouldStop !== null && $shouldStop())) {
-                $drained = false;
-
-                break;
-            }
         }
 
         return new ShipResult($shipped, $requeued, $dropped, $failures, $drained);
+    }
+
+    /**
+     * Whether this drain has spent its budget.
+     *
+     * Entries AND wall clock: an entry budget bounds the work but not
+     * the time it takes, and ten thousand entries at two seconds a
+     * POST is a hundred seconds in which the daemon flushes no metrics
+     * and never looks at its stop flag.
+     *
+     * @param  (Closure(): bool)|null  $shouldStop
+     */
+    private function spent(float $deadline, int $handled, int $maxEntries, ?Closure $shouldStop): bool
+    {
+        return $handled >= $maxEntries
+            || ($deadline > 0.0 && microtime(true) >= $deadline)
+            || ($shouldStop !== null && $shouldStop());
     }
 
     /**

@@ -19,7 +19,22 @@ use Illuminate\Database\Events\QueryExecuted;
  */
 final class QueryInstrumentation
 {
-    private const MAX_QUERY_LENGTH = 500;
+    /**
+     * The query text is NOT cut here.
+     *
+     * It used to be, at 500 characters, and that is the same bug the
+     * span-level value cap turned out to be: redaction runs at export,
+     * so cutting
+     * `SELECT 1 /* …https://alice:hunter2@example.test/ *​/` before the
+     * `@` leaves a string the userinfo pattern no longer recognises,
+     * and the password ships. A comment in a query is not an exotic
+     * place for a connection string to appear — ORMs and migration
+     * tools put them there.
+     *
+     * Length belongs to `telemetry.redaction.max_value_length`, which
+     * redacts first and cuts after; the memory a long query occupies
+     * until then is bounded by the tracer's byte budget.
+     */
 
     /** Distinct query fingerprints held per trace before the map resets. */
     private const MAX_FINGERPRINTS = 10_000;
@@ -115,7 +130,7 @@ final class QueryInstrumentation
                 [
                     'db.system.name' => DbSystem::name($event->connection->getDriverName()),
                     'laravel.db.connection' => $event->connectionName,
-                    'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
+                    'db.query.text' => $event->sql,
                 ],
                 SpanKind::Client,
                 detail: true,
@@ -175,7 +190,7 @@ final class QueryInstrumentation
             $telemetry->event('db.query.duplicate_detected', [
                 'db.system.name' => DbSystem::name($event->connection->getDriverName()),
                 'laravel.db.connection' => $event->connectionName,
-                'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
+                'db.query.text' => $event->sql,
                 'db.query.repeat_count' => $count,
             ]);
         });

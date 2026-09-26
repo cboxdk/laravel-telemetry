@@ -47,6 +47,15 @@ final class FlushCommand extends Command
      */
     private const SHUTDOWN_DRAIN_SECONDS = 5.0;
 
+    /**
+     * Seconds a one-shot run may spend draining the spool.
+     *
+     * Long enough to clear a real backlog, bounded so a producer that
+     * keeps the spool fed cannot keep the process alive until the next
+     * cron tick starts behind it.
+     */
+    private const CRON_DRAIN_SECONDS = 50.0;
+
     protected $signature = 'telemetry:flush
                             {--daemon : Keep running, shipping the spool every --interval seconds}
                             {--interval=1 : Seconds between spool ships in daemon mode}
@@ -125,8 +134,20 @@ final class FlushCommand extends Command
             $maxBatch = (int) $this->option('max-batch');
             $shipped = new ShipResult;
 
+            // Until the spool is empty OR the run has had long enough.
+            // Draining until the first budget ran out left the rest for
+            // the next tick, so a backlog could grow across runs that
+            // all reported success — and draining until empty is a loop
+            // a busy producer can keep fed forever, which is a cron job
+            // that never exits and a second one starting behind it.
+            $deadline = microtime(true) + self::CRON_DRAIN_SECONDS;
+
             do {
-                $result = FailSafe::guard(fn () => $shipper->ship($maxBatch, shouldStop: fn (): bool => $this->shouldStop));
+                $result = FailSafe::guard(fn () => $shipper->ship(
+                    $maxBatch,
+                    shouldStop: fn (): bool => $this->shouldStop,
+                    maxSeconds: max(1.0, $deadline - microtime(true)),
+                ));
 
                 if ($result === null) {
                     $this->components->error('Failed to ship the spool — see the configured exception handler for details.');
@@ -135,7 +156,7 @@ final class FlushCommand extends Command
                 }
 
                 $shipped = $shipped->plus($result);
-            } while (! $result->drained && ! $this->shouldStop);
+            } while (! $result->drained && ! $this->shouldStop && microtime(true) < $deadline);
 
             $healthy = $this->reportSpool($shipped) && $healthy;
         }

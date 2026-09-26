@@ -157,7 +157,21 @@ final class FailSafe
     private static function shape(string $message): string
     {
         $shape = strtolower(strtok($message, "\n") ?: '');
-        $shape = (string) preg_replace('/\b[0-9a-f]{8,}\b/', '#', $shape);
+
+        // Long runs go first — an id, a uuid, a hash, a key. These are
+        // what make a message unique per occurrence, and leaving them
+        // in turns the throttle into a report per failure AND fills
+        // shared memory with keys nobody will look up twice.
+        $shape = (string) preg_replace('/[A-Za-z0-9_-]{16,}/', '#', $shape);
+
+        // Then every number, short ones included. This is a deliberate
+        // trade in one direction: `collector returned HTTP 401` and
+        // `… 403` share a key and the second waits a minute, while
+        // `cannot write key user:1` through `user:50000` stay one
+        // failure. Keeping short numbers apart would reverse both, and
+        // the second is the case that takes an application down — a
+        // report per occurrence on a path that runs per query, into a
+        // log pipeline the application shares.
         $shape = (string) preg_replace('/\d+/', '#', $shape);
 
         return substr($shape, 0, 160);

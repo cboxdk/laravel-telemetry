@@ -17,7 +17,6 @@ use Cbox\Telemetry\Support\SharedState;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Redis\Connections\Connection;
 use Illuminate\Redis\Connections\PhpRedisConnection;
-use RuntimeException;
 use Throwable;
 
 /**
@@ -91,7 +90,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     public function __construct(
         private readonly Factory $redis,
-        private readonly string $connectionName = 'default',
+        private readonly string $connection = 'default',
         private readonly string $prefix = 'telemetry',
         private readonly int $maxFields = 50_000,
     ) {}
@@ -128,6 +127,13 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
     {
+        // Belt and braces with Histogram::record(): Redis refuses to
+        // increment a sum by NAN or INF, which fails the script after
+        // the bucket has been counted.
+        if (! is_finite($value)) {
+            return;
+        }
+
         $key = $this->familyKey(MetricType::Histogram, $definition->name);
         $series = base64_encode(Labels::encode($labels));
         $bucket = $this->bucketIndex($definition->buckets ?? [], $value);
@@ -240,11 +246,23 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
                 // returns an integer. Taking false for success meant a
                 // server with scripting disabled silently discarded
                 // every metric write, forever.
+                // phpredis answers BOTH a refused command and a Lua
+                // runtime error with false, so false alone does not
+                // say which. A one-line probe does, and asking is the
+                // only way to avoid the two wrong answers: repeating
+                // the operations after a script that actually ran
+                // double-counts, and latching off scripting for a
+                // transient error throws away atomicity and the
+                // series budget with it.
                 if ($result === false) {
-                    throw new RuntimeException('EVAL was refused: unknown command');
-                }
+                    if (! $this->scriptingIsRefusedByProbe($connection)) {
+                        return;
+                    }
 
-                return;
+                    SharedState::remember($this->scriptingKey(), time() + self::RETRY_SCRIPTING_AFTER_SECONDS);
+                } else {
+                    return;
+                }
             } catch (Throwable $e) {
                 // Only a server that cannot run EVAL justifies the
                 // non-atomic path. A timeout does not: the script may
@@ -322,7 +340,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
         // A had written its, and stay invisible to collection for five
         // minutes. A deploy that changes a histogram's bounds is the
         // same problem in time rather than space.
-        $memo = 'store:init:'.$this->prefix.':'.$this->connectionName.':'
+        $memo = 'store:init:'.$this->prefix.':'.$this->connection.':'
             .$definition->type->value.':'.$definition->name.':'
             .substr(hash('xxh128', $this->encodeMeta($definition)), 0, 12);
         $now = time();
@@ -352,7 +370,27 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     private function scriptingKey(): string
     {
-        return 'store:noscript:'.$this->prefix.':'.$this->connectionName;
+        return 'store:noscript:'.$this->prefix.':'.$this->connection;
+    }
+
+    /**
+     * Ask the server whether it runs scripts at all.
+     *
+     * One trivial EVAL. If that works, the failure above was the
+     * script's own — a NaN increment, a wrong type — and the fallback
+     * would repeat work that already happened.
+     */
+    private function scriptingIsRefusedByProbe(Connection $connection): bool
+    {
+        try {
+            $probe = $connection instanceof PhpRedisConnection
+                ? $connection->eval('return 1', 0)
+                : $connection->command('eval', ['return 1', 0]);
+
+            return $probe === false;
+        } catch (Throwable $e) {
+            return self::scriptingIsUnsupported($e);
+        }
     }
 
     private function scriptingIsRefused(): bool
@@ -368,7 +406,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
     {
         $message = strtolower($e->getMessage());
 
-        foreach (['unknown command', 'not allowed', 'unsupported', 'disabled'] as $needle) {
+        foreach (['unknown command', 'not allowed', 'unsupported', 'disabled', 'noperm', 'no permissions'] as $needle) {
             if (str_contains($message, $needle)) {
                 return true;
             }
@@ -604,7 +642,7 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
 
     private function connection(): Connection
     {
-        return $this->redis->connection($this->connectionName);
+        return $this->redis->connection($this->connection);
     }
 
     /**

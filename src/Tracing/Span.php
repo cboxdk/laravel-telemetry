@@ -212,18 +212,37 @@ final class Span
      */
     public function approximateBytes(): int
     {
-        $bytes = strlen($this->name) + 128;
+        // Every key goes through strlen() as a STRING. PHP turns a
+        // numeric string array key into an int on the way in, so
+        // `setAttribute('0', 'v')` handed strlen() an integer and this
+        // method — reached from end(), outside any guard — threw into
+        // the application. In this package that is the one unforgivable
+        // bug, and a size estimate is the last place it should come
+        // from.
+        $bytes = strlen($this->name) + strlen((string) $this->statusDescription) + 128;
 
-        foreach ($this->attributes as $key => $value) {
-            $bytes += strlen($key) + (is_string($value) ? strlen($value) : 8) + 48;
-        }
+        $bytes += $this->sizeOf($this->attributes);
 
         foreach ($this->events as $event) {
-            $bytes += strlen($event->name) + 64;
+            $bytes += strlen($event->name) + 64 + $this->sizeOf($event->attributes);
+        }
 
-            foreach ($event->attributes as $key => $value) {
-                $bytes += strlen($key) + (is_string($value) ? strlen($value) : 8) + 48;
-            }
+        foreach ($this->links as $link) {
+            $bytes += 96 + $this->sizeOf($link->attributes);
+        }
+
+        return $bytes;
+    }
+
+    /**
+     * @param  array<array-key, scalar|null>  $attributes
+     */
+    private function sizeOf(array $attributes): int
+    {
+        $bytes = 0;
+
+        foreach ($attributes as $key => $value) {
+            $bytes += strlen((string) $key) + (is_string($value) ? strlen($value) : 8) + 48;
         }
 
         return $bytes;
@@ -322,11 +341,14 @@ final class Span
         // An event's own attribute map is as unbounded as the span's
         // was, and a hundred and twenty-eight events of it is the same
         // problem multiplied.
+        $droppedAttributes = 0;
+
         if (count($attributes) > self::MAX_ATTRIBUTES) {
+            $droppedAttributes = count($attributes) - self::MAX_ATTRIBUTES;
             $attributes = array_slice($attributes, 0, self::MAX_ATTRIBUTES, preserve_keys: true);
         }
 
-        $this->events[] = new SpanEvent($name, (int) (microtime(true) * 1e9), $attributes);
+        $this->events[] = new SpanEvent($name, (int) (microtime(true) * 1e9), $attributes, $droppedAttributes);
 
         return $this;
     }

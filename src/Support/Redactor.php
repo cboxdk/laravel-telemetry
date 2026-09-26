@@ -696,17 +696,28 @@ final class Redactor implements RedactsTelemetry
         return [
             // JWTs — three base64url segments.
             //
-            // Possessive, but NOT length-bounded. What made the
-            // userinfo pattern cost 198ms of CPU on a 62KiB header was
-            // an unbounded scan with nothing to anchor it; every
-            // pattern here begins with a literal — `eyJ`, `Bearer`,
-            // `://` — so the engine only ever starts where one occurs,
-            // and the scan is linear from there. Measured on the same
-            // adversarial inputs, capping the quantifiers saved nothing
-            // at all and cost three credential disclosures: a token one
-            // character past the cap stopped matching, and what the
-            // pattern no longer covers is exported verbatim.
-            '/\beyJ[\w-]{10,}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
+            // Possessive, and bounded only where the bound cannot
+            // truncate a credential.
+            //
+            // Each pattern begins with a literal — `eyJ`, `Bearer`,
+            // `://` — so the engine starts only where one occurs. That
+            // is what makes them cheap, and why capping the payload
+            // and the token bought nothing except three disclosures:
+            // a credential one character past the cap stopped matching,
+            // and what the pattern no longer covers is exported
+            // verbatim.
+            //
+            // The JWT HEADER is the exception, and the reason is the
+            // literal itself: `-` is a base64url character, so
+            // `eyJaaaaaaaaaa-eyJaaaaaaaaaa-…` is one unbroken run with
+            // an `eyJ` every fourteen characters, and each one starts
+            // another scan of the whole remainder. 218KiB of it cost
+            // 635ms. Bounding the first segment — and only the first —
+            // makes each restart cheap while leaving the payload and
+            // signature, which is where a long token's secret actually
+            // lives, unbounded. 4096 base64 characters is far more
+            // header than any real token carries, x5c chains included.
+            '/\beyJ[\w-]{10,4096}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
             //
             // Two ways to qualify, because a flat length threshold cannot

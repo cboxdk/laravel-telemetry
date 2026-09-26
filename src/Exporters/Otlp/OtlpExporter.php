@@ -119,21 +119,36 @@ final class OtlpExporter implements Exporter
             return ExportResult::ok();
         }
 
+        // The breaker is decided across ALL the results, before any of
+        // them is returned. Returning at the first failure meant a 400
+        // on traces followed by a timeout on logs left the circuit
+        // shut — the exporter had just proved the collector
+        // unreachable and then forgot — and a one-second Retry-After
+        // followed by an hour's took the one second.
+        $cooldown = 0;
+
+        foreach ($results as $result) {
+            if (! $result->success && $result->retryable) {
+                $cooldown = max($cooldown, $result->retryAfterSeconds ?? self::DEFAULT_COOLDOWN_SECONDS);
+            }
+        }
+
+        if ($cooldown > 0) {
+            SharedState::remember(self::CIRCUIT_KEY, time() + $cooldown);
+        }
+
         foreach ($results as $result) {
             if (! $result->success) {
-                if ($result->retryable) {
-                    SharedState::remember(
-                        self::CIRCUIT_KEY,
-                        time() + ($result->retryAfterSeconds ?? self::DEFAULT_COOLDOWN_SECONDS),
-                    );
-                }
-
                 return $result;
             }
         }
 
+        // A rejection, or a response we could not read — either way
+        // the batch was accepted but something about it is unknown,
+        // and both have to survive the fold. Reporting a clean success
+        // here is how a partial loss goes unnoticed.
         foreach ($results as $result) {
-            if ($result->rejected > 0) {
+            if ($result->rejected > 0 || $result->reason !== null) {
                 return $result;
             }
         }

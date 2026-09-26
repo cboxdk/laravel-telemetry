@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Http\Controllers;
 
+use Cbox\Telemetry\Contracts\RedactsTelemetry;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Support\CampaignAttribution;
 use Cbox\Telemetry\Support\ClientGeo;
@@ -269,6 +270,24 @@ final class SpanIngestController
     }
 
     /**
+     * The configured redactor, resolved once per process.
+     *
+     * Null only when the host has not bound one, which means redaction
+     * is off entirely — and then there is nothing for the cut below to
+     * destroy.
+     */
+    private static ?RedactsTelemetry $redactor = null;
+
+    private static function redact(string $key, string $value): string
+    {
+        self::$redactor ??= app()->bound(RedactsTelemetry::class)
+            ? app(RedactsTelemetry::class)
+            : null;
+
+        return self::$redactor?->value($key, $value) ?? $value;
+    }
+
+    /**
      * @param  array<mixed>  $raw
      * @return array<string, scalar>
      */
@@ -282,7 +301,14 @@ final class SpanIngestController
             }
 
             if (is_string($value)) {
-                $out[mb_substr($key, 0, self::MAX_NAME)] = mb_substr($value, 0, self::MAX_VALUE);
+                // Redacted BEFORE it is cut. This is untrusted input,
+                // so the cut has to stay — but cutting first is how a
+                // credential survives it: a thousand characters of
+                // padding and then `https://alice:hunter2@example.test/`
+                // loses its `@` at the boundary, and what is left is a
+                // string the userinfo pattern no longer recognises. One
+                // pass per ingested batch; this is not a hot path.
+                $out[mb_substr($key, 0, self::MAX_NAME)] = mb_substr(self::redact($key, $value), 0, self::MAX_VALUE);
             } elseif (is_int($value) || is_float($value) || is_bool($value)) {
                 $out[mb_substr($key, 0, self::MAX_NAME)] = $value;
             }

@@ -56,6 +56,18 @@ interface RedactsTelemetry
     public function redactStructure(array $values, int $depth = 0): array;
 
     /**
+     * Redact one attribute value.
+     *
+     * The single-value entry point, for the places that have to scrub
+     * something before the export-time pass can see it — inbound
+     * browser spans, which are cut to a length bound on arrival, and
+     * anywhere else a value is shortened before it reaches a span.
+     * Cutting first is what lets a credential through: it removes the
+     * `@` or the separator the pattern matches on.
+     */
+    public function value(string $key, string $value): string;
+
+    /**
      * An application hook, run after the built-in rules.
      *
      * @param  (Closure(string, string): ?string)|null  $custom

@@ -105,13 +105,20 @@ it('routes a failure to the application own error handler by default', function 
     expect($reported)->toBeNull();
 });
 
-it('separates two different problems that share a throw site', function () {
-    // Two container bindings failing from the same line of the same
-    // vendor file, through the same guard. Keyed on class and location
-    // alone they are one failure, and the second is silenced for a
-    // minute — which is exactly when you need to hear about it.
-    FailSafe::guard(static fn () => throw new RuntimeException('Target class [BillingClient] does not exist'));
-    FailSafe::guard(static fn () => throw new RuntimeException('Target class [ShippingClient] does not exist'));
+it('separates two different problems thrown from the same place', function () {
+    // Two container bindings failing through the same guard, on the
+    // same line. Keyed on class and location alone they are one
+    // failure and the second is silenced for a minute, which is
+    // exactly when you need to hear about it.
+    //
+    // Thrown from ONE line, not two: two lines already produce
+    // different keys without the message playing any part, so a test
+    // written that way proves nothing about the message.
+    $fail = static fn (string $class) => throw new RuntimeException("Target class [{$class}] does not exist");
+
+    foreach (['BillingClient', 'ShippingClient'] as $class) {
+        FailSafe::guard(static fn () => $fail($class));
+    }
 
     expect($this->reported)->toHaveCount(2);
 });

@@ -22,9 +22,6 @@ final class RedisSpool implements Spool
         private readonly int $maxItems = 20000,
     ) {}
 
-    /** Whether this server understood `LPOP key count` (Redis 6.2+). */
-    private bool $batchPop = true;
-
     public function push(array $entry): void
     {
         $this->pushMany([$entry]);
@@ -78,49 +75,47 @@ final class RedisSpool implements Spool
 
         $connection = $this->redis->connection($this->connection);
 
-        $tried = false;
+        try {
+            /** @var mixed $raw */
+            $raw = $connection->command('lpop', [$this->key, $count]);
+        } catch (Throwable) {
+            // The command may have RUN and only its reply been lost,
+            // in which case those entries are already off the list.
+            // Popping again here would skip past them for good, so
+            // this tick ships nothing and the next one starts clean.
+            return [];
+        }
 
-        if ($this->batchPop) {
-            try {
-                $tried = true;
-
-                /** @var mixed $raw */
-                $raw = $connection->command('lpop', [$this->key, $count]);
-
-                if (is_array($raw)) {
-                    return $this->decodeAll($raw);
-                }
-            } catch (Throwable) {
-                $this->batchPop = false;
-                $tried = false;
-            }
+        if (is_array($raw)) {
+            return $this->decodeAll($raw);
         }
 
         // A non-array answer is ambiguous: phpredis returns false both
         // for an empty list and for a command the server did not
-        // understand. One single-key LPOP settles it — and treating
-        // "did not understand" as "empty" would have made the spool
-        // look permanently drained on Redis before 6.2, which is
-        // silent, total data loss.
+        // understand. Treating it as "empty" would make the spool look
+        // permanently drained on Redis before 6.2 — silent, total data
+        // loss with the daemon reporting success throughout — so the
+        // per-entry form settles it.
+        //
+        // No latch on the outcome. Inferring "this server is old" from
+        // one ambiguous answer is wrong whenever a producer pushes
+        // between the two calls, and being wrong costs every later
+        // batch its round trips. One wasted command per drain on an
+        // old server is the cheaper mistake.
         $entries = [];
 
         for ($i = 0; $i < $count; $i++) {
-            $raw = $connection->command('lpop', [$this->key]);
+            $encoded = $connection->command('lpop', [$this->key]);
 
-            if (! is_string($raw)) {
+            if (! is_string($encoded)) {
                 break;
             }
 
-            $entry = SpoolEntry::decode($raw);
+            $entry = SpoolEntry::decode($encoded);
 
             if ($entry !== null) {
                 $entries[] = $entry;
             }
-        }
-
-        if ($tried && $entries !== []) {
-            // The list was not empty, so the count form was refused.
-            $this->batchPop = false;
         }
 
         return $entries;

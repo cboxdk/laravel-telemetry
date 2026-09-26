@@ -62,8 +62,11 @@ final class Tracer
     public function __construct(
         private readonly float $sampleRate = 1.0,
         private readonly int $maxBuffer = 5000,
-        private readonly int $maxBufferBytes = 33_554_432,
         private readonly bool $alwaysSampleErrors = true,
+        // Appended, not inserted: `new Tracer(1.0, 5000, false)` is a
+        // call an application can have written, and slipping an int
+        // into third position turns it into a TypeError on upgrade.
+        private readonly int $maxBufferBytes = 33_554_432,
     ) {}
 
     /**

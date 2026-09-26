@@ -25,8 +25,14 @@ final class ApcuMemory implements SharedMemory
      * START of the request: a request that runs for thirty-one seconds
      * and then stores a thirty-second cooldown would otherwise write an
      * entry that is already expired.
+     *
+     * An hour, because the padding has to exceed the longest request
+     * the application runs and there is no way to know that from here.
+     * The cost of overshooting is a key that lingers reading as
+     * expired, which is nothing; the cost of undershooting is a
+     * cooldown that never takes effect.
      */
-    private const LIFETIME_PADDING = 300;
+    private const LIFETIME_PADDING = 3600;
 
     /**
      * @param  string  $namespace  distinguishes applications that share

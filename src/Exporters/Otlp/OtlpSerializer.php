@@ -120,11 +120,12 @@ final readonly class OtlpSerializer
         }
 
         if ($span->events() !== []) {
-            $data['events'] = array_map(fn ($event): array => [
+            $data['events'] = array_map(fn ($event): array => array_filter([
                 'name' => $event->name,
                 'timeUnixNano' => (string) $event->timeUnixNano,
                 'attributes' => $this->attributes($event->attributes),
-            ], $span->events());
+                'droppedAttributesCount' => $event->droppedAttributes ?: null,
+            ], static fn ($value) => $value !== null), $span->events());
         }
 
         if ($span->links() !== []) {

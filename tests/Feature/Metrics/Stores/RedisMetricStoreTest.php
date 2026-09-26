@@ -400,3 +400,21 @@ it('refuses a whole observation at the budget, never half of one', function () {
 
     expect(array_sum($sample->bucketCounts))->toBe($sample->count);
 });
+
+it('refuses a non-finite observation instead of half-writing one', function () {
+    // Redis refuses to increment a sum by NAN, and the bucket has
+    // already been counted by then: buckets outnumbering the count,
+    // from arithmetic that belongs to the application.
+    $definition = new MetricDefinition('http.server.request.duration', MetricType::Histogram, buckets: [10, 100]);
+
+    $this->store->recordHistogram($definition, ['route' => '/a'], 5);
+    $this->store->recordHistogram($definition, ['route' => '/a'], NAN);
+    $this->store->recordHistogram($definition, ['route' => '/a'], INF);
+
+    $family = collect($this->store->collect())->firstWhere(fn ($f) => $f->name() === 'http.server.request.duration');
+    $sample = $family->samples[0];
+
+    expect($sample->count)->toBe(1)
+        ->and(array_sum($sample->bucketCounts))->toBe(1)
+        ->and(is_finite($sample->sum))->toBeTrue();
+});

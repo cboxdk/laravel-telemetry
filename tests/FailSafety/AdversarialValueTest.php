@@ -140,3 +140,14 @@ it('redacts the whole credential, however long it is', function (string $value, 
         'SECRETCLAIM',
     ],
 ]);
+
+it('stays fast on a run of JWT prefixes', function () {
+    // `-` is a base64url character, so this is one unbroken word run
+    // with an `eyJ` every fourteen characters — each one starting
+    // another scan of the remainder. 218KiB of it cost 635ms once the
+    // payload bound came off; the fix was to bound the header segment
+    // instead, which cannot hide a secret.
+    $value = str_repeat('eyJaaaaaaaaaa-', 16_000).'.aaaaaa.!';
+
+    expect(adversarial($value, ['max_value_length' => 0]))->toBeLessThan(50.0);
+});

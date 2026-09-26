@@ -290,3 +290,77 @@ it('holds nothing after a teardown that could not even resolve telemetry', funct
         'attemptSpans' => 0,
     ]);
 });
+
+it('ends the span and closes the native unit even when reporting throws', function () {
+    // Detaching the maps stops the leak and nothing else. The
+    // reporting guard can fail at its first line — resolving the
+    // manager is enough — and then the span was never ended and the
+    // unit never closed. A worker runs the next job in the same
+    // process, and an unclosed native unit means every job after this
+    // one is refused a unit of its own.
+    config([
+        'telemetry.native.enabled' => true,
+        'telemetry.instrument.profiling' => true,
+    ]);
+
+    $runtime = new class implements NativeRuntime
+    {
+        public int $finishes = 0;
+
+        public function available(): bool
+        {
+            return true;
+        }
+
+        public function version(): ?string
+        {
+            return '1.0.0';
+        }
+
+        public function status(): array
+        {
+            return [];
+        }
+
+        public function begin(array $context): int
+        {
+            return 42;
+        }
+
+        public function finish(int $handle, bool $includeProfile = false, bool $includeStacks = false): array
+        {
+            $this->finishes++;
+
+            return [];
+        }
+
+        public function drainCrashes(int $max = 32): array
+        {
+            return [];
+        }
+    };
+
+    app()->instance(NativeRuntime::class, $runtime);
+    Telemetry::addExporter(new CollectingExporter);
+
+    app('queue');
+    $events = app('events');
+    $job = teardownJob(1);
+
+    $events->dispatch(new JobProcessing('redis', $job));
+
+    $spans = new ReflectionProperty(QueueInstrumentation::class, 'jobSpans');
+    $open = $spans->getValue(app(QueueInstrumentation::class));
+    $span = $open[array_key_last($open)] ?? null;
+
+    app()->forgetInstance(TelemetryManager::class);
+    Telemetry::clearResolvedInstances();
+    app()->bind(TelemetryManager::class, static fn () => throw new RuntimeException('the manager is gone'));
+
+    FailSafe::handleExceptionsUsing(fn () => null);
+    $events->dispatch(new JobProcessed('redis', $job));
+    FailSafe::handleExceptionsUsing(null);
+
+    expect($span?->hasEnded())->toBeTrue()
+        ->and($runtime->finishes)->toBe(1);
+});

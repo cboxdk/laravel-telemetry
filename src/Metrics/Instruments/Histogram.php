@@ -42,6 +42,17 @@ final readonly class Histogram
      */
     public function record(float $value, array $labels = []): void
     {
+        // NAN and INF are not observations. Redis refuses to increment
+        // a sum by either, which fails the write HALFWAY through — the
+        // bucket has already been counted — and leaves a series whose
+        // buckets outnumber its count. A division by a zero rate, an
+        // unset timer subtracted from a set one, and there it is; the
+        // arithmetic that produced it belongs to the application and
+        // the corrupt series would belong to us.
+        if (! is_finite($value)) {
+            return;
+        }
+
         FailSafe::guard(function () use ($value, $labels) {
             $traceId = $this->exemplarTraceId !== null ? ($this->exemplarTraceId)() : null;
 

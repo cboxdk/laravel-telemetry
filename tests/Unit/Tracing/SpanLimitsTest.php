@@ -130,5 +130,9 @@ it('bounds the attributes on an event too', function () {
     $span = (new Tracer)->startSpan('work');
     $span->addEvent('cache.get', $attributes);
 
-    expect($span->events()[0]->attributes)->toHaveCount(128);
+    expect($span->events()[0]->attributes)->toHaveCount(128)
+        // And says how many it refused: an event that lost half of
+        // what it was told must not look like one that was told half
+        // as much.
+        ->and($span->events()[0]->droppedAttributes)->toBe(872);
 });

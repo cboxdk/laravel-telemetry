@@ -98,11 +98,13 @@ class OtlpTransport
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$rawHeaders): int {
-                // Headers count against a bound of their own. Two 40KiB
-                // header lines from something that is not a collector
-                // would otherwise sail past the response cap below.
-                if (strlen($rawHeaders) < self::MAX_RESPONSE_BYTES) {
-                    $rawHeaders .= substr($line, 0, self::MAX_RESPONSE_BYTES - strlen($rawHeaders));
+                // Whole lines only, and only while there is room for a
+                // whole one. Cutting a line at the bound turned
+                // `Retry-After: 120` into `Retry-After: 1` — a
+                // truncated value that still parses is worse than no
+                // value, because nothing downstream can tell.
+                if (strlen($rawHeaders) + strlen($line) <= self::MAX_RESPONSE_BYTES) {
+                    $rawHeaders .= $line;
                 }
 
                 return strlen($line);
@@ -184,14 +186,18 @@ class OtlpTransport
         /** @var array<string, mixed>|null $decoded */
         $decoded = json_decode($body, true);
 
-        // A 2xx whose body we cut in half does not decode, and "does
-        // not decode" must not read as "accepted everything". OTLP
-        // reports rejections inside a 200, so this is exactly where a
-        // silent partial loss would hide — the one bug the transport
-        // tests exist for. Reported as accepted, because retrying a
-        // batch the backend took would duplicate it, but the count is
+        // A 2xx whose body we cut does not decode, and "does not
+        // decode" must not read as "accepted everything". OTLP reports
+        // rejections inside a 200, so this is exactly where a silent
+        // partial loss would hide — the one bug the transport tests
+        // exist for. Reported as accepted, because retrying a batch
+        // the backend took would duplicate it, but the count is
         // unknown and the reason says so.
-        if ($decoded === null && $truncated && trim($body) !== '') {
+        //
+        // On `$truncated` alone, not on the retained bytes: a response
+        // whose first 64KiB is whitespace decodes to null and looks
+        // empty, and that is the shape an attacker picks.
+        if ($decoded === null && $truncated) {
             return ExportResult::partial(0, 'the response was too large to read — any partial-success count in it was lost');
         }
 

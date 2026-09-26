@@ -199,3 +199,25 @@ it('ignores a Retry-After it cannot make sense of', function () {
 
     expect($method->invoke($transport, "HTTP/1.1 503 x\r\nRetry-After: soon please\r\n\r\n"))->toBeNull();
 });
+
+it('does not let a truncated header parse as a smaller value', function () {
+    // Cutting a header line at the bound turned `Retry-After: 120`
+    // into `Retry-After: 1`. A truncated value that still parses is
+    // worse than none, because nothing downstream can tell.
+    $transport = new OtlpTransport('http://unused:4318');
+    $method = new ReflectionMethod(OtlpTransport::class, 'retryAfter');
+
+    expect($method->invoke($transport, "HTTP/1.1 503 x\r\nRetry-After: 1"))->toBe(1)
+        ->and($method->invoke($transport, "HTTP/1.1 503 x\r\nRetry-After: 120\r\n"))->toBe(120);
+});
+
+it('does not read a 200 padded with whitespace as a clean accept', function () {
+    // The shape an attacker picks: the retained bytes are blank, so a
+    // check on the body rather than on the truncation flag lets it
+    // through as success.
+    $this->server = StubOtlpServer::start(200, str_repeat(' ', 70_000).'{"partialSuccess":{"rejectedSpans":"42"}}');
+
+    $result = transportFor($this->server)->post('/v1/traces', ['resourceSpans' => []]);
+
+    expect($result->reason)->toContain('too large to read');
+});

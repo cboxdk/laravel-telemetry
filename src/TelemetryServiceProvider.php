@@ -590,7 +590,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $store = match ($driver) {
             'redis' => new RedisMetricStore(
                 redis: $app->make(RedisFactory::class),
-                connectionName: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
+                connection: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
                 prefix: Cast::string($config->get('telemetry.stores.redis.prefix'), 'telemetry'),
                 maxFields: Cast::int($config->get('telemetry.stores.redis.max_fields'), 50_000),
             ),

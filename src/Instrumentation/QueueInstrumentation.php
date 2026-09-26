@@ -717,6 +717,30 @@ final class QueueInstrumentation implements ManagesRequestState
             }
         });
 
+        // Disposal, in guards of its own, AFTER the reporting above.
+        //
+        // Detaching the maps stopped the leak but not the rest of it:
+        // the reporting guard can throw at its first line — resolving
+        // the manager is enough — and then the span was never ended
+        // and the native unit never closed. `schedule:run` and a queue
+        // worker both run the next unit of work in the same process,
+        // and an unclosed native unit means every one after this is
+        // refused. The backstop cannot help, because the ownership it
+        // looks for was already released.
+        //
+        // Each in its own guard so one failing does not skip the next.
+        if ($unit !== null) {
+            FailSafe::guard(static fn () => $unit->discard());
+        }
+
+        if ($profile !== null) {
+            FailSafe::guard(static fn () => $profile->stop(0));
+        }
+
+        if ($span !== null && ! $span->hasEnded()) {
+            FailSafe::guard(static fn () => $span->end());
+        }
+
         if (! $sync) {
             // Worker self-report: the process' CURRENT memory after each job.
             // A distribution that drifts upward over time IS the memory leak —
