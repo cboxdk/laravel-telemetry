@@ -138,6 +138,36 @@ read — and so is anything with a space or a character no token generator
 emits. Over-redaction is its own failure: an operator who cannot read
 the URLs stops trusting the tool.
 
+**Personal identifiers — optional, and off.** A separate layer for the
+structured ones, found in free text:
+
+```php
+'pii' => true,                              // email, credit_card, iban, us_ssn, dk_cpr
+'pii' => ['detectors' => ['email', 'ip']],  // exactly these
+```
+
+It catches what leaked in by accident — an email in an exception
+message, a card number in a SQL string, a CPR in a URL path — which is
+how personal data actually reaches an observability pipeline. Nobody
+decides to put it there.
+
+Every detector that can be checksummed is: Luhn for cards, mod-97 for
+IBANs, the unissued ranges excluded for SSNs. Without that a sixteen-
+digit number is a card far more often than it is an order id, and the
+first person to see a primary key redacted switches the whole thing off
+— which is worse than never having shipped it. `ip` and `phone` are not
+in the defaults: an IP is also how you find the one host that is broken,
+and a bare national phone number is indistinguishable from an order id.
+
+It costs about 2µs a span on top of the redaction pass.
+
+**It is a control, not compliance.** No configuration of it makes an
+application GDPR-, HIPAA- or SOC 2-compliant. Those are organisational,
+and most of what they cover cannot be pattern-matched: HIPAA names
+eighteen identifiers and this sees six, because a person's name, their
+address and a medical record number have no form to recognise. Those
+need the key rules above, and the discipline not to put them in a span.
+
 **Or replace the model.** `RedactsTelemetry` is a contract, for an
 organisation whose redaction policy is its own — a compliance list, a
 shared internal package, a scanner that already exists elsewhere:

@@ -41,6 +41,7 @@ final class Redactor implements RedactsTelemetry
      * @param  array<string, string>  $patterns  regex => replacement
      * @param  list<string>  $safeKeys
      * @param  list<string>  $credentialPrefixes
+     * @param  list<string>  $personalData
      */
     public function __construct(
         private readonly bool $enabled = true,
@@ -56,6 +57,8 @@ final class Redactor implements RedactsTelemetry
         private readonly bool $valueShape = true,
         /** How long an unrecognised value must be before its shape is evidence. */
         private readonly int $valueMinLength = 24,
+        /** Structured personal identifiers to scrub out of free text. Empty = off. */
+        private readonly array $personalData = [],
     ) {}
 
     /**
@@ -109,6 +112,11 @@ final class Redactor implements RedactsTelemetry
             valueMinLength: is_numeric($config['value_min_length'] ?? null)
                 ? max(8, (int) $config['value_min_length'])
                 : 24,
+            // Off unless asked for. It is a real cost per value and a
+            // real risk of removing something an operator needed, so it
+            // is a decision an organisation makes rather than one made
+            // for them.
+            personalData: self::personalDataFromConfig($config),
         );
     }
 
@@ -408,6 +416,36 @@ final class Redactor implements RedactsTelemetry
     }
 
     /**
+     * Which personal-data detectors the config asks for.
+     *
+     * `true` means the defaults; a list names them exactly. Unknown
+     * names are dropped rather than throwing, because a typo in a
+     * config file must not break telemetry — and `telemetry:doctor`
+     * reports what is actually active.
+     *
+     * @param  array<string, mixed>  $config
+     * @return list<string>
+     */
+    private static function personalDataFromConfig(array $config): array
+    {
+        $pii = $config['pii'] ?? null;
+
+        if ($pii === null || $pii === false) {
+            return [];
+        }
+
+        $detectors = $pii === true
+            ? PersonalData::defaultDetectors()
+            : (self::stringList(is_array($pii) ? ($pii['detectors'] ?? null) : null) ?? PersonalData::defaultDetectors());
+
+        if (is_array($pii) && ($pii['enabled'] ?? true) === false) {
+            return [];
+        }
+
+        return array_values(array_intersect($detectors, PersonalData::availableDetectors()));
+    }
+
+    /**
      * The issuer prefixes as one anchored pattern, built on first use.
      *
      * Memoised on the instance rather than statically: the list is
@@ -495,6 +533,18 @@ final class Redactor implements RedactsTelemetry
      *    never mixed case — because a UUID in a URL is almost always an
      *    id somebody needs to read.
      */
+    /**
+     * The personal-identifier detectors in effect — what `telemetry:doctor`
+     * reports, and the closest thing this package has to evidence of a
+     * control for an audit.
+     *
+     * @return list<string>
+     */
+    public function personalDataDetectors(): array
+    {
+        return $this->personalData;
+    }
+
     public function valueLooksLikeCredential(string $value): bool
     {
         $length = strlen($value);
@@ -765,6 +815,13 @@ final class Redactor implements RedactsTelemetry
         }
 
         $value = $this->redactEncodedParameters($value);
+
+        // Personal identifiers last among the built-ins: by here the
+        // credentials are gone, so this walks a smaller string, and an
+        // email inside a redacted token is no longer there to find.
+        if ($this->personalData !== []) {
+            $value = PersonalData::scrub($value, $this->personalData, $this->replacement);
+        }
 
         if ($this->custom !== null) {
             $value = FailSafe::guard(fn (): string => ($this->custom)($key, $value) ?? $value) ?? $value;

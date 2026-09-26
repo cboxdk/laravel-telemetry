@@ -380,6 +380,36 @@ return [
         // the false positives start immediately below here.
         'value_shape' => env('TELEMETRY_REDACTION_VALUE_SHAPE', true),
         'value_min_length' => env('TELEMETRY_REDACTION_VALUE_MIN_LENGTH', 24),
+
+        // Structured personal identifiers, found in free text. OFF by
+        // default, because it costs something per value and because
+        // removing data an operator needed is its own failure.
+        //
+        // This is a defence-in-depth CONTROL, not compliance. It catches
+        // identifiers that leaked in by accident — an email in an
+        // exception message, a card number in a SQL string, a CPR in a
+        // URL path — which is how personal data actually reaches an
+        // observability pipeline; nobody decides to put it there. No
+        // configuration of it makes an application GDPR-, HIPAA- or
+        // SOC 2-compliant: HIPAA names eighteen identifiers and this
+        // sees six, because a person's name, their address and a
+        // medical record number have no form to recognise. Those need
+        // the key rules above and the discipline not to put them in a
+        // span.
+        //
+        // Every detector that can be checksummed is: a sixteen-digit
+        // number is an order id far more often than a card, and without
+        // Luhn this would redact the primary key of every table in the
+        // application.
+        //
+        //   'pii' => true                              // the defaults
+        //   'pii' => ['detectors' => ['email', 'ip']]  // exactly these
+        //
+        // Available: email, credit_card, iban, us_ssn, dk_cpr, ip, phone.
+        // `ip` and `phone` are not in the defaults — an IP is also how
+        // you find the one host that is broken, and a bare phone number
+        // is indistinguishable from an order id.
+        'pii' => env('TELEMETRY_REDACTION_PII', false),
     ],
 
     /*

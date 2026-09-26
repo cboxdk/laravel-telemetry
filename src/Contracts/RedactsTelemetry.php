@@ -68,6 +68,15 @@ interface RedactsTelemetry
     public function keyIsSensitive(string $key): bool;
 
     /**
+     * The personal-identifier detectors in effect, for `telemetry:doctor`
+     * to report. Return an empty list when the implementation has no
+     * such concept.
+     *
+     * @return list<string>
+     */
+    public function personalDataDetectors(): array;
+
+    /**
      * Whether this VALUE looks like a credential whatever it was called.
      *
      * The half of the model that matters for auto-instrumentation: a

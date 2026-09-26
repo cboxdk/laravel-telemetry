@@ -230,6 +230,8 @@ final class DoctorCommand extends Command
             }
         }
 
+        $this->reportPersonalData();
+
         if ($stale === []) {
             $this->components->twoColumnDetail('Redaction', '<fg=green>OK — the package defaults are in effect</>');
 
@@ -267,6 +269,32 @@ final class DoctorCommand extends Command
         $this->components->warn(
             'redaction.replace_defaults is on, so the package lists are NOT unioned in and the entries above '
             .'are not running. Turn it off, or copy the missing entries in deliberately.',
+        );
+    }
+
+    /**
+     * Which personal-identifier detectors are actually running.
+     *
+     * Printed whether or not any are, because "none" is the answer an
+     * auditor is asking for as often as a list — and because an
+     * operator who set `pii => true` in a config the package never read
+     * would otherwise have no way to find out.
+     */
+    private function reportPersonalData(): void
+    {
+        $active = Redactor::fromConfig(
+            Cast::stringKeyedArray(config('telemetry.redaction', [])),
+        )->personalDataDetectors();
+
+        if ($active === []) {
+            $this->components->twoColumnDetail('Personal identifiers', 'not scrubbed (redaction.pii is off)');
+
+            return;
+        }
+
+        $this->components->twoColumnDetail(
+            'Personal identifiers',
+            '<fg=green>scrubbing '.implode(', ', $active).'</>',
         );
     }
 
