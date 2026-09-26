@@ -669,7 +669,16 @@ final class Redactor implements RedactsTelemetry
     {
         return [
             // JWTs — three base64url segments.
-            '/\beyJ[\w-]{10,}\.[\w-]{6,}\.[\w-]{6,}/' => '[REDACTED:jwt]',
+            //
+            // Every quantifier here and below is bounded and possessive.
+            // An unbounded one costs (start positions x scan length) on
+            // input that nearly matches, and these patterns run over
+            // attribute values an attacker can choose: a 62KiB header
+            // value of `a+.-` repeated cost 198ms of CPU inside the
+            // request it was measuring. The bounds are far above any
+            // real credential and the possessive quantifiers say there
+            // is nothing to reconsider on failure.
+            '/\beyJ[\w-]{10,4096}+\.[\w-]{6,4096}+\.[\w-]{6,4096}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
             //
             // Two ways to qualify, because a flat length threshold cannot
@@ -691,9 +700,17 @@ final class Redactor implements RedactsTelemetry
             // Only the scheme is case-insensitive. An `/i` over the whole
             // pattern makes `[A-Z0-9]` match lowercase too and swallows the
             // prose, which is how the first attempt at this failed.
-            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,}={0,2}|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]*)/' => '$1 [REDACTED]',
+            '/\b((?i:Bearer|Basic))\s+(?:[A-Za-z0-9._~+\/-]{16,4096}+={0,2}|(?=[A-Za-z0-9._~+\/=-]{4,})[A-Za-z][a-z]*+[A-Z0-9_~+\/][A-Za-z0-9._~+\/=-]{0,4096})/' => '$1 [REDACTED]',
             // Userinfo in URLs: scheme://user:pass@host.
-            '#\b([a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@#i' => '$1[REDACTED]@',
+            //
+            // Anchored on `://` and not on the scheme. Matching the
+            // scheme meant an unbounded run of scheme characters before
+            // it, which is what made 62KiB of `a+.-` cost 198ms; and
+            // bounding that run instead would have stopped matching a
+            // credential preceded by a long unbroken word, because the
+            // run had been swallowing it. The scheme was never needed:
+            // it is reproduced verbatim in the replacement.
+            '#://[^/@\s:]{1,4096}+:[^/@\s]{1,4096}+@#' => '://[REDACTED]@',
             // NOTE: the two query-parameter patterns that used to live here
             // are gone. Matching a parameter by literal text could never see
             // that `%74oken=` and `token%5B%5D=` are the same secret, and a

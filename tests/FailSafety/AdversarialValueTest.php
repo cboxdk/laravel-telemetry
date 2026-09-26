@@ -99,3 +99,17 @@ it('replaces a value too long to scan rather than scanning half of it', function
     expect($out)->toBe('[REDACTED]')
         ->not->toContain('hunter2');
 });
+
+it('stays fast on the shapes that only bite once the cap is off', function (string $value) {
+    // With max_value_length at 0 there is no scan ceiling either, so
+    // the patterns see the whole value. Every quantifier in them is
+    // bounded for this reason: the userinfo pattern's unbounded scheme
+    // made 62KiB of `a+.-` cost 198ms of CPU, inside the request whose
+    // telemetry it was scrubbing.
+    expect(adversarial($value, ['max_value_length' => 0]))->toBeLessThan(25.0);
+})->with([
+    'scheme-shaped run' => [str_repeat('a+.-', 16_000).'@'],
+    'many schemes, no match' => ['@'.str_repeat('a://', 8_000).str_repeat('b', 30_000)],
+    'jwt prefix, no dots' => ['eyJ'.str_repeat('a', 60_000)],
+    'bearer with a long tail' => ['Bearer '.str_repeat('a', 60_000)],
+]);
