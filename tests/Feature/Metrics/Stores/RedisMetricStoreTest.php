@@ -337,5 +337,49 @@ it('does not re-register a metric it already registered this window', function (
     (new RedisMetricStore(app(Factory::class), 'default', $this->prefix))
         ->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
 
-    expect($commands)->toBe(['hincrbyfloat']);
+    expect($commands)->toBe(['eval']);
+});
+
+it('stops a runaway label from growing the family without bound', function () {
+    // The last line of defence. Every label this package produces is
+    // classified or bounded at its source, but an application declares
+    // its own metrics too, and a label built from a user id is the
+    // oldest mistake in the book. The budget lives in the script
+    // because the series already stored live in Redis: no process can
+    // count them on its own, and under FPM a per-process tally is a
+    // per-request one.
+    $store = new RedisMetricStore(app(Factory::class), 'default', $this->prefix, maxFields: 20);
+    $definition = new MetricDefinition('orders.created', MetricType::Counter);
+
+    for ($i = 0; $i < 200; $i++) {
+        $store->incrementCounter($definition, ['user' => (string) $i], 1.0);
+    }
+
+    $fields = app(Factory::class)->connection()->hgetall("{$this->prefix}:counter:orders.created");
+    $family = collect($store->collect())->firstWhere(fn ($f) => $f->name() === 'orders.created');
+
+    expect(count($family->samples))->toBeLessThan(25)
+        // And it says so, rather than leaving an operator to wonder
+        // where the rest went.
+        ->and((int) ($fields['__overflow'] ?? 0))->toBeGreaterThan(150);
+});
+
+it('keeps counting a series it already has after the budget is reached', function () {
+    // Refusing NEW series must not stop the existing ones. The metrics
+    // that were already there are the ones the dashboards are built on.
+    $store = new RedisMetricStore(app(Factory::class), 'default', $this->prefix, maxFields: 5);
+    $definition = new MetricDefinition('orders.created', MetricType::Counter);
+
+    $store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    for ($i = 0; $i < 50; $i++) {
+        $store->incrementCounter($definition, ['tenant' => "t{$i}"], 1.0);
+    }
+
+    $store->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    $family = collect($store->collect())->firstWhere(fn ($f) => $f->name() === 'orders.created');
+    $acme = collect($family->samples)->first(fn ($sample) => ($sample->labels['tenant'] ?? null) === 'acme');
+
+    expect($acme->value)->toBe(2.0);
 });

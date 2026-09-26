@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
 
 /**
  * Laravel lets an application name a queue at dispatch time, and
@@ -86,4 +87,26 @@ it('leaves the name alone when nobody configured a classifier', function () {
     Event::dispatch(new JobProcessed('redis', $job));
 
     Telemetry::recordedMetrics('queue.jobs.processed')->assertLabelValues('queue', ['emails']);
+});
+
+it('groups job names through the classifier before they become labels', function () {
+    // displayName is the job's to choose, and a job that names itself
+    // after what it is working on mints a series per tenant across
+    // several histograms. The class name needs nothing; a name built
+    // at dispatch needs this.
+    Telemetry::classifyJobsUsing(fn (string $job) => Str::before($job, ' '));
+
+    expect(Telemetry::classifyJob('App\Jobs\SyncTenant tenant-4812'))->toBe('App\Jobs\SyncTenant')
+        ->and(Telemetry::classifyJob('App\Jobs\SyncTenant tenant-9'))->toBe('App\Jobs\SyncTenant');
+});
+
+it('keeps the job name as-is when no classifier is registered', function () {
+    expect(Telemetry::classifyJob('App\Jobs\Ship'))->toBe('App\Jobs\Ship')
+        ->and(Telemetry::classifyJob(null))->toBe('unknown');
+});
+
+it('falls back to one bucket when the job classifier throws', function () {
+    Telemetry::classifyJobsUsing(fn (string $job) => throw new RuntimeException('bad classifier'));
+
+    expect(Telemetry::classifyJob('App\Jobs\Ship'))->toBe('other');
 });

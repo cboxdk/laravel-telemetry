@@ -106,6 +106,19 @@ return [
         'redis' => [
             'connection' => env('TELEMETRY_REDIS_CONNECTION', 'default'),
             'prefix' => env('TELEMETRY_REDIS_PREFIX', 'telemetry'),
+
+            // The last line of defence against a runaway label: the most
+            // hash fields ONE metric family may hold before new series
+            // are refused. Existing series keep being written, and the
+            // refusals are counted into a `__overflow` field that
+            // `telemetry:doctor` reports — a ceiling nobody is told
+            // about is just missing data.
+            //
+            // A field is not a series: a histogram spends one per bucket
+            // plus a sum and a count, so ~14 fields per series on the
+            // default ladder. The default is far above any sane label
+            // set and exists for the ones that are not. 0 disables it.
+            'max_fields' => env('TELEMETRY_REDIS_MAX_FIELDS', 50000),
         ],
 
         'apcu' => [

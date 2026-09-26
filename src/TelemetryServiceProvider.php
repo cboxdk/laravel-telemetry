@@ -591,6 +591,7 @@ class TelemetryServiceProvider extends ServiceProvider
                 redis: $app->make(RedisFactory::class),
                 connection: Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
                 prefix: Cast::string($config->get('telemetry.stores.redis.prefix'), 'telemetry'),
+                maxFields: Cast::int($config->get('telemetry.stores.redis.max_fields'), 50_000),
             ),
             'apcu' => new ApcuMetricStore(
                 prefix: Cast::string($config->get('telemetry.stores.apcu.prefix'), 'telemetry'),

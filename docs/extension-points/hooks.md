@@ -202,6 +202,24 @@ reasonable, because you may genuinely not care about a customer's webhook
 endpoint. Dropping a queue would silently remove work the application
 actually did from its own throughput numbers.
 
+## Job name classification — `classifyJobsUsing()`
+
+`job.name` is a metric label on the queue metrics, and it comes from the
+payload's `displayName` — which Laravel lets a job set for itself. A
+job class name is bounded by your code and needs nothing here. A
+display name built at dispatch time is bounded only by your own
+discipline, and `"SyncTenant tenant-4812"` is one permanent series per
+tenant.
+
+```php
+Telemetry::classifyJobsUsing(fn (string $job) => Str::before($job, ' '));
+```
+
+Like the queue classifier, it cannot drop a series: returning `null`
+collapses the job to `other`, because work the application actually did
+should not vanish from its own throughput numbers. Spans keep the real
+name.
+
 ## Analytics session id — `resolveSessionUsing()`
 
 Only active when `telemetry.analytics.enabled` is on. Overrides how the
@@ -268,6 +286,7 @@ Telemetry::resolveClientGeoUsing(function ($request) {
 | `classifyCacheKeysUsing()` | cache grouping/dropping | `fn (string $store, string $key): ?string` |
 | `classifyHttpHostsUsing()` | outgoing-host metric label (bounded!) | `fn (string $host): ?string` |
 | `classifyQueuesUsing()` | queue metric label (bounded!) | `fn (string $queue): ?string` |
+| `classifyJobsUsing()` | job metric label (bounded!) | `fn (string $job): ?string` |
 | `redactUsing()` | last-pass redaction | `fn (string $key, string $value): ?string` |
 | `handleExceptionsUsing()` | internal-failure reporting | `fn (Throwable $e): void` |
 | `Telemetry::context()` | ambient dimensions on all signals | — |

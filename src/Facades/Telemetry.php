@@ -30,6 +30,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static void classifyCacheKeysUsing(\Closure|null $classifier)
  * @method static void classifyHttpHostsUsing(\Closure|null $classifier)
  * @method static void classifyQueuesUsing(\Closure|null $classifier)
+ * @method static void classifyJobsUsing(\Closure|null $classifier)
+ * @method static string classifyJob(string|null $job)
  * @method static void resolveUserUsing(\Closure|null $resolver)
  * @method static void resolveSessionUsing(\Closure|null $resolver)
  * @method static void resolveClientGeoUsing(\Closure|null $resolver)

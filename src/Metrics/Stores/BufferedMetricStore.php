@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Contracts\ReportsOverflow;
 use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\Labels;
 use Cbox\Telemetry\Metrics\MetricDefinition;
@@ -22,7 +23,7 @@ use Throwable;
  * buffer. The buffer force-flushes at $maxPending operations so
  * long-running workers without flush points stay bounded.
  */
-final class BufferedMetricStore implements MetricStore
+final class BufferedMetricStore implements MetricStore, ReportsOverflow
 {
     /** @var array<string, array{definition: MetricDefinition, series: array<string, float>}> */
     private array $counters = [];
@@ -282,6 +283,17 @@ final class BufferedMetricStore implements MetricStore
     /**
      * Scrapes and exports must see everything written so far.
      */
+    /**
+     * Straight through to the store behind the buffer — the budget is
+     * enforced where the series actually live.
+     *
+     * @return array<string, int>
+     */
+    public function overflowingFamilies(): array
+    {
+        return $this->inner instanceof ReportsOverflow ? $this->inner->overflowingFamilies() : [];
+    }
+
     public function collect(): array
     {
         $this->flushBuffer();

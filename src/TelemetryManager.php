@@ -72,6 +72,8 @@ class TelemetryManager
 
     private ?Closure $queueClassifier = null;
 
+    private ?Closure $jobClassifier = null;
+
     private ?Closure $sessionResolver = null;
 
     private ?Closure $clientGeoResolver = null;
@@ -648,6 +650,39 @@ class TelemetryManager
     /**
      * @internal used by the queue instrumentation
      */
+    /**
+     * Group job names before they become a metric label.
+     *
+     * `job.name` comes from the payload's displayName, which Laravel
+     * lets a job set for itself — and a job that names itself after
+     * what it is working on ("SyncTenant tenant-4812") is one
+     * permanent series per tenant on several histograms. The class
+     * name is bounded by the code and needs nothing; a displayName
+     * built at dispatch is bounded only by the application's
+     * discipline, and this is where it gets some.
+     *
+     *     Telemetry::classifyJobsUsing(fn (string $job) => Str::before($job, ' '));
+     *
+     * @param  (Closure(string): ?string)|null  $classifier
+     */
+    public function classifyJobsUsing(?Closure $classifier): void
+    {
+        $this->jobClassifier = $classifier;
+    }
+
+    public function classifyJob(?string $job): string
+    {
+        $job ??= 'unknown';
+
+        if ($this->jobClassifier === null) {
+            return $job;
+        }
+
+        $group = FailSafe::guard(fn () => ($this->jobClassifier)($job));
+
+        return is_string($group) && $group !== '' ? $group : 'other';
+    }
+
     public function classifyQueue(?string $queue): string
     {
         $queue ??= 'default';

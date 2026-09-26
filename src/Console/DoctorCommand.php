@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Contracts\NativeRuntime;
+use Cbox\Telemetry\Contracts\ReportsOverflow;
 use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\Spool;
@@ -13,6 +14,7 @@ use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Support\Cast;
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\SharedState;
 use Cbox\Telemetry\TelemetryManager;
@@ -62,6 +64,7 @@ final class DoctorCommand extends Command
         $this->components->info('Telemetry is enabled.');
 
         $healthy = $this->checkStore();
+        $this->checkSeriesBudget();
         $this->checkCooldownState();
         $this->checkCacheCollision();
         $this->checkRedaction();
@@ -148,6 +151,41 @@ final class DoctorCommand extends Command
      * informational, not a failure — the setup still works, it's just
      * one `cache:clear` away from an empty dashboard.
      */
+    /**
+     * Metric families that have hit their field budget.
+     *
+     * The store refuses new series past the budget and counts the
+     * refusals; this is where an operator finds out. A family in
+     * overflow means a label somewhere is carrying a value it should
+     * not — a user id, a URL, a job payload — and the fix is at that
+     * label, not here.
+     */
+    private function checkSeriesBudget(): void
+    {
+        $overflowing = FailSafe::guard(function (): array {
+            $store = app(MetricStore::class);
+
+            if (! $store instanceof ReportsOverflow) {
+                return [];
+            }
+
+            return $store->overflowingFamilies();
+        }) ?? [];
+
+        if ($overflowing === []) {
+            $this->components->twoColumnDetail('Series budget', '<fg=green>no family over its field budget</>');
+
+            return;
+        }
+
+        foreach ($overflowing as $name => $refused) {
+            $this->components->twoColumnDetail(
+                "Series budget [{$name}]",
+                "<fg=yellow>{$refused} series refused — a label is unbounded</>",
+            );
+        }
+    }
+
     /**
      * Whether the circuit breaker and the report throttle mean anything
      * on this SAPI.

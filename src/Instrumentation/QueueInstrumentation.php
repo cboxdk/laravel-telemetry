@@ -612,7 +612,10 @@ final class QueueInstrumentation implements ManagesRequestState
             // time, so `->onQueue("tenant-{$id}")` is one permanent
             // series per tenant on every metric below — several of them
             // histograms. See TelemetryManager::classifyQueuesUsing().
-            $labels = ['job.name' => $job, 'queue' => $this->telemetry()->classifyQueue($queue)];
+            $labels = [
+                'job.name' => $this->telemetry()->classifyJob($job),
+                'queue' => $this->telemetry()->classifyQueue($queue),
+            ];
 
             if ($span = array_pop($this->jobSpans)) {
                 $id = spl_object_id($span);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Metrics\Stores;
 
 use Cbox\Telemetry\Contracts\MetricStore;
+use Cbox\Telemetry\Contracts\ReportsOverflow;
 use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\HistogramSample;
 use Cbox\Telemetry\Metrics\Labels;
@@ -37,26 +38,37 @@ use Throwable;
  *
  * Collect is SMEMBERS + HGETALL per family — never KEYS or SCAN.
  */
-final class RedisMetricStore implements MetricStore
+final class RedisMetricStore implements MetricStore, ReportsOverflow
 {
     /**
      * Applies a flat list of (op, field, value) triples to one hash.
      * `i` HINCRBY, `f` HINCRBYFLOAT, `s` HSET.
      */
     private const APPLY_SCRIPT = <<<'LUA'
-        local i = 1
+        local limit = tonumber(ARGV[1])
+        local refused = 0
+        local i = 2
         while i <= #ARGV do
             local op = ARGV[i]
-            if op == 'i' then
-                redis.call('HINCRBY', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+            local field = ARGV[i + 1]
+            local value = ARGV[i + 2]
+            if limit > 0
+                and redis.call('HEXISTS', KEYS[1], field) == 0
+                and redis.call('HLEN', KEYS[1]) >= limit then
+                refused = refused + 1
+            elseif op == 'i' then
+                redis.call('HINCRBY', KEYS[1], field, value)
             elseif op == 'f' then
-                redis.call('HINCRBYFLOAT', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+                redis.call('HINCRBYFLOAT', KEYS[1], field, value)
             else
-                redis.call('HSET', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+                redis.call('HSET', KEYS[1], field, value)
             end
             i = i + 3
         end
-        return 1
+        if refused > 0 then
+            redis.call('HINCRBY', KEYS[1], '__overflow', refused)
+        end
+        return refused
         LUA;
 
     /** Whether this server runs EVAL. Set false once, if it does not. */
@@ -66,6 +78,7 @@ final class RedisMetricStore implements MetricStore
         private readonly Factory $redis,
         private readonly string $connection = 'default',
         private readonly string $prefix = 'telemetry',
+        private readonly int $maxFields = 50_000,
     ) {}
 
     public function incrementCounter(MetricDefinition $definition, array $labels, float $by): void
@@ -73,7 +86,7 @@ final class RedisMetricStore implements MetricStore
         $key = $this->familyKey(MetricType::Counter, $definition->name);
 
         $this->initialize($definition, $key);
-        $this->connection()->hincrbyfloat($key, Labels::encode($labels), $by);
+        $this->apply($key, [['f', Labels::encode($labels), (string) $by]]);
     }
 
     public function setGauge(MetricDefinition $definition, array $labels, float $value): void
@@ -87,7 +100,7 @@ final class RedisMetricStore implements MetricStore
         $key = $this->familyKey($this->scalarType($definition), $definition->name);
 
         $this->initialize($definition, $key);
-        $this->connection()->hset($key, Labels::encode($labels), (string) $value);
+        $this->apply($key, [['s', Labels::encode($labels), (string) $value]]);
     }
 
     public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
@@ -95,7 +108,7 @@ final class RedisMetricStore implements MetricStore
         $key = $this->familyKey($this->scalarType($definition), $definition->name);
 
         $this->initialize($definition, $key);
-        $this->connection()->hincrbyfloat($key, Labels::encode($labels), $delta);
+        $this->apply($key, [['f', Labels::encode($labels), (string) $delta]]);
     }
 
     public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
@@ -168,6 +181,15 @@ final class RedisMetricStore implements MetricStore
      * improvement must not be able to stop metrics being written at
      * all.
      *
+     * The script also enforces the per-family field budget, which is
+     * the only place a budget can be enforced correctly: the series
+     * already stored live in Redis, so no process can know the count
+     * on its own, and under PHP-FPM a per-process tally is a
+     * per-request one. Inside the script HEXISTS and HLEN are local
+     * calls — the budget costs nothing on the wire. Refused writes are
+     * counted into a `__overflow` field on the family, because a
+     * cardinality ceiling nobody is told about is just missing data.
+     *
      * @param  list<array{0: 'i'|'f'|'s', 1: string, 2: string}>  $operations
      */
     private function apply(string $key, array $operations): void
@@ -179,7 +201,7 @@ final class RedisMetricStore implements MetricStore
         $connection = $this->connection();
 
         if ($this->scripting) {
-            $arguments = [];
+            $arguments = [(string) $this->maxFields];
 
             foreach ($operations as [$op, $field, $value]) {
                 $arguments[] = $op;
@@ -284,6 +306,27 @@ final class RedisMetricStore implements MetricStore
         // transient failure disabled initialization for the life of the
         // process, permanently.
         SharedState::remember($memo, $now + self::REINITIALIZE_AFTER_SECONDS);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function overflowingFamilies(): array
+    {
+        $overflowing = [];
+        $connection = $this->connection();
+
+        foreach (MetricType::cases() as $type) {
+            foreach ($this->names($type) as $name) {
+                $refused = $connection->hget($this->familyKey($type, $name), '__overflow');
+
+                if (is_string($refused) && (int) $refused > 0) {
+                    $overflowing[$name] = (int) $refused;
+                }
+            }
+        }
+
+        return $overflowing;
     }
 
     public function collect(): array
