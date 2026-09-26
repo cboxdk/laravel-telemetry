@@ -88,7 +88,13 @@ final class RedisInstrumentation
                 return;
             }
 
-            foreach ($redis->connections() as $name => $connection) {
+            // `null`, not `[]`, until the first connection exists — and
+            // at boot there usually is none. Iterating it raised a
+            // warning that Laravel turns into an ErrorException, which
+            // the guard above swallowed and then REPORTED: one error in
+            // the log per boot, in every application, forever. A
+            // swallowed failure is only harmless if it is also silent.
+            foreach ($redis->connections() ?? [] as $name => $connection) {
                 if (! is_object($connection)
                     || in_array((string) $name, self::RESERVED_KEYS, true)
                     || in_array((string) $name, $this->ignoreConnections, true)) {

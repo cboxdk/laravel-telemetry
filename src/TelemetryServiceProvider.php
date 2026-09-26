@@ -383,31 +383,62 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         $config = $this->app->make('config');
-        $registry = $this->app->make(Registry::class);
 
-        // Only meaningful when OTLP is actually in use — the breaker is an
-        // OtlpExporter concern, and an unused gauge is just scrape noise.
-        if (in_array('otlp', (array) $config->get('telemetry.exporters', []), true)) {
-            // 1 while the per-process OTLP circuit breaker is open (recent
-            // transport failure), 0 otherwise — alert on sustained 1.
-            $registry->gauge(
-                'telemetry.export.circuit_open',
-                fn (): float => OtlpExporter::circuitOpen() ? 1.0 : 0.0,
-                description: 'OTLP export circuit breaker state (1 = open)',
-                unit: '1',
-            );
+        // Deferred, like the host provider. Resolving the Registry
+        // resolves the MetricStore, which on the Redis driver builds the
+        // store and the manager behind it — for every request, whether or
+        // not anything ever records a metric. No socket is opened, but
+        // "passive listener" means not building the machinery either
+        // until something asks.
+        $this->onRegistry(function (Registry $registry) use ($config): void {
+            // Only meaningful when OTLP is actually in use — the breaker
+            // is an OtlpExporter concern, and an unused gauge is just
+            // scrape noise.
+            if (in_array('otlp', (array) $config->get('telemetry.exporters', []), true)) {
+                // 1 while the per-process OTLP circuit breaker is open
+                // (recent transport failure), 0 otherwise — alert on
+                // sustained 1.
+                $registry->gauge(
+                    'telemetry.export.circuit_open',
+                    fn (): float => OtlpExporter::circuitOpen() ? 1.0 : 0.0,
+                    description: 'OTLP export circuit breaker state (1 = open)',
+                    unit: '1',
+                );
+            }
+
+            // Spool backlog — a climbing depth means the daemon isn't
+            // keeping up (or is down). Only meaningful when the spool is
+            // enabled.
+            if ($config->get('telemetry.otlp.spool.enabled', false)) {
+                $registry->gauge(
+                    'telemetry.spool.depth',
+                    fn (): float => (float) (FailSafe::guard(fn () => $this->app->make(Spool::class)->size()) ?? 0),
+                    description: 'Pending payloads in the OTLP spool',
+                    unit: '',
+                );
+            }
+        });
+    }
+
+    /**
+     * Run when the Registry is first built, or now if it already has
+     * been.
+     *
+     * `afterResolving` alone would miss an application that resolved it
+     * during its own boot, and `make()` alone would build it in every
+     * application that never records anything.
+     *
+     * @param  Closure(Registry): void  $register
+     */
+    private function onRegistry(Closure $register): void
+    {
+        if ($this->app->resolved(Registry::class)) {
+            $register($this->app->make(Registry::class));
+
+            return;
         }
 
-        // Spool backlog — a climbing depth means the daemon isn't keeping
-        // up (or is down). Only meaningful when the spool is enabled.
-        if ($config->get('telemetry.otlp.spool.enabled', false)) {
-            $registry->gauge(
-                'telemetry.spool.depth',
-                fn (): float => (float) (FailSafe::guard(fn () => $this->app->make(Spool::class)->size()) ?? 0),
-                description: 'Pending payloads in the OTLP spool',
-                unit: '',
-            );
-        }
+        $this->app->afterResolving(Registry::class, $register);
     }
 
     /**

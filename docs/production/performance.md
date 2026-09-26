@@ -78,6 +78,30 @@ way it can in Node or Python. The ecosystem has two standard answers:
 | Observable gauge | zero until scrape/flush |
 | Disabled (`TELEMETRY_ENABLED=false`) | ~zero: no listeners, no-op instruments |
 
+### Measured per-operation, not reasoned
+
+`vendor/bin/pest --group=benchmark` runs these. The absolute figures are
+one machine's; the deltas are the package's, and each is the same work
+measured with the listener armed and with it absent.
+
+| Hot path | Cost |
+|---|---|
+| Redis command, `redis_failures` on | **0.6 µs** — and that whole figure is Laravel's dispatch, not our handler, which measures as noise. Without the switch the connection has no dispatcher and nothing is dispatched at all, so this is the true price of hearing that a node died: at 200 commands a request, 0.12 ms. |
+| Query, outside a trace | **+1 µs** — the early return an unsampled or untraced request pays. |
+| Query, inside a sampled trace | **+11.5 µs** — of which ~6 µs is the tallies and the counter, and ~5.5 µs is the detail span. |
+| N+1 detection | **+0.2 µs** — an `xxh3` of the statement. Leave it on. |
+| Outgoing HTTP hop | **+20 µs** — against a network call measured in milliseconds. |
+| Listeners registered on defaults | **84** |
+
+The one number worth acting on is the query path. Fifty queries in a
+request is half a millisecond; five hundred — an N+1 you would want to
+know about anyway — is six. Both knobs below apply to it, and the split
+above says which one to reach for: `traces.queries.min_duration_ms`
+removes the span and keeps the counters, `instrument.queries=false`
+removes both.
+
+Everything else is comfortably inside the noise of the work it measures.
+
 ## Tuning knobs
 
 - **Sample traces** in high-traffic apps: `TELEMETRY_TRACES_SAMPLE_RATE=0.1`.
@@ -118,6 +142,35 @@ disable buffering if you need write-through semantics.
   loop resolves the same object.
 - Every capture path is exception-guarded; telemetry failure never becomes
   application failure.
+
+## When telemetry itself fails
+
+Every capture and export path runs through `FailSafe::guard`, which
+swallows the failure and hands it to `report()`. Two properties matter
+more than any signal the package collects, and both are covered by a
+test suite (`tests/FailSafety`) that breaks the package on purpose:
+
+- **Nothing reaches the application.** Every instrumented Laravel event
+  is dispatched with the container binding poisoned, and the suite
+  asserts both that nothing escaped *and* that the guard is what caught
+  it — without the second check a listener that silently never ran would
+  pass. The middleware paths are covered too: a request is served with
+  the metric store refusing every write, an upstream response survives
+  malformed cURL stats, and a refused connection still reaches the caller
+  as a refused connection.
+
+- **Reporting is throttled to once per distinct failure per minute, per
+  process.** The guards sit on paths that run per query and per cache
+  operation, so a backend that is down does not fail once — it fails tens
+  of thousands of times a minute. Reporting each one would turn a
+  degraded dashboard into a log-volume incident on a pipeline usually
+  shared with the application. The key is the throw site and the
+  exception class, not the message, because a message often carries the
+  id that varied.
+
+The same suite runs the package against a native extension that throws
+from every call, one that answers with the wrong shapes, and one that is
+simply absent.
 
 ## When the OTLP backend is down
 

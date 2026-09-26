@@ -21,6 +21,9 @@ final class QueryInstrumentation
 {
     private const MAX_QUERY_LENGTH = 500;
 
+    /** Distinct query fingerprints held per trace before the map resets. */
+    private const MAX_FINGERPRINTS = 10_000;
+
     private float $minDurationMs = 0.0;
 
     private bool $detectDuplicates = true;
@@ -138,6 +141,20 @@ final class QueryInstrumentation
 
         if ($traceId !== $this->currentTraceId) {
             $this->currentTraceId = $traceId;
+            $this->queryCounts = [];
+        }
+
+        // Bounded. One trace can run an unbounded number of DISTINCT
+        // queries — a bulk import, a migration, a long job — and this map
+        // is keyed by fingerprint, so without a cap it grows for as long
+        // as the trace does. A queue worker holding one trace across a
+        // million distinct statements would carry a million entries.
+        //
+        // Clearing rather than refusing to add: N+1 detection restarts
+        // from zero, which loses nothing that matters (a query repeating
+        // enough to be a smell will repeat again) and keeps the memory
+        // flat instead of frozen at the cap with stale counts.
+        if (count($this->queryCounts) >= self::MAX_FINGERPRINTS) {
             $this->queryCounts = [];
         }
 

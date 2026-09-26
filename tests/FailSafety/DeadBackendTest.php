@@ -107,3 +107,26 @@ it('closes the client span when the promise is rejected, so nothing is left ambi
 
     $root->end();
 });
+
+it('reports nothing at all on a clean boot', function (): void {
+    // A guard that swallows and then reports is not free. The Redis
+    // retro-fit iterated a property that is null until the first
+    // connection exists, which at boot it usually is — PHP warned,
+    // Laravel turned that into an ErrorException, the guard caught it,
+    // and report() ran once per boot in every application. A swallowed
+    // failure is only harmless if it is also silent.
+    $caught = [];
+    FailSafe::handleExceptionsUsing(static function (Throwable $e) use (&$caught): void {
+        $caught[] = $e->getMessage();
+    });
+
+    try {
+        $this->refreshApplication();
+        $this->app->make('queue');
+        $this->app->make('redis');
+    } finally {
+        FailSafe::handleExceptionsUsing(null);
+    }
+
+    expect($caught)->toBe([]);
+});

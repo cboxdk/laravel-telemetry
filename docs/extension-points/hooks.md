@@ -95,7 +95,7 @@ key stays on the span). Whole stores can be excluded with
 ## Outgoing host classification — `classifyHttpHostsUsing()`
 
 `server.address` is a **metric** label on `http.client.request.duration`
-and `http.client.connection_failures`. That is safe while every outbound
+and `http.client.connection.duration`. That is safe while every outbound
 host is one your app chose. It stops being safe the moment a host comes
 from a user — an OAuth issuer pasted into a form, a customer webhook, a
 tenant's own API — because each distinct hostname then becomes a
@@ -112,6 +112,29 @@ The returned group replaces `server.address` on the **metrics only** —
 spans keep the real hostname, because per-occurrence it costs nothing and
 it is what you need when reading a trace. Return `null` to drop the
 metrics for that host entirely while still recording the span.
+
+## Queue name classification — `classifyQueuesUsing()`
+
+`queue` is a metric label on every queue metric this package emits, and
+Laravel lets you name a queue at dispatch time. `->onQueue("tenant-{$id}")`
+is an ordinary thing to write and a permanent series per tenant across
+half a dozen metrics, several of them histograms. On a platform with
+thousands of tenants that is not a slow dashboard; it is the metrics
+backend falling over.
+
+```php
+Telemetry::classifyQueuesUsing(fn (string $queue) =>
+    str_starts_with($queue, 'tenant-') ? 'tenant' : $queue);
+```
+
+The group replaces `queue` on the **metrics only** — spans keep the real
+name, which is what you want when reading one trace.
+
+Unlike the host classifier this one cannot drop a series: returning
+`null` collapses the queue to `other`. Dropping an outgoing host is
+reasonable, because you may genuinely not care about a customer's webhook
+endpoint. Dropping a queue would silently remove work the application
+actually did from its own throughput numbers.
 
 ## Analytics session id — `resolveSessionUsing()`
 
@@ -178,6 +201,7 @@ Telemetry::resolveClientGeoUsing(function ($request) {
 | `resolveUserUsing()` | user attribution | `fn ($user, ?string $guard): array` |
 | `classifyCacheKeysUsing()` | cache grouping/dropping | `fn (string $store, string $key): ?string` |
 | `classifyHttpHostsUsing()` | outgoing-host metric label (bounded!) | `fn (string $host): ?string` |
+| `classifyQueuesUsing()` | queue metric label (bounded!) | `fn (string $queue): ?string` |
 | `redactUsing()` | last-pass redaction | `fn (string $key, string $value): ?string` |
 | `handleExceptionsUsing()` | internal-failure reporting | `fn (Throwable $e): void` |
 | `Telemetry::context()` | ambient dimensions on all signals | — |

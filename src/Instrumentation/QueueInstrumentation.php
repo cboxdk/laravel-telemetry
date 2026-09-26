@@ -167,7 +167,7 @@ final class QueueInstrumentation implements ManagesRequestState
                     ->counter('queue.jobs.dispatched', 'Jobs pushed onto the queue')
                     ->inc(1, [
                         'job.name' => is_string($payload['displayName'] ?? null) ? $payload['displayName'] : 'unknown',
-                        'queue' => $queueName ?? 'default',
+                        'queue' => $telemetry->classifyQueue($queueName),
                     ]));
 
                 // Carry the full context: trace position, ambient custom
@@ -242,7 +242,10 @@ final class QueueInstrumentation implements ManagesRequestState
             $events->listen(QueueBusy::class, function ($event) {
                 FailSafe::guard(fn () => $this->telemetry()
                     ->gauge('queue.size', description: 'Queue depth reported by queue:monitor', unit: '{jobs}')
-                    ->set((float) $event->size, ['connection' => $event->connection, 'queue' => $event->queue]));
+                    ->set((float) $event->size, [
+                        'connection' => $event->connection,
+                        'queue' => $this->telemetry()->classifyQueue($event->queue),
+                    ]));
             });
 
             // A connection that failed over. The dispatch succeeded, so
@@ -285,9 +288,9 @@ final class QueueInstrumentation implements ManagesRequestState
                 WorkerQueueResumed::class => 'queue_resumed',
                 WorkerInterrupted::class => 'interrupted',
             ] as $event => $transition) {
-                $this->tally($events, $event, $transition, static fn (object $e): array => [
+                $this->tally($events, $event, $transition, fn (object $e): array => [
                     'connection' => is_string($e->connectionName ?? null) ? $e->connectionName : 'default',
-                    'queue' => is_string($e->queue ?? null) ? $e->queue : 'default',
+                    'queue' => $this->telemetry()->classifyQueue(is_string($e->queue ?? null) ? $e->queue : null),
                 ], counter: 'queue.worker.transitions', label: 'transition');
             }
         }
@@ -305,7 +308,9 @@ final class QueueInstrumentation implements ManagesRequestState
 
         return [
             'job.name' => is_object($job) && method_exists($job, 'resolveName') ? $job->resolveName() : 'unknown',
-            'queue' => is_object($job) && method_exists($job, 'getQueue') ? ($job->getQueue() ?? 'default') : 'default',
+            'queue' => $this->telemetry()->classifyQueue(
+                is_object($job) && method_exists($job, 'getQueue') ? $job->getQueue() : null,
+            ),
         ];
     }
 
@@ -395,7 +400,7 @@ final class QueueInstrumentation implements ManagesRequestState
                     ->histogram('queue.job.wait_time', buckets: [0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600], description: 'Time from dispatch until the attempt started', unit: 's')
                     ->record($waitMs / 1000, [
                         'job.name' => $event->job->resolveName(),
-                        'queue' => $event->job->getQueue() ?? 'default',
+                        'queue' => $this->telemetry()->classifyQueue($event->job->getQueue()),
                     ]);
             }
 
@@ -595,7 +600,11 @@ final class QueueInstrumentation implements ManagesRequestState
             // "job.name", not "job" — a bare `job` label collides with
             // Prometheus' reserved scrape-job label and gets overwritten
             // by collectors.
-            $labels = ['job.name' => $job, 'queue' => $queue ?? 'default'];
+            // Classified: Laravel lets a queue be named at dispatch
+            // time, so `->onQueue("tenant-{$id}")` is one permanent
+            // series per tenant on every metric below — several of them
+            // histograms. See TelemetryManager::classifyQueuesUsing().
+            $labels = ['job.name' => $job, 'queue' => $this->telemetry()->classifyQueue($queue)];
 
             if ($span = array_pop($this->jobSpans)) {
                 if (($owner = array_search(spl_object_id($span), $this->attemptSpans, true)) !== false) {
@@ -695,7 +704,7 @@ final class QueueInstrumentation implements ManagesRequestState
             // day. The distribution answers the same question without needing
             // to know which process asked it.
             FailSafe::guard(function () use ($queue) {
-                $labels = ['queue' => $queue ?? 'default'];
+                $labels = ['queue' => $this->telemetry()->classifyQueue($queue)];
 
                 $this->telemetry()
                     ->histogram('queue.worker.memory.php', buckets: [16777216, 33554432, 67108864, 134217728, 268435456, 536870912, 1073741824, 2147483648], description: 'Worker PHP allocator usage after each job', unit: 'By')

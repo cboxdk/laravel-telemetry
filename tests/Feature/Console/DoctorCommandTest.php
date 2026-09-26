@@ -66,9 +66,12 @@ it('warns when the apcu store shares the same segment as the apcu cache driver',
     config()->set('cache.default', 'apcu');
     config()->set('cache.stores.apcu.driver', 'apcu');
 
+    // Output, not exit code: this asks for an apcu store on a build
+    // that has no APCu, so the store check legitimately fails. The
+    // warning is the point, and the command now prints it instead of
+    // crashing before it gets there.
     $this->artisan('telemetry:doctor')
-        ->expectsOutputToContain('apcu_clear_cache() (via `cache:clear`) wipes the WHOLE APCu segment')
-        ->assertSuccessful();
+        ->expectsOutputToContain('apcu_clear_cache() (via `cache:clear`) wipes the WHOLE APCu segment');
 });
 
 it('warns when telemetry and the cache store share the same redis connection', function () {
@@ -79,9 +82,14 @@ it('warns when telemetry and the cache store share the same redis connection', f
     config()->set('cache.stores.redis.connection', 'default');
     config()->set('database.redis.default', ['host' => '127.0.0.1', 'port' => 6379, 'database' => 0]);
 
+    // Output, not exit code. The store round trip is a separate check
+    // and it genuinely fails here: this configures a Redis nobody is
+    // running. It used to pass only because the store had already been
+    // resolved as `array` during boot and the config change above never
+    // reached it — a green assertion about a store that was not the one
+    // under test.
     $this->artisan('telemetry:doctor')
-        ->expectsOutputToContain('share the same Redis database')
-        ->assertSuccessful();
+        ->expectsOutputToContain('share the same Redis database');
 });
 
 it('stays quiet when telemetry uses a dedicated redis connection', function () {
@@ -94,8 +102,7 @@ it('stays quiet when telemetry uses a dedicated redis connection', function () {
     config()->set('database.redis.telemetry', ['host' => '127.0.0.1', 'port' => 6379, 'database' => 5]);
 
     $this->artisan('telemetry:doctor')
-        ->doesntExpectOutputToContain('Cache collision')
-        ->assertSuccessful();
+        ->doesntExpectOutputToContain('Cache collision');
 });
 
 it('falls back to excimer when there is no native profiler', function () {
@@ -340,4 +347,22 @@ it('does not call a config healthy when its replacements were discarded', functi
     ));
 
     $this->artisan('telemetry:doctor')->expectsOutputToContain('patterns');
+});
+
+it('explains an unreachable store instead of crashing on it', function () {
+    // The one tool whose job is to explain a broken configuration used
+    // to take the store by method injection, so the container built it
+    // before the body ran — an apcu store on a build without the
+    // extension, or a Redis nobody is running, threw out of the command
+    // and printed nothing at all.
+    config()->set('telemetry.store', 'apcu');
+
+    $this->artisan('telemetry:doctor')
+        // It reports the store by name and exits non-zero. Before, the
+        // exception escaped and the command printed nothing whatsoever
+        // — no store line, no collision warning, no exit code worth
+        // reading.
+        ->expectsOutputToContain('Metric store [apcu]')
+        ->expectsOutputToContain('One or more checks failed')
+        ->assertFailed();
 });

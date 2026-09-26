@@ -31,9 +31,28 @@ final class DoctorCommand extends Command
 
     protected $description = 'Verify the telemetry configuration, store and exporters';
 
-    public function handle(TelemetryManager $telemetry, MetricStore $store, Spool $spool): int
+    /**
+     * The store and the spool are resolved INSIDE their checks, not
+     * injected here.
+     *
+     * Method injection resolves them before the body runs, so an apcu
+     * store on a build without the extension — or a spool pointed at an
+     * unwritable file — threw out of the command entirely. The one tool
+     * whose job is to explain a broken configuration crashed on the
+     * configurations it exists to explain, and printed nothing.
+     */
+    public function handle(): int
     {
-        if (! $telemetry->enabled()) {
+        // Nothing is injected. Resolving the manager builds the registry,
+        // which builds the store — so a method signature was enough to
+        // crash this command on the very configuration it exists to
+        // explain, and print nothing at all while doing it.
+        //
+        // Every check that reads config runs regardless, because those
+        // are the ones that say WHY the store cannot be built. Only the
+        // OTLP check needs the manager, and it says so when it cannot
+        // have one.
+        if (! config('telemetry.enabled')) {
             $this->components->warn('Telemetry is DISABLED (TELEMETRY_ENABLED=false). Nothing else to check.');
 
             return self::SUCCESS;
@@ -41,14 +60,14 @@ final class DoctorCommand extends Command
 
         $this->components->info('Telemetry is enabled.');
 
-        $healthy = $this->checkStore($store);
+        $healthy = $this->checkStore();
         $this->checkCacheCollision();
         $this->checkRedaction();
         $this->checkProfiling();
         $this->checkNative();
         $healthy = $this->checkPrometheus() && $healthy;
-        $healthy = $this->checkOtlp($telemetry) && $healthy;
-        $healthy = $this->checkSpool($spool) && $healthy;
+        $healthy = $this->checkOtlp() && $healthy;
+        $healthy = $this->checkSpool() && $healthy;
 
         if ($healthy) {
             $this->components->info('All checks passed.');
@@ -59,11 +78,12 @@ final class DoctorCommand extends Command
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
 
-    private function checkStore(MetricStore $store): bool
+    private function checkStore(): bool
     {
         $driver = Cast::string(config('telemetry.store'), 'redis');
 
         try {
+            $store = app(MetricStore::class);
             $definition = new MetricDefinition('telemetry.doctor.heartbeat', MetricType::Gauge, 'telemetry:doctor round-trip check', 's');
 
             $store->setGauge($definition, [], microtime(true));
@@ -380,7 +400,7 @@ final class DoctorCommand extends Command
             .($missing === [] ? '' : ' (unavailable: '.implode(', ', $missing).')');
     }
 
-    private function checkOtlp(TelemetryManager $telemetry): bool
+    private function checkOtlp(): bool
     {
         /** @var list<string> $exporters */
         $exporters = config('telemetry.exporters', []);
@@ -402,7 +422,18 @@ final class DoctorCommand extends Command
             compress: $compressed,
         );
 
-        $payload = $this->probeBatch($telemetry->resource());
+        // The one check that needs the manager, and the only place the
+        // store's failure to build can stop a check rather than explain
+        // one.
+        try {
+            $resource = app(TelemetryManager::class)->resource();
+        } catch (Throwable $e) {
+            $this->components->twoColumnDetail('OTLP', '<fg=red>SKIPPED — telemetry could not be assembled: '.$e->getMessage().'</>');
+
+            return false;
+        }
+
+        $payload = $this->probeBatch($resource);
 
         $start = microtime(true);
         $result = $transport->post('/v1/traces', $payload);
@@ -469,7 +500,7 @@ final class DoctorCommand extends Command
      * keeping up (or was never scheduled at all): past max_items the
      * spool silently drops its oldest entries with no other warning.
      */
-    private function checkSpool(Spool $spool): bool
+    private function checkSpool(): bool
     {
         if (! config('telemetry.otlp.spool.enabled', false)) {
             $this->components->twoColumnDetail('OTLP spool', 'disabled');
@@ -478,7 +509,7 @@ final class DoctorCommand extends Command
         }
 
         try {
-            $depth = $spool->size();
+            $depth = app(Spool::class)->size();
         } catch (Throwable $e) {
             $this->components->twoColumnDetail('OTLP spool', '<fg=red>FAILED — '.$e->getMessage().'</>');
 

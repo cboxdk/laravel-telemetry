@@ -7,6 +7,7 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\TelemetryServiceProvider;
+use Illuminate\Container\Container;
 
 /**
  * The service provider does registrations, not work.
@@ -51,4 +52,35 @@ it('lets the operator name the host over the detected one', function () {
 
     putenv('OTEL_RESOURCE_ATTRIBUTES');
     ResourceDetector::flush();
+});
+
+it('builds no metric store, and opens nothing, while booting', function () {
+    // "Passive listener" is the rule, and it has two halves. The loud
+    // half is that no socket is opened, which is easy to get right by
+    // accident. The quiet half is not BUILDING the machinery either: the
+    // registry resolves the metric store, which on the Redis driver
+    // constructs the store and the manager behind it, for every request
+    // in an application that may never record a metric.
+    $resolved = (new ReflectionProperty(Container::class, 'resolved'))->getValue($this->app);
+
+    expect(array_keys($resolved))
+        ->not->toContain(Registry::class)
+        ->not->toContain(MetricStore::class)
+        ->not->toContain(TelemetryManager::class)
+        ->not->toContain(Tracer::class);
+});
+
+it('opens no database or cache connection while booting', function () {
+    // Resolving the managers is allowed and unavoidable — hearing about
+    // a Redis command at all means giving the manager a dispatcher. What
+    // is not allowed is a connection: those belong to the application,
+    // when the application wants one.
+    $db = $this->app->make('db');
+    $connections = (new ReflectionProperty($db::class, 'connections'))->getValue($db);
+
+    expect($connections)->toBe([]);
+
+    $redis = $this->app->make('redis');
+
+    expect($redis->connections() ?? [])->toBe([]);
 });

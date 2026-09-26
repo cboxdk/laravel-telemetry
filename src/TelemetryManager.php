@@ -70,6 +70,8 @@ class TelemetryManager
 
     private ?Closure $httpHostClassifier = null;
 
+    private ?Closure $queueClassifier = null;
+
     private ?Closure $sessionResolver = null;
 
     private ?Closure $clientGeoResolver = null;
@@ -609,6 +611,54 @@ class TelemetryManager
         $group = FailSafe::guard(fn () => ($this->httpHostClassifier)($host));
 
         return is_string($group) && $group !== '' ? [true, $group] : [false, $host];
+    }
+
+    /**
+     * Classify queue names into bounded groups — or drop them from the
+     * metrics.
+     *
+     * `queue` is a label on every queue metric this package emits, and
+     * Laravel lets an application name a queue at dispatch time:
+     * `->onQueue("tenant-{$id}")` is an ordinary thing to write and a
+     * permanent series per tenant on half a dozen metrics, several of
+     * them histograms. On a platform with thousands of tenants that is
+     * not a slow dashboard, it is the metrics backend falling over.
+     *
+     *     Telemetry::classifyQueuesUsing(function (string $queue) {
+     *         return str_starts_with($queue, 'tenant-') ? 'tenant' : $queue;
+     *     });
+     *
+     * The group replaces `queue` on the METRICS only; spans keep the
+     * real name, because per-occurrence it costs nothing and it is what
+     * you need when reading one.
+     *
+     * Unlike the host classifier this one cannot drop a series — it
+     * collapses to `other` instead. Dropping an outgoing host is
+     * reasonable because you may genuinely not care about a customer's
+     * webhook endpoint; dropping a queue would silently remove work the
+     * application actually did from its own throughput numbers.
+     *
+     * @param  (Closure(string): ?string)|null  $classifier
+     */
+    public function classifyQueuesUsing(?Closure $classifier): void
+    {
+        $this->queueClassifier = $classifier;
+    }
+
+    /**
+     * @internal used by the queue instrumentation
+     */
+    public function classifyQueue(?string $queue): string
+    {
+        $queue ??= 'default';
+
+        if ($this->queueClassifier === null) {
+            return $queue;
+        }
+
+        $group = FailSafe::guard(fn () => ($this->queueClassifier)($queue));
+
+        return is_string($group) && $group !== '' ? $group : 'other';
     }
 
     /**
