@@ -28,8 +28,8 @@ Telemetry::gauge('queue.depth', fn () => [
 ]);
 
 // Histogram — distributions, with closure timing
-Telemetry::histogram('checkout.duration', unit: 'ms')->record($ms);
-Telemetry::histogram('import.duration', buckets: [100, 500, 1000])
+Telemetry::histogram('checkout.duration', unit: 's')->record($seconds);
+Telemetry::histogram('import.duration', buckets: [0.1, 0.5, 1], unit: 's')
     ->time(fn () => $importer->run());
 ```
 

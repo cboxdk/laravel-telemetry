@@ -298,7 +298,7 @@
       "targets": [
         {
           "refId": "Q197",
-          "expr": "system_filesystem_usage_bytes{system_filesystem_state=\"used\"} / (system_filesystem_usage_bytes{system_filesystem_state=\"used\"} + system_filesystem_usage_bytes{system_filesystem_state=\"free\"}) * 100",
+          "expr": "sum(system_filesystem_usage_bytes{system_filesystem_state=\"used\"}) / sum(system_filesystem_usage_bytes) * 100",
           "legendFormat": "__auto",
           "datasource": {
             "type": "prometheus",

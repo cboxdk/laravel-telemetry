@@ -63,7 +63,7 @@ final class RedisInstrumentation
             return;
         }
 
-        FailSafe::guard(function () use ($commands) {
+        FailSafe::guard(function () {
             $redis = $this->container->make('redis');
 
             // Future connections fire events…
@@ -71,34 +71,31 @@ final class RedisInstrumentation
                 $redis->enableEvents();
             }
 
-            // …and retro-fit any already-resolved connection (the metric
-            // store may have opened one before us). Setting the dispatcher
-            // on the cached instance is what actually enables its events.
+            // …and retro-fit the ones already open. `connections()`
+            // returns what the manager has ALREADY created, so this
+            // touches only live instances and opens nothing — the earlier
+            // version read the config and called `connection()` on every
+            // name, which is I/O during boot and is exactly what the
+            // service provider is not allowed to do.
             //
-            // Only for command spans, and never for failures alone. This
-            // loop OPENS every configured connection, which is I/O during
-            // boot — acceptable as the price of a feature someone switched
-            // on deliberately, not something to do in every application
-            // that merely wants to hear about a Redis node dying. The
-            // connections it would catch are the ones opened before us,
-            // and those are the package's own store and spool, which are
-            // in the ignore list anyway.
-            if (! $commands) {
+            // It also runs for failures-only mode now. An application
+            // that resolved its cache connection before we booted would
+            // otherwise never report that connection dying, which is the
+            // one thing failures-only mode exists for.
+            $dispatcher = $this->container->make('events');
+
+            if (! method_exists($redis, 'connections')) {
                 return;
             }
 
-            $connections = (array) $this->container->make('config')->get('database.redis', []);
-            $dispatcher = $this->container->make('events');
-
-            foreach (array_keys($connections) as $name) {
-                if (in_array((string) $name, self::RESERVED_KEYS, true)
+            foreach ($redis->connections() as $name => $connection) {
+                if (! is_object($connection)
+                    || in_array((string) $name, self::RESERVED_KEYS, true)
                     || in_array((string) $name, $this->ignoreConnections, true)) {
                     continue;
                 }
 
-                FailSafe::guard(function () use ($redis, $name, $dispatcher) {
-                    $connection = $redis->connection((string) $name);
-
+                FailSafe::guard(function () use ($connection, $dispatcher) {
                     if (method_exists($connection, 'setEventDispatcher')) {
                         $connection->setEventDispatcher($dispatcher);
                     }
@@ -170,11 +167,14 @@ final class RedisInstrumentation
             $telemetry = $this->container->make(TelemetryManager::class);
             $command = strtoupper($event->command);
 
+            // The same keys the span uses, and the exception's full class
+            // name: two `NotFoundException`es from different namespaces
+            // are different failures, and a basename merges them.
             $telemetry->counter('redis.commands.failed', 'Redis commands that raised')
                 ->inc(1, [
-                    'command' => $command,
-                    'connection' => $event->connectionName,
-                    'exception' => class_basename($event->exception),
+                    'db.operation.name' => $command,
+                    'laravel.db.connection' => $event->connectionName,
+                    'error.type' => $event->exception::class,
                 ]);
 
             $telemetry->tracer()->bumpStat('redis.command.failed', 1);
@@ -183,6 +183,16 @@ final class RedisInstrumentation
                 return;
             }
 
+            // Zero duration, deliberately. `CommandFailed` carries no
+            // elapsed time, and the only way to measure one would be to
+            // wrap every command — the high-volume thing this package is
+            // careful not to do by default. The span marks WHEN the cache
+            // stopped answering, not what the wait cost; a timeout will
+            // therefore read as instantaneous, and the alternative was
+            // making the failure invisible in the trace entirely.
+            //
+            // The status goes in as an argument: recordSpan ends the span,
+            // which can flush it before a caller could set anything on it.
             $telemetry->tracer()->recordSpan(
                 'redis '.$command,
                 0.0,
@@ -194,7 +204,9 @@ final class RedisInstrumentation
                 ],
                 SpanKind::Client,
                 detail: true,
-            )->setStatus(SpanStatus::Error, $event->exception->getMessage());
+                status: SpanStatus::Error,
+                statusDescription: $event->exception->getMessage(),
+            );
         });
     }
 }

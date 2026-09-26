@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Support\DbSystem;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -76,7 +77,7 @@ final class ConnectionTiming
                     unit: 's',
                 )
                 ->record($durationMs / 1000, [
-                    'db.system.name' => $system,
+                    'db.system.name' => DbSystem::name($system),
                     'laravel.db.connection' => $connection,
                     'outcome' => $error === null ? 'ok' : 'error',
                 ]);
@@ -85,20 +86,22 @@ final class ConnectionTiming
                 return;
             }
 
-            $span = $telemetry->tracer()->recordSpan(
+            // The status goes IN, not on the returned span: recordSpan
+            // ends it, and a full buffer exports it before this line would
+            // have run. A failed handshake arrived with `error.type` set
+            // and no error status.
+            $telemetry->tracer()->recordSpan(
                 $spanName,
                 max(0.0, $durationMs),
                 array_merge($attributes, array_filter([
-                    'db.system.name' => $system,
+                    'db.system.name' => DbSystem::name($system),
                     'laravel.db.connection' => $connection,
                     'error.type' => $error === null ? null : $error::class,
                 ], static fn (mixed $value): bool => $value !== null)),
                 SpanKind::Client,
+                status: $error === null ? null : SpanStatus::Error,
+                statusDescription: $error?->getMessage(),
             );
-
-            if ($error !== null) {
-                $span->setStatus(SpanStatus::Error, $error->getMessage());
-            }
         });
     }
 

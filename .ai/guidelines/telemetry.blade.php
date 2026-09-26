@@ -7,7 +7,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - Something happened → counter: `Telemetry::counter('orders.created')->inc(1, ['tenant' => $slug])`. Counters are monotonic; negative increments are ignored.
 - Current value, queryable on demand → observable gauge: `Telemetry::gauge('queue.depth', fn () => Queue::size())`. The callback runs at scrape time — keep it cheap, never do heavy queries in it.
 - Current value that goes up AND down at event time → push gauge: `Telemetry::gauge('jobs.in_flight')->increment()` / `->decrement()`.
-- Distribution (durations, sizes) → histogram: `Telemetry::histogram('checkout.duration', unit: 'ms')->record($ms)` or `->time(fn () => ...)` to measure a closure.
+- Distribution (durations, sizes) → histogram: `Telemetry::histogram('checkout.duration', unit: 's')->record($seconds)` or `->time(fn () => ...)` to measure a closure.
 - A decision or state transition you will query later → `Telemetry::event('autoscale.decision', ['workers' => 7])`.
 - Traced work → `Telemetry::span('import.customers', fn ($span) => ...)`. The closure form ends the span, records exceptions and rethrows — prefer it over manual `->end()`.
 
@@ -22,7 +22,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 ### Rules
 
 - Metric names: lowercase, dot-namespaced, OTel-style (`orders.created`, `billing.invoices.overdue`). Names match `[a-z][a-z0-9._]*`. A name keeps one instrument type forever.
-- Declare units in the instrument (`unit: 'ms'`, `'By'`, `'1'`), never in the name.
+- Declare units in the instrument (`unit: 's'`, `'By'`, `'1'`), never in the name. Durations are SECONDS — `time()` records in whatever the instrument declares.
 - Label values must be bounded: route patterns, status codes, queue names, plans. NEVER user ids, emails, URLs or UUIDs as label values — put those on span attributes or events instead.
 - Do not wrap telemetry calls in try/catch and do not check `Telemetry::enabled()` — recording never throws and no-ops when disabled.
 - HTTP requests, queue jobs (incl. dispatch counts + wait time), DB queries, scheduled tasks, mail, notifications, outgoing Http-client calls and reported exceptions are auto-instrumented; do not add manual spans/counters for those.

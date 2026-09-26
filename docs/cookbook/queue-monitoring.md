@@ -110,5 +110,5 @@ queue_depth{queue="default"} > 1000
 
 # p95 job runtime regression
 histogram_quantile(0.95, sum by (le, job_name)
-  (rate(queue_job_duration_bucket[10m]))) > 30000
+  (rate(queue_job_duration_seconds_bucket[10m]))) > 30
 ```

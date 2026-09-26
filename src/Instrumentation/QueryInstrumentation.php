@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Support\DbSystem;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -92,7 +93,7 @@ final class QueryInstrumentation
                 'db.query',
                 $event->time,
                 [
-                    'db.system.name' => $event->connection->getDriverName(),
+                    'db.system.name' => DbSystem::name($event->connection->getDriverName()),
                     'laravel.db.connection' => $event->connectionName,
                     'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
                 ],
@@ -138,7 +139,7 @@ final class QueryInstrumentation
                 ->inc(1, ['connection' => $event->connectionName]);
 
             $telemetry->event('db.query.duplicate_detected', [
-                'db.system.name' => $event->connection->getDriverName(),
+                'db.system.name' => DbSystem::name($event->connection->getDriverName()),
                 'laravel.db.connection' => $event->connectionName,
                 'db.query.text' => mb_substr($event->sql, 0, self::MAX_QUERY_LENGTH),
                 'db.query.repeat_count' => $count,

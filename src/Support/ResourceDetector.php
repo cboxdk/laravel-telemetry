@@ -106,10 +106,17 @@ final class ResourceDetector
         $arch = php_uname('m');
 
         if (trim($arch) !== '') {
-            // OTel spells these `amd64` / `arm64`, not the kernel's names.
-            $attributes['host.arch'] = match ($arch) {
-                'x86_64' => 'amd64',
-                'aarch64' => 'arm64',
+            // OTel spells these its own way, not the kernel's. The
+            // 32-bit spellings matter less often and cost nothing to get
+            // right; anything unrecognised passes through, because an
+            // honest unknown beats a wrong category.
+            $attributes['host.arch'] = match (true) {
+                $arch === 'x86_64', $arch === 'amd64' => 'amd64',
+                $arch === 'aarch64', $arch === 'arm64' => 'arm64',
+                $arch === 'i386', $arch === 'i486', $arch === 'i586', $arch === 'i686' => 'x86',
+                str_starts_with($arch, 'armv'), $arch === 'arm' => 'arm32',
+                $arch === 'ppc64le', $arch === 'ppc64' => 'ppc64',
+                $arch === 's390x' => 's390x',
                 default => $arch,
             };
         }

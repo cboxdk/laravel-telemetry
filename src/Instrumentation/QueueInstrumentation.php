@@ -288,8 +288,14 @@ final class QueueInstrumentation implements ManagesRequestState
 
                 $attributes['messaging.wait_time_ms'] = round($waitMs, 2);
 
+                // Its own ladder, reaching ten minutes. The default stops
+                // at 10s, and for a CLASSIC histogram a quantile that
+                // lands in `+Inf` reports the highest finite bound — so a
+                // queue uniformly an hour behind answered p95 = 10, and
+                // the shipped "wait time over 30s" alert could not fire
+                // no matter how bad the backlog got.
                 $this->telemetry()
-                    ->histogram('queue.job.wait_time', description: 'Time from dispatch until the attempt started', unit: 's')
+                    ->histogram('queue.job.wait_time', buckets: [0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600], description: 'Time from dispatch until the attempt started', unit: 's')
                     ->record($waitMs / 1000, [
                         'job.name' => $event->job->resolveName(),
                         'queue' => $event->job->getQueue() ?? 'default',
@@ -525,8 +531,11 @@ final class QueueInstrumentation implements ManagesRequestState
                     $this->reportProfile($profile, $span->durationMs(), $job, $queue ?? 'default');
                 }
 
+                // Likewise: a job is allowed to take minutes, and the
+                // default ladder would report every long one as exactly
+                // ten seconds.
                 $this->telemetry()
-                    ->histogram('queue.job.duration', description: 'Queue job processing duration', unit: 's')
+                    ->histogram('queue.job.duration', buckets: [0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 600], description: 'Queue job processing duration', unit: 's')
                     ->record($span->durationMs() / 1000, $labels);
             }
 

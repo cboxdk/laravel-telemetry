@@ -29,9 +29,9 @@ it('counts a failed redis command', function (): void {
     Event::dispatch(redisFailure('get', new RuntimeException('Connection refused')));
 
     Telemetry::assertCounterIncremented('redis.commands.failed', [
-        'command' => 'GET',
-        'connection' => 'cache',
-        'exception' => 'RuntimeException',
+        'db.operation.name' => 'GET',
+        'laravel.db.connection' => 'cache',
+        'error.type' => 'RuntimeException',
     ]);
 });
 

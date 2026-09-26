@@ -43,9 +43,9 @@ Keep scrape-time callbacks cheap; they run on every scrape and every
 ## Histograms
 
 ```php
-Telemetry::histogram('http.client.duration', unit: 'ms')->record($ms);
+Telemetry::histogram('http.client.duration', unit: 's')->record($seconds);
 
-Telemetry::histogram('import.duration', buckets: [100, 500, 1000, 5000])
+Telemetry::histogram('import.duration', buckets: [0.1, 0.5, 1, 5], unit: 's')
     ->time(fn () => $importer->run());
 ```
 

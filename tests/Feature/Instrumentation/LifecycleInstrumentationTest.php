@@ -54,11 +54,14 @@ it('annotates both edges of a maintenance window', function () {
     Telemetry::assertEventEmitted('app.maintenance_mode', fn (TelemetryEvent $e): bool => $e->attributes['app.maintenance_mode.enabled'] === false);
 });
 
-it('counts a busy connection pool', function () {
+it('records a connection count over the operator threshold', function () {
     Event::dispatch(new DatabaseBusy('mysql', 140));
 
-    Telemetry::assertCounterIncremented('db.connections.busy', [
-        'db.client.connection.pool.name' => 'mysql',
+    Telemetry::assertCounterIncremented('db.connections.over_threshold', [
+        'laravel.db.connection' => 'mysql',
     ]);
-    Telemetry::assertEventEmitted('db.connections.busy');
+    Telemetry::assertEventEmitted(
+        'db.connections.over_threshold',
+        fn (TelemetryEvent $e): bool => $e->attributes['db.connections.observed'] === 140,
+    );
 });

@@ -129,7 +129,7 @@ groups:
           severity: warning
         annotations:
           summary: "Queue backlog on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
-          description: "p95 job wait time is {{ printf \"%.0f\" $value }}ms over 5m (threshold 30s) — workers are behind."
+          description: "p95 job wait time is {{ printf \"%.0f\" $value }}s over 5m (threshold 30s) — workers are behind."
 
       - alert: ScheduledTaskFailing
         expr: |

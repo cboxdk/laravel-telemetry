@@ -125,10 +125,20 @@ final class LifecycleInstrumentation
     }
 
     /**
-     * The pool is full. Laravel raises this from a scheduled check, not
-     * from the query path, so it is rare by construction — but it is the
-     * one signal that separates "the database is slow" from "we ran out of
-     * connections to ask it with", and those have opposite fixes.
+     * The database reported more open connections than the operator said
+     * to tolerate.
+     *
+     * Precisely that, and nothing more. Laravel raises this from
+     * `db:monitor`, which compares the server's own thread count against
+     * a `--max` somebody chose; it can fire at ten connections on a box
+     * that would happily serve a thousand, and it does not mean any
+     * checkout failed. So this is not `db.client.connection.*`, which is
+     * about a client-side pool we do not have — it is a threshold
+     * crossing on a count, named as one.
+     *
+     * Still worth recording: the count climbing is the difference between
+     * "the database is slow" and "everyone is queuing to talk to it",
+     * which have opposite fixes and identical symptoms.
      */
     private function databaseBusy(DatabaseBusy $event): void
     {
@@ -136,12 +146,12 @@ final class LifecycleInstrumentation
             $telemetry = $this->telemetry();
             $connection = (string) $event->connectionName;
 
-            $telemetry->counter('db.connections.busy', 'Times a connection pool was reported busy')
-                ->inc(1, ['db.client.connection.pool.name' => $connection]);
+            $telemetry->counter('db.connections.over_threshold', 'Times db:monitor found more connections than its --max')
+                ->inc(1, ['laravel.db.connection' => $connection]);
 
-            $telemetry->event('db.connections.busy', [
-                'db.client.connection.pool.name' => $connection,
-                'db.client.connection.count' => (int) $event->connections,
+            $telemetry->event('db.connections.over_threshold', [
+                'laravel.db.connection' => $connection,
+                'db.connections.observed' => (int) $event->connections,
             ]);
         });
     }

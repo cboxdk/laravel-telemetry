@@ -264,7 +264,10 @@ final class HttpClientSpanMiddleware
             ->record($span->durationMs() / 1000, array_filter([
                 'http.request.method' => (string) ($span->attributes()['http.request.method'] ?? HttpMethod::OTHER),
                 'server.address' => $label,
-                'http.response.status_code' => (string) ($status ?? 0),
+                // Omitted when there was no response. `0` is not a status
+                // code; a connection refused and a server answering zero
+                // are different events, and only one of them is real.
+                'http.response.status_code' => $status === null ? null : (string) $status,
                 // Only present when the call failed, per semconv — an
                 // always-present empty label would double the series count
                 // of every healthy endpoint for nothing.

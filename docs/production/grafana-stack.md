@@ -127,7 +127,7 @@ Alertmanager or Grafana contact points. Validate edits with
 ```promql
 # p95 request latency per route
 histogram_quantile(0.95, sum by (le, http_route) (
-  rate(http_server_request_duration_bucket[5m])))
+  rate(http_server_request_duration_seconds_bucket[5m])))
 
 # queue failure ratio
 sum(rate(queue_jobs_failed_total[5m]))

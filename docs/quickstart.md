@@ -46,10 +46,10 @@ Telemetry::gauge('queue.depth', fn () => [
 ## Measure distributions
 
 ```php
-Telemetry::histogram('checkout.duration', unit: 'ms')->record($ms);
+Telemetry::histogram('checkout.duration', unit: 's')->record($seconds);
 
 // Or time a closure directly:
-$report = Telemetry::histogram('report.duration', unit: 'ms')
+$report = Telemetry::histogram('report.duration', unit: 's')
     ->time(fn () => $generator->build());
 ```
 
@@ -107,7 +107,7 @@ and docs/core-concepts/naming.md. Then:
 1. Identify the 3-5 most important domain flows (checkout, imports,
    signups, ...) by reading the codebase. Propose the list before coding.
 2. For each flow add: a counter for occurrences (OTel-style dot-namespaced
-   name, e.g. orders.created), a histogram with unit 'ms' for duration
+   name, e.g. orders.created), a histogram with unit 's' for duration
    where timing matters (prefer ->time(fn () => ...)), and
    Telemetry::event() for decisions worth auditing.
 3. Wrap multi-step domain operations in Telemetry::span('domain.op',

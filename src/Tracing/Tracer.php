@@ -344,9 +344,15 @@ final class Tracer
      * reporting its own duration). The span is backdated and closed
      * immediately, parented to the current span.
      *
+     * `$status` is a parameter rather than something the caller sets on
+     * the returned span, because by then it is too late: this ends the
+     * span, ending flushes it, and a full buffer exports it before the
+     * caller gets it back. A failure recorded that way arrives with its
+     * error attributes and no error status.
+     *
      * @param  array<string, scalar|null>  $attributes
      */
-    public function recordSpan(string $name, float $durationMs, array $attributes = [], SpanKind $kind = SpanKind::Internal, bool $detail = false): Span
+    public function recordSpan(string $name, float $durationMs, array $attributes = [], SpanKind $kind = SpanKind::Internal, bool $detail = false, ?SpanStatus $status = null, ?string $statusDescription = null): Span
     {
         $durationNano = (int) ($durationMs * 1_000_000);
         $start = (int) (microtime(true) * 1e9) - $durationNano;
@@ -371,6 +377,10 @@ final class Tracer
 
         if ($detail) {
             $span->markDetail();
+        }
+
+        if ($status !== null) {
+            $span->setStatus($status, $statusDescription);
         }
 
         $span->end($start + $durationNano);

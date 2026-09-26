@@ -535,7 +535,6 @@ class TelemetryServiceProvider extends ServiceProvider
         $resource = [
             'service.name' => Cast::string($config->get('telemetry.service.name'), 'laravel'),
             'deployment.environment.name' => Cast::string($config->get('telemetry.service.environment'), 'production'),
-            'host.name' => (string) gethostname(),
             'telemetry.sdk.name' => 'cboxdk/laravel-telemetry',
             'telemetry.sdk.language' => 'php',
             'process.runtime.name' => 'php',
@@ -566,6 +565,15 @@ class TelemetryServiceProvider extends ServiceProvider
         if ($config->get('telemetry.resource_detection', true)) {
             $resource += ResourceDetector::detect();
         }
+
+        // Last, and only if nothing else said so. `host.name` used to be
+        // seeded above with `gethostname()`, and `+=` keeps what is
+        // already there — so `OTEL_RESOURCE_ATTRIBUTES=host.name=…`, the
+        // operator's explicit word and the one thing that outranks
+        // detection, could never take effect. It matters wherever the
+        // container's hostname is a random id and the real machine has a
+        // name worth reading.
+        $resource['host.name'] ??= (string) gethostname();
 
         return $resource;
     }
@@ -1182,9 +1190,25 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->make(TelemetryManager::class)->provider(new SystemMetricsProvider(
-            cpuInterval: Cast::float($config->get('telemetry.providers.system.cpu_interval'), 0.1),
-        ));
+        // Through a resolution hook, not `make()`. Building the manager
+        // builds the resource, which reads `.git` and probes container and
+        // environment files — I/O, during boot, in every application that
+        // has cboxdk/system-metrics installed, whether or not anything
+        // ever asks for a metric. The registration is the boot-time work;
+        // the manager can be built when something actually needs one.
+        $register = function (TelemetryManager $telemetry) use ($config): void {
+            $telemetry->provider(new SystemMetricsProvider(
+                cpuInterval: Cast::float($config->get('telemetry.providers.system.cpu_interval'), 0.1),
+            ));
+        };
+
+        if ($this->app->resolved(TelemetryManager::class)) {
+            $register($this->app->make(TelemetryManager::class));
+
+            return;
+        }
+
+        $this->app->afterResolving(TelemetryManager::class, $register);
     }
 
     /**

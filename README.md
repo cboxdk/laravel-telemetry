@@ -12,7 +12,7 @@ under FPM.**
 ```php
 Telemetry::counter('orders.created')->inc();
 Telemetry::gauge('queue.depth', fn () => Queue::size());
-Telemetry::histogram('checkout.duration', unit: 'ms')->record($ms);
+Telemetry::histogram('checkout.duration', unit: 's')->record($seconds);
 
 Telemetry::span('import.customers', function () {
     // traced work — exceptions recorded, duration measured

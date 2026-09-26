@@ -117,7 +117,10 @@ final class CommandInstrumentation implements ManagesRequestState
             $labels = ['command' => $event->command ?? 'unknown'];
 
             $this->telemetry()
-                ->histogram('command.duration', description: 'Artisan command duration', unit: 's')
+                // An artisan command is allowed to take half an hour. The default
+                // ladder stops at ten seconds, and a classic histogram
+                // reports the highest finite bound for anything past it.
+                ->histogram('command.duration', buckets: [0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 300, 600, 1800], description: 'Artisan command duration', unit: 's')
                 ->record($span->durationMs() / 1000, $labels);
 
             $this->telemetry()

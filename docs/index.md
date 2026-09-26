@@ -17,7 +17,7 @@ OTLP over HTTP JSON, exported directly to any OpenTelemetry backend.
 ```php
 Telemetry::counter('orders.created')->inc();
 Telemetry::gauge('queue.depth', fn () => Queue::size());
-Telemetry::histogram('checkout.duration', unit: 'ms')->record($ms);
+Telemetry::histogram('checkout.duration', unit: 's')->record($seconds);
 
 Telemetry::span('import.customers', function () {
     // traced work

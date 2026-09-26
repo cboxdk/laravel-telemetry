@@ -95,7 +95,7 @@ so dashboards group naturally.
 - Names match `[a-z][a-z0-9._]*` — invalid names throw at registration.
 - A name is one instrument type forever; re-registering `orders.created`
   as a histogram after it was a counter throws `InstrumentTypeMismatch`.
-- Declare units in the instrument (`unit: 'ms'`, `'By'`, `'1'`) rather than
+- Declare units in the instrument (`unit: 's'`, `'By'`, `'1'`) rather than
   in the name; exporters surface them appropriately.
 - Label keys follow the same conventions (`http.route`, `tenant.id`).
   Non-conforming characters are sanitized to `_` for Prometheus.

@@ -287,7 +287,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | Default bucket boundaries for histograms that don't declare their own.
-    | Values are in the instrument's native unit (durations: milliseconds).
+    | Values are in the instrument's native unit.
+    |
+    | The ladder tops out at 10 seconds, which suits a request and suits
+    | nothing that runs for minutes. A classic histogram reports the
+    | highest finite boundary for anything past it, so a queue an hour
+    | behind answers p95 = 10 and an alert set at 30 never fires — silently
+    | and forever. Long-running instruments pass their own ladders; do the
+    | same for yours.
     |
     */
 
@@ -677,10 +684,14 @@ return [
         //                  four minutes is invisible without the histogram.
         // maintenance_mode app.maintenance_mode events, so a planned
         //                  window reads as a window and not an outage.
-        // connection_pool  db.connections.busy counter + event, from
-        //                  Laravel's DatabaseBusy. Separates "the database
-        //                  is slow" from "we ran out of connections to ask
-        //                  it with" — opposite fixes, identical symptoms.
+        // connection_pool  db.connections.over_threshold counter + event,
+        //                  from Laravel's DatabaseBusy: the server's own
+        //                  connection count crossed the --max somebody
+        //                  gave db:monitor. Not a failed checkout, and not
+        //                  a client pool — but the count climbing is the
+        //                  difference between "the database is slow" and
+        //                  "everyone is queuing to talk to it", which have
+        //                  opposite fixes and identical symptoms.
         'migrations' => env('TELEMETRY_INSTRUMENT_MIGRATIONS', true),
         'maintenance_mode' => env('TELEMETRY_INSTRUMENT_MAINTENANCE_MODE', true),
         'connection_pool' => env('TELEMETRY_INSTRUMENT_CONNECTION_POOL', true),

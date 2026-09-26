@@ -22,7 +22,7 @@ final readonly class PaymentGateway
                 'order.id' => $order->id,
             ]);
 
-            $response = Telemetry::histogram('http.client.duration', unit: 'ms')
+            $response = Telemetry::histogram('http.client.duration', unit: 's')
                 ->time(fn () => Http::timeout(5)->post($this->url, $order->payload()),
                     ['peer' => 'stripe', 'operation' => 'charge']);
 
@@ -67,7 +67,7 @@ sum by (peer) (rate(http_client_requests_total{status=~"5.."}[5m]))
 
 # p95 latency per peer
 histogram_quantile(0.95, sum by (le, peer)
-  (rate(http_client_duration_bucket[10m]))) > 2000
+  (rate(http_client_duration_seconds_bucket[10m]))) > 2
 ```
 
 ## Rule of thumb

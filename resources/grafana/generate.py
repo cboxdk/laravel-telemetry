@@ -284,9 +284,9 @@ D["overview"] = dashboard("cbox-tel-overview", "Telemetry", [
     ], 16, 14, w=8, colors=OUTCOME_COLORS),
     row("Drill-down", 22),
     table("Routes by p95 — click a route to drill down", f'histogram_quantile(0.95, sum by (le, http_route) (rate({REQ}_bucket{{{SVC}}}[10m]))) > 0', 0, 23, unit="s",
-          field_link=("http_route", LINK_REQ, "Open in Requests"), gauge_max=2000),
+          field_link=("http_route", LINK_REQ, "Open in Requests"), gauge_max=2),
     table("Jobs by p95 — click a job to drill down", f'histogram_quantile(0.95, sum by (le, job_name) (rate(queue_job_duration_seconds_bucket{{{SVC}}}[10m]))) > 0', 12, 23, unit="s",
-          field_link=("job_name", LINK_JOB, "Open in Jobs"), gauge_max=5000),
+          field_link=("job_name", LINK_JOB, "Open in Jobs"), gauge_max=5),
     traces("Latest failing traces — requests, jobs and tasks", f'{{{TSVC} && status=error}}', 0, 31),
     row("Fleet — environments & hosts", 40),
     timeseries("Requests by environment", [target(f'sum by (deployment_environment_name) (rate({REQ}_count{{{SVC}}}[$__rate_interval])) * 60', '{{deployment_environment_name}}')], 0, 41, w=12, unit="reqpm", stacked=True,
@@ -457,7 +457,11 @@ D["system"] = dashboard("cbox-tel-system", "Telemetry / System", [
     stat("CPU", f'system_cpu_utilization_ratio{{{SVC}}} * 100', 0, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 70}, {"color": "red", "value": 90}])),
     stat("Memory", 'system_memory_utilization_ratio{system_memory_state="used"} * 100', 6, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
     stat("Load 1m", 'system_cpu_load_average_1m', 12, 0, w=6),
-    stat("Disk used", 'system_filesystem_usage_bytes{system_filesystem_state="used"} / (system_filesystem_usage_bytes{system_filesystem_state="used"} + system_filesystem_usage_bytes{system_filesystem_state="free"}) * 100', 18, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
+    # `used / (used + free)` looked right and matched nothing: the two
+    # sides carry different values of the same label, so the binary
+    # operator finds no pair. Sum the state dimension away on the
+    # denominator and ignore it on the division.
+    stat("Disk used", 'sum(system_filesystem_usage_bytes{system_filesystem_state="used"}) / sum(system_filesystem_usage_bytes) * 100', 18, 0, w=6, unit="percent", decimals=0, thresholds=ok_at([{"color": "orange", "value": 80}, {"color": "red", "value": 92}])),
     row("Host", 4),
     timeseries("Memory by state", [target('system_memory_usage_bytes', '{{system_memory_state}}')], 0, 5, unit="bytes", stacked=True, colors={"used": "orange", "free": "green", "cached": "blue"}),
     timeseries("Load averages", [target('system_cpu_load_average_1m', '1m'), target('system_cpu_load_average_5m', '5m'), target('system_cpu_load_average_15m', '15m')], 12, 5),

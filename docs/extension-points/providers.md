@@ -28,7 +28,7 @@ final class QueueMetricsProvider implements TelemetryProvider
     {
         $registry->gauge('queue.depth', fn () => QueueMetrics::depth(), unit: '{jobs}');
         $registry->counter('queue_metrics.jobs.recorded');
-        $registry->histogram('queue_metrics.runtime', unit: 'ms');
+        $registry->histogram('queue_metrics.runtime', unit: 's');
     }
 }
 ```
