@@ -141,6 +141,14 @@ it('can be replaced outright by binding the contract', function () {
         {
             return true;
         }
+
+        public function personalDataDetectors(): array
+        {
+            // An implementation with no such concept says so, and
+            // telemetry:doctor reports "not scrubbed" rather than
+            // guessing.
+            return [];
+        }
     });
 
     expect(app(RedactsTelemetry::class)->spans([]))->toBe([])
