@@ -32,9 +32,12 @@ final class SharedState
     /**
      * Keys this process has written, so flush() can clear them. Capped
      * because nothing may grow without bound in a worker that lives for
-     * days; the values themselves expire on their own.
+     * days; the values themselves expire on their own. The ceiling is
+     * well above the number of metric families a real application
+     * declares, because reaching it costs those families their
+     * bookkeeping memo and the round trips it was saving.
      */
-    private const MAX_KEYS = 512;
+    private const MAX_KEYS = 2048;
 
     private static ?SharedMemory $memory = null;
 

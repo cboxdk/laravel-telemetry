@@ -325,21 +325,34 @@ final class ApcuMetricStore implements MetricStore
 
         apcu_add($this->sinceKey($type, $definition->name), (int) (microtime(true) * 1e9));
 
-        $this->appendUnique($this->nameIndexKey($type), $definition->name);
-        $this->appendUnique($this->seriesIndexKey($type, $definition->name), $series);
+        // Both, on separate lines, so neither is skipped by a
+        // short-circuit when the other loses its lock.
+        $nameIndexed = $this->appendUnique($this->nameIndexKey($type), $definition->name);
+        $seriesIndexed = $this->appendUnique($this->seriesIndexKey($type, $definition->name), $series);
 
-        $this->indexed[$memo] = $now;
+        // Only memoize what actually landed. An append that gave up on
+        // lock contention and was memoized anyway meant this process
+        // spent the next five minutes writing a series collect() could
+        // not find — invisible data, which is worse than none, because
+        // the dashboard shows a gap and nothing shows why.
+        if ($nameIndexed && $seriesIndexed) {
+            $this->indexed[$memo] = $now;
+        }
     }
 
     /**
      * Append a value to a list key if missing, guarded by a spin lock.
+     *
+     * @return bool whether the value is in the list now — false means the
+     *              lock was never won, and the caller must not record this
+     *              series as indexed
      */
-    private function appendUnique(string $key, string $value): void
+    private function appendUnique(string $key, string $value): bool
     {
         $current = apcu_fetch($key);
 
         if (is_array($current) && in_array($value, $current, true)) {
-            return;
+            return true;
         }
 
         $lock = "{$key}:lock";
@@ -356,11 +369,13 @@ final class ApcuMetricStore implements MetricStore
 
                 apcu_delete($lock);
 
-                return;
+                return true;
             }
 
             usleep(100);
         }
+
+        return false;
     }
 
     /**

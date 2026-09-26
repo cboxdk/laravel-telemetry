@@ -12,8 +12,11 @@ use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Sample;
+use Cbox\Telemetry\Support\SharedState;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Redis\Connections\Connection;
+use Illuminate\Redis\Connections\PhpRedisConnection;
+use Throwable;
 
 /**
  * The default shared store: one Redis HASH per metric family, one index SET
@@ -36,8 +39,28 @@ use Illuminate\Redis\Connections\Connection;
  */
 final class RedisMetricStore implements MetricStore
 {
-    /** @var array<string, int> unix time of the last successful initialization, per metric */
-    private array $initialized = [];
+    /**
+     * Applies a flat list of (op, field, value) triples to one hash.
+     * `i` HINCRBY, `f` HINCRBYFLOAT, `s` HSET.
+     */
+    private const APPLY_SCRIPT = <<<'LUA'
+        local i = 1
+        while i <= #ARGV do
+            local op = ARGV[i]
+            if op == 'i' then
+                redis.call('HINCRBY', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+            elseif op == 'f' then
+                redis.call('HINCRBYFLOAT', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+            else
+                redis.call('HSET', KEYS[1], ARGV[i + 1], ARGV[i + 2])
+            end
+            i = i + 3
+        end
+        return 1
+        LUA;
+
+    /** Whether this server runs EVAL. Set false once, if it does not. */
+    private bool $scripting = true;
 
     public function __construct(
         private readonly Factory $redis,
@@ -83,14 +106,17 @@ final class RedisMetricStore implements MetricStore
 
         $this->initialize($definition, $key);
 
-        $connection = $this->connection();
-        $connection->hincrby($key, "{$series}:b{$bucket}", 1);
-        $connection->hincrbyfloat($key, "{$series}:sum", $value);
-        $connection->hincrby($key, "{$series}:count", 1);
+        $operations = [
+            ['i', "{$series}:b{$bucket}", '1'],
+            ['f', "{$series}:sum", (string) $value],
+            ['i', "{$series}:count", '1'],
+        ];
 
         if ($exemplar !== null) {
-            $connection->hset($key, "{$series}:exemplar", $this->encodeExemplar($exemplar));
+            $operations[] = ['s', "{$series}:exemplar", $this->encodeExemplar($exemplar)];
         }
+
+        $this->apply($key, $operations);
     }
 
     public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
@@ -100,24 +126,92 @@ final class RedisMetricStore implements MetricStore
 
         $this->initialize($definition, $key);
 
-        $connection = $this->connection();
+        $operations = [];
 
         foreach ($bucketCounts as $index => $bucketCount) {
             if ($bucketCount > 0) {
-                $connection->hincrby($key, "{$series}:b{$index}", $bucketCount);
+                $operations[] = ['i', "{$series}:b{$index}", (string) $bucketCount];
             }
         }
 
         if ($sum !== 0.0) {
-            $connection->hincrbyfloat($key, "{$series}:sum", $sum);
+            $operations[] = ['f', "{$series}:sum", (string) $sum];
         }
 
         if ($count > 0) {
-            $connection->hincrby($key, "{$series}:count", $count);
+            $operations[] = ['i', "{$series}:count", (string) $count];
         }
 
         if ($exemplar !== null) {
-            $connection->hset($key, "{$series}:exemplar", $this->encodeExemplar($exemplar));
+            $operations[] = ['s', "{$series}:exemplar", $this->encodeExemplar($exemplar)];
+        }
+
+        $this->apply($key, $operations);
+    }
+
+    /**
+     * Apply several field writes to ONE hash, atomically and in one
+     * round trip.
+     *
+     * A histogram observation is three writes — bucket, sum, count —
+     * and they were three commands. Two consequences, both of which
+     * showed up in review. The cost: three synchronous round trips per
+     * observation, so a request touching three histogram families paid
+     * nine before anything else. And the correctness: a failure between
+     * them leaves a series whose buckets add up to more than its count,
+     * which is not a number anyone can reason about afterwards — a
+     * retry after a partial write produced exactly that.
+     *
+     * Every field is in the same key, so the script is single-key and
+     * valid on Redis Cluster. A server that refuses EVAL falls back to
+     * the individual commands, once, and is remembered: an atomicity
+     * improvement must not be able to stop metrics being written at
+     * all.
+     *
+     * @param  list<array{0: 'i'|'f'|'s', 1: string, 2: string}>  $operations
+     */
+    private function apply(string $key, array $operations): void
+    {
+        if ($operations === []) {
+            return;
+        }
+
+        $connection = $this->connection();
+
+        if ($this->scripting) {
+            $arguments = [];
+
+            foreach ($operations as [$op, $field, $value]) {
+                $arguments[] = $op;
+                $arguments[] = $field;
+                $arguments[] = $value;
+            }
+
+            try {
+                // The two clients disagree on how EVAL is called.
+                // phpredis takes (script, args, numKeys) and Laravel's
+                // PhpRedisConnection::eval() reorders for it; predis
+                // takes (script, numKeys, ...args) natively. Spelling
+                // both out is shorter than the wrapper that would hide
+                // it, and says which is which.
+                if ($connection instanceof PhpRedisConnection) {
+                    $connection->eval(self::APPLY_SCRIPT, 1, $key, ...$arguments);
+                } else {
+                    $connection->command('eval', [self::APPLY_SCRIPT, 1, $key, ...$arguments]);
+                }
+
+                return;
+            } catch (Throwable) {
+                $this->scripting = false;
+            }
+        }
+
+        foreach ($operations as [$op, $field, $value]) {
+            match ($op) {
+                'i' => $connection->command('hincrby', [$key, $field, (int) $value]),
+                'f' => $connection->command('hincrbyfloat', [$key, $field, (float) $value]),
+                's' => $connection->command('hset', [$key, $field, $value]),
+            };
         }
     }
 
@@ -160,7 +254,13 @@ final class RedisMetricStore implements MetricStore
 
     private function initialize(MetricDefinition $definition, string $key): void
     {
-        $memo = $definition->type->value.':'.$definition->name;
+        // Held in shared memory where there is any. A per-process memo
+        // is no memo at all under PHP-FPM, where the process state is
+        // the request's: every request rewrote the bookkeeping for
+        // every metric it touched, three commands each, and with ten
+        // families that is thirty round trips a request for data that
+        // changes on deploy.
+        $memo = 'store:init:'.$this->prefix.':'.$definition->type->value.':'.$definition->name;
         $now = time();
 
         // Re-run periodically rather than once per process. The bookkeeping
@@ -171,7 +271,7 @@ final class RedisMetricStore implements MetricStore
         // index and drops any family whose __meta is missing, so the metric
         // vanished from every scrape until a COLD process happened to write
         // it again — which, for a series with one long-lived writer, is never.
-        if (($this->initialized[$memo] ?? 0) > $now - self::REINITIALIZE_AFTER_SECONDS) {
+        if ($now < SharedState::deadline($memo)) {
             return;
         }
 
@@ -183,7 +283,7 @@ final class RedisMetricStore implements MetricStore
         // Memoize only once the writes landed. Setting it first meant a single
         // transient failure disabled initialization for the life of the
         // process, permanently.
-        $this->initialized[$memo] = $now;
+        SharedState::remember($memo, $now + self::REINITIALIZE_AFTER_SECONDS);
     }
 
     public function collect(): array
