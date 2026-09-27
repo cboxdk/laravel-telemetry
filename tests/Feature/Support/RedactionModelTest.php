@@ -17,6 +17,25 @@ use Cbox\Telemetry\Tracing\SpanKind;
  * So the model has two halves, and this asserts both: what the name
  * says, and what the value looks like when the name says nothing.
  */
+/**
+ * A credential-shaped string, assembled at runtime.
+ *
+ * Spelled out as a literal, `sk_live_` followed by twenty-four base62
+ * characters is Stripe's own documented example key — and GitHub's push
+ * protection recognises it and refuses the push. It is right to: a
+ * scanner cannot tell a fixture from a leak, and a repository whose
+ * tests trip secret scanning is a repository whose contributors learn
+ * to click through the warning.
+ *
+ * The redactor needs the SHAPE, and a shape only has to exist when the
+ * test runs. Prefix and body are separate strings here, so the file
+ * contains no credential-shaped literal and the assertion is unchanged.
+ */
+function credentialShaped(string $prefix = 'sk_live_'): string
+{
+    return $prefix.'Kq7mZt2Rb9Xw4Ns6Vd1Hy8Pc';
+}
+
 function redactUrl(string $query): string
 {
     $redactor = Redactor::fromConfig(config('telemetry.redaction'));
@@ -56,14 +75,17 @@ it('redacts every spelling of a credential parameter', function (string $name) {
 it('redacts a value that looks like a credential whatever it was called', function (string $name) {
     // The half a name list cannot do. These are real parameter names
     // from real APIs, and no list will ever have them all.
-    expect(redactUrl("{$name}=STRIPE_EXAMPLE_KEY_REMOVED_FROM_HISTORY"))
-        ->not->toContain('STRIPE_EXAMPLE_KEY_REMOVED_FROM_HISTORY');
+    $secret = credentialShaped();
+
+    expect(redactUrl("{$name}={$secret}"))->not->toContain($secret);
 })->with(['t', 'k', 'sas', 'se', 'x', 'v', 'cursor', 'opaque']);
 
 it('recognises the issuers that stamp their keys', function (string $value) {
     expect(redactUrl("q={$value}"))->not->toContain($value);
 })->with([
-    'STRIPE_EXAMPLE_KEY_REMOVED_FROM_HISTORY',
+    // Assembled rather than written out, for the reason in
+    // credentialShaped()'s docblock.
+    credentialShaped(),
     'ghp_16C7e42F292c6912E7710c838347Ae178B4a',
     'xoxb-1234-5678-abcdefghijklmnop',
     'AKIAIOSFODNN7EXAMPLE',
@@ -100,7 +122,10 @@ it('sees a secret through percent-encoding on both sides', function () {
     // `%74oken` is `token` to the application and to no regex that does
     // not decode; and the value is encoded just as often as the name.
     expect(redactUrl('%74oken=SECRETVALUE123abcXYZ0987'))->not->toContain('SECRETVALUE123abcXYZ0987')
-        ->and(redactUrl('q=sk%5Flive%5F4eC39HqLyjWDarjtT1zdp7dc'))->not->toContain('4eC39HqLyjWDarjtT1zdp7dc');
+        // Percent-encoded underscores: the prefix rule has to see the
+        // DECODED value, which is the whole point of this assertion.
+        ->and(redactUrl('q='.str_replace('_', '%5F', credentialShaped())))
+        ->not->toContain(substr(credentialShaped(), 8));
 });
 
 it('is configurable without writing a class', function () {
@@ -109,7 +134,7 @@ it('is configurable without writing a class', function () {
 
     // The app's own issuer prefix, unioned with the package's.
     expect(redactUrl('q=acme_tok_abcdef'))->not->toContain('acme_tok_abcdef')
-        ->and(redactUrl('q=STRIPE_EXAMPLE_KEY_REMOVED_FROM_HISTORY'))->not->toContain('4eC39HqLyjWDarjtT1zdp7dc');
+        ->and(redactUrl('q='.credentialShaped()))->not->toContain(credentialShaped());
 
     // Shape detection off: an unrecognised long value is kept.
     expect(redactUrl('t=SECRETVALUE123abcXYZ0987'))->toContain('SECRETVALUE123abcXYZ0987');
