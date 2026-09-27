@@ -47,7 +47,11 @@ SPOOL=0
 
 PORT="${LOADTEST_PORT:-8931}"
 DURATION="${LOADTEST_DURATION:-20s}"
-CONCURRENCY="${LOADTEST_CONCURRENCY:-32}"
+# Two, not thirty-two. Thirty-two saturates a laptop's cores against 32
+# FPM workers and measures the queue: p50 was 19ms at -c 1 and 56ms at
+# -c 16 on the same rig, with the package's own ~6ms somewhere inside
+# that. Raise it to look at saturation behaviour, not at cost.
+CONCURRENCY="${LOADTEST_CONCURRENCY:-2}"
 ROUTES="flat work heavy"
 COMPOSE="docker compose -f loadtest/docker-compose.yml"
 
@@ -205,8 +209,14 @@ The delta is the package, where it exceeds the noise column. Absolute
 throughput belongs to this rig — worker count, container CPU limits,
 the host — and is not a capacity figure for anything.
 
-Still not measured: a collector that is SLOW rather than absent (the
-breaker covers absent; a slow one holds an FPM worker), and the metric
-store under a whole fleet's writes rather than one host's.
+Measure at LOW concurrency. The default 32 saturates a laptop's cores
+against 32 FPM workers, and then the latency is queueing rather than
+work — p50 went 19ms at -c 1 to 56ms at -c 16 with nothing else
+changed. LOADTEST_CONCURRENCY=2 is where the package is visible.
+
+Still not measured: the metric store under a whole fleet's writes
+rather than one host's. For per-phase attribution — boot versus
+request versus per-operation — the in-process harness is better than
+this one, because it has no queueing or network in it at all.
 NOTE
 fi
