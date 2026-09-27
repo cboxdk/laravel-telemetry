@@ -7,15 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - unreleased
+
+A major for three reasons, and then a long tail of hardening that found
+its way in because the same review that checked the conformance work kept
+finding other things.
+
+**Read `UPGRADE.md` before taking this.** Every dashboard, alert and
+recording rule that reads a duration or a state label needs editing; the
+package cannot do it for you and will not warn you at runtime.
+
+### Breaking
+
+- **Durations are seconds, not milliseconds.** OpenTelemetry states the
+  unit for `http.server.request.duration` and every other duration
+  histogram, and this package was emitting milliseconds under a name that
+  promises seconds. A backend that trusts the unit was therefore off by
+  a thousand, silently — nothing in a dashboard says "this axis is wrong",
+  it just reads 250 where the truth is 0.25. Buckets move with the values.
+
+- **Semantic-convention attribute keys.** `system.memory.state`,
+  `system.filesystem.state` and `network.io.direction` replace the bare
+  `state` and `direction` keys, in both producers — the `telemetry:monitor`
+  command emitted them independently of the metrics provider, so both had
+  to change together.
+
+- **A dimensionless gauge carries `_ratio`,** as the OTLP-to-Prometheus
+  translation gives it, and only a gauge — a dimensionless counter is a
+  count. Applying the rule exposed two metrics using unit `1` for
+  something that is not a ratio: a load average is a run-queue length and
+  a circuit-breaker flag is a state, so both were relabelled rather than
+  weakening the rule.
+
+- **The instrument TYPE is part of the metric, and two were wrong.**
+  `system.memory.usage` and `system.filesystem.usage` become
+  UpDownCounters. Bytes in use are a sum that happens to go down: add them
+  across ten hosts and you have the fleet's memory, which is the question
+  you actually have — declared a gauge, a backend is entitled to average
+  them and answer a tenth of it. `MetricType` gains `UpDownCounter`,
+  OTLP serialises it as a non-monotonic sum, and the Prometheus renderer
+  maps it onto a gauge the way the OTLP translation does.
+  `Telemetry::observable()` and `Telemetry::pushed()` are the new entry
+  points, and `ObservableGauge` is now `Observable` because it no longer
+  only holds gauges.
+
+- **Redaction is a model with a bindable contract,** not a name list.
+  Probed with 33 real parameter spellings, the list leaked 11 — including
+  two that were on it. `accessToken` slipped past because camelCase was
+  never split, which matters because camelCase is what a JavaScript-facing
+  API uses and those are exactly the URLs an application does not control.
+  `AWSAccessKeyId` is named in the OTel spec itself; `sas` and `se` are
+  Azure; `t` and `k` are unreachable by any name-based rule that ever
+  existed. Names now split on a capital as well as `_`, `-` and `.`, and
+  a second half matches the VALUE's shape for the names no list will ever
+  hold. `RedactsTelemetry` can be bound to replace the whole engine.
+
 ### Added
 
+- **Optional scrubbing of structured personal identifiers** — email, IBAN,
+  card, CPR, IPv6, phone — each behind a checksum so an order number is
+  not mistaken for a card. Off by default; `telemetry.redaction.pii`.
+- **The signals that say a dependency died**, and the events that hide a
+  failure: migrations, maintenance mode, `db.connections.over_threshold`,
+  and 23 Laravel events that were dispatched at nothing.
 - **`host.name` and `host.arch` on the resource.** Detection covered
   container, Kubernetes and cloud identity but never named the machine, so
-  a plain VM or bare-metal host — the most common self-hosted deployment —
-  reported nothing to tie a request to the box that served it. Anything
-  reading that host's own exporters had nothing to join on.
-  `OTEL_RESOURCE_ATTRIBUTES` still wins, which is how a Kubernetes operator
-  substitutes the node for the pod.
+  a plain VM or bare-metal host reported nothing to tie a request to the
+  box that served it. `OTEL_RESOURCE_ATTRIBUTES` still wins, which is how
+  a Kubernetes operator substitutes the node for the pod.
+- **A series budget at the store,** enforced inside the same Lua script
+  that writes the observation, so it costs nothing on the wire. Refused
+  series are counted into `__overflow` and reported by `telemetry:doctor`.
+- **`classifyJobsUsing()`**, `telemetry.instrument.hosts`, and
+  `telemetry.stores.redis.max_fields`.
+- **`telemetry.traces.max_buffer_bytes`** — a byte budget beside the span
+  count, because five thousand spans is a ceiling for ordinary spans and
+  none at all for spans carrying a 100KB query.
+
+### Changed
+
+- **`instrument.resources` no longer reads `/proc` off Linux**, where it
+  cost 79ms a request — and it was a default.
+- **`server.address` is kept only for a host from a finite set** the
+  application named. Trusted-host patterns prove the host was VALIDATED,
+  not that there are few of them: Laravel's own `TrustHosts` defaults to
+  every subdomain of `app.url`, so an app behind wildcard DNS minted a
+  permanent series per subdomain anyone asked for.
+- **The OTLP circuit breaker and the report throttle share their cooldown
+  across the pool** via APCu where it exists. As static properties they
+  lasted exactly one request under PHP-FPM, so a "30 second" breaker was a
+  no-op and every request rediscovered the dead collector.
+- **Histogram writes are one atomic EVAL** instead of three commands, and
+  the spool pops a batch with one `LPOP key count` instead of one command
+  per entry.
+
+### Fixed
+
+- Every listener, teardown path and the manager binding itself are wrapped
+  so telemetry cannot throw into the application — including the paths a
+  guard cannot reach, like a constructor and a numeric attribute key.
+- Redaction: catastrophic scanning on attacker-chosen input (198ms of CPU
+  from one header), truncation before redaction in five places — each of
+  which removed the character the patterns match on and exported the
+  credential — and a redactor that failed OPEN.
+- Memory: span attribute and event counts, a per-span byte ceiling, the
+  finished-span buffer in bytes, the write buffer's series count, the OTLP
+  response, and the request body that was read in order to be measured.
+- Queue: job teardown released nothing until it had already done the work
+  that could fail, and a sync child ended the outer job's span.
+- The spool drain could outlast the daemon; the cron drain reported success
+  with a backlog remaining.
+
+### Security
+
+- `session_id` in a URL, JWTs written with any whitespace in the header,
+  userinfo with no username, and short numeric bearer tokens are all
+  redacted. See the Breaking note on the redaction model.
 
 ## [2.7.2] - 2026-09-25
 
