@@ -83,7 +83,7 @@ final class QueueInstrumentation implements ManagesRequestState
      * told about and not somebody else's — and can tell an attempt that
      * reported an outcome from one that never did.
      *
-     * @var array<int, int> job object id => span object id
+     * @var array<string, int> attempt key => span object id
      */
     private array $attemptSpans = [];
 
@@ -424,7 +424,17 @@ final class QueueInstrumentation implements ManagesRequestState
             );
 
             $this->jobSpans[] = $span;
-            $this->attemptSpans[spl_object_id($event->job)] = spl_object_id($span);
+            // A uuid identifies one attempt. If one is somehow already
+            // open under this key — a job that dispatched itself
+            // synchronously — the object id keeps the two apart rather
+            // than the second overwriting the first's ownership.
+            $key = self::attemptKey($event->job);
+
+            if (isset($this->attemptSpans[$key])) {
+                $key = 'obj:'.spl_object_id($event->job);
+            }
+
+            $this->attemptSpans[$key] = spl_object_id($span);
 
             $this->telemetry()->publishTraceContext();
 
@@ -614,7 +624,13 @@ final class QueueInstrumentation implements ManagesRequestState
         // did was something that could leave every map still holding
         // this span's entries. Nothing below can fail before the
         // release now, because the release is above it.
-        $span = array_pop($this->jobSpans);
+        // THIS attempt's span, not whatever is on top of the stack.
+        // A sync dispatch inside a job nests, so the stack holds the
+        // outer job's span too — and an inner attempt that never
+        // acquired one of its own used to pop the outer one, ending it
+        // early and recording its duration against the inner job's
+        // outcome.
+        $span = $this->spanFor($attempt);
         $usage = null;
         $unit = null;
         $profile = null;
@@ -814,7 +830,7 @@ final class QueueInstrumentation implements ManagesRequestState
      */
     private function closeAbandonedAttempt(object $job, string $connectionName): void
     {
-        $owner = spl_object_id($job);
+        $owner = self::attemptKey($job);
 
         // Already closed by an outcome event — every ordinary attempt, since
         // JobAttempted fires after JobProcessed/JobFailed, not instead.
@@ -884,6 +900,60 @@ final class QueueInstrumentation implements ManagesRequestState
         foreach ($units as $unit) {
             FailSafe::guard(static fn () => $unit->discard());
         }
+    }
+
+    /**
+     * What identifies an attempt across the events that report it.
+     *
+     * The job's uuid when it has one, because Laravel does not always
+     * hand the same job INSTANCE to every event of one attempt — and
+     * object identity then loses track of a span mid-attempt. The
+     * object id is the fallback for a job with no uuid (a raw payload,
+     * a custom queue driver).
+     */
+    private static function attemptKey(object $job): string
+    {
+        $uuid = FailSafe::guard(static fn (): ?string => method_exists($job, 'uuid') ? $job->uuid() : null);
+
+        return is_string($uuid) && $uuid !== '' ? 'uuid:'.$uuid : 'obj:'.spl_object_id($job);
+    }
+
+    /**
+     * The span this attempt owns, removed from the open stack.
+     *
+     * Falls back to the top of the stack only when the caller gave no
+     * attempt to identify — the Octane/NativePHP resets, which are
+     * closing everything anyway.
+     */
+    private function spanFor(?object $attempt): ?Span
+    {
+        $wanted = $attempt !== null ? ($this->attemptSpans[self::attemptKey($attempt)] ?? null) : null;
+
+        if ($wanted === null) {
+            // No ownership record at all: this attempt never opened a
+            // span, so it takes none. Popping the stack here is what
+            // ended the OUTER job's span when a sync child completed
+            // inside it.
+            //
+            // Only a caller with no attempt to identify — the
+            // Octane/NativePHP resets, which close everything — falls
+            // back to the top of the stack.
+            return $attempt === null ? array_pop($this->jobSpans) : null;
+        }
+
+        foreach ($this->jobSpans as $index => $open) {
+            if (spl_object_id($open) !== $wanted) {
+                continue;
+            }
+
+            $remaining = $this->jobSpans;
+            unset($remaining[$index]);
+            $this->jobSpans = array_values($remaining);
+
+            return $open;
+        }
+
+        return null;
     }
 
     private function currentJobSpan(): ?Span

@@ -94,20 +94,46 @@ php artisan telemetry:flush --daemon --interval=1 --metrics-interval=15
 ```
 
 With the spool enabled, requests serialize their spans/events and push
-them to a capped Redis list — one `RPUSH`, microseconds, no HTTP in the
-request lifecycle. The daemon (one process, under supervisor) drains the
-list every `--interval` seconds, merges up to `--max-batch` entries into
-a single OTLP request, and flushes metrics every `--metrics-interval`
-seconds — sub-second span delivery, sub-minute metrics.
+them to a capped Redis list — two commands (one `RPUSH` for everything
+the request carries, and the `LTRIM` that caps the list), microseconds,
+no HTTP in the request lifecycle. The daemon (one process, under
+supervisor) drains the list every `--interval` seconds, merges up to
+`--max-batch` entries into a single OTLP request, and flushes metrics
+every `--metrics-interval` seconds — sub-second span delivery,
+sub-minute metrics.
 
-Delivery semantics:
+### Delivery semantics
+
+Stated precisely, because the useful thing to know about a buffer is
+what it does **not** promise.
 
 - **Endpoint down** → the chunk is requeued at the front and retried
-  next tick; nothing is lost to a collector hiccup.
+  next tick; nothing is lost to a collector hiccup. A `Retry-After` is
+  honoured, so an overloaded collector is not hammered.
+- **Endpoint returns 4xx** → that chunk is dropped. A payload the
+  collector will always reject must not wedge the queue behind it, and
+  the drop is counted and reported.
 - **Daemon down** → the list caps at `otlp.spool.max_items` (20 000 by
-  default) with drop-oldest semantics; app memory and Redis stay bounded.
-- **SIGTERM** → the daemon drains what remains before exiting, so
-  restarts don't strand telemetry.
+  default) with drop-oldest semantics; app memory and Redis stay
+  bounded.
+- **SIGTERM** → the daemon drains for up to five seconds and exits.
+  Whatever does not fit stays in Redis and the next start picks it up;
+  the spool survives restarts. It is deliberately not "drain whatever
+  remains", because a supervisor sends SIGKILL about ten seconds later
+  and a drain that outlasts that is a kill with extra steps.
+- **Redis connection lost mid-drain** → entries are claimed with a
+  single atomic `LPOP key count`, so two daemons never take the same
+  ones. But if that command executes and its reply is lost, those
+  entries are gone: **the spool is at-most-once for the drain
+  itself.** It is a buffer in front of an endpoint, not a durable
+  queue, and telemetry is lossy by design at several points before it
+  (sampling, the span-buffer cap, the circuit breaker). If you need
+  acknowledged delivery of telemetry, the thing to run is a local
+  collector with its own on-disk queue, and point this package at it.
+- **Collector accepts a POST and its response is lost** → that chunk
+  is requeued and re-sent, so the other edge is at-least-once.
+  Duplicate spans share a span id and a well-behaved backend
+  deduplicates them.
 
 Supervisor program:
 

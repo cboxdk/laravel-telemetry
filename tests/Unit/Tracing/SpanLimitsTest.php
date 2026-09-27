@@ -136,3 +136,44 @@ it('bounds the attributes on an event too', function () {
         // as much.
         ->and($span->events()[0]->droppedAttributes)->toBe(872);
 });
+
+it('bounds an open span, not only the finished buffer', function () {
+    // The tracer's byte budget covers finished spans, which is no help
+    // while one is still open: sixty-four 1MiB attributes were held
+    // until it ended, whatever the buffer's ceiling said.
+    $span = (new Tracer)->startSpan('work');
+
+    for ($i = 0; $i < 64; $i++) {
+        $span->setAttribute("chunk.{$i}", str_repeat('a', 1024 * 1024));
+    }
+
+    expect($span->approximateBytes())->toBeLessThan(3 * 1024 * 1024)
+        ->and($span->droppedAttributes())->toBeGreaterThan(50);
+});
+
+it('does not let a rewritten attribute climb the ceiling', function () {
+    // A loop that updates one attribute must not exhaust the budget by
+    // counting every version of it.
+    $span = (new Tracer)->startSpan('work');
+
+    for ($i = 0; $i < 200; $i++) {
+        $span->setAttribute('progress', str_repeat('a', 100_000));
+    }
+
+    $span->setAttribute('outcome', 'ok');
+
+    expect($span->attributes())->toHaveKey('outcome')
+        ->and($span->droppedAttributes())->toBe(0);
+});
+
+it('still records the exception on a span that has hit its byte ceiling', function () {
+    $span = (new Tracer)->startSpan('work');
+
+    for ($i = 0; $i < 64; $i++) {
+        $span->setAttribute("chunk.{$i}", str_repeat('a', 1024 * 1024));
+    }
+
+    $span->recordException(new RuntimeException('the payment gateway refused'));
+
+    expect($span->attributes()['error.type'] ?? null)->toBe(RuntimeException::class);
+});

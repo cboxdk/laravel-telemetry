@@ -39,6 +39,18 @@ final class Span
 
     private const RESERVE = 8;
 
+    /**
+     * Most bytes one span's content may occupy.
+     *
+     * The tracer's byte budget covers the FINISHED buffer, which is no
+     * help while a span is still open: one span accepted sixty-four
+     * 1MiB attributes and held 64MiB until it ended. A per-span
+     * ceiling is the only thing that bounds that, and refusing a whole
+     * attribute is the safe way to enforce it — truncating a value
+     * would cut a credential before redaction could read it.
+     */
+    private const MAX_BYTES = 2_097_152;
+
     /** @var array<string, scalar|null> */
     private array $attributes;
 
@@ -46,6 +58,9 @@ final class Span
     private array $events = [];
 
     private int $droppedAttributes = 0;
+
+    /** Running total of attribute bytes, for the per-span ceiling. */
+    private int $bytes = 0;
 
     private int $droppedEvents = 0;
 
@@ -184,14 +199,38 @@ final class Span
             return $this;
         }
 
-        // No length limit here, deliberately. Cutting a value before
-        // redaction sees it destroys the evidence redaction matches on:
-        // truncating `…https://alice:hunter2@example.test/` at the `@`
-        // leaves a string the userinfo pattern no longer recognises,
-        // and the password ships. Length is the redactor's cap to
-        // apply, after it has redacted; the memory a long value
-        // occupies until then is bounded by the tracer's byte budget,
-        // which drops whole spans rather than mutilating one.
+        // A per-span byte ceiling, refusing the attribute WHOLE.
+        //
+        // The tracer's budget covers the finished buffer, which is no
+        // help while a span is open — one span took sixty-four 1MiB
+        // attributes and held them until it ended. Truncating the value
+        // instead would cut a credential before redaction could read
+        // it, so the choice is to keep it or refuse it.
+        //
+        // An update credits the old value first, or a loop that
+        // rewrites one attribute would climb the ceiling and start
+        // refusing everything else.
+        $previous = array_key_exists($key, $this->attributes)
+            ? self::sizeOfEntry($key, $this->attributes[$key])
+            : 0;
+
+        $size = self::sizeOfEntry($key, $value);
+
+        if (! $reserved && $this->bytes - $previous + $size > self::MAX_BYTES) {
+            $this->droppedAttributes++;
+
+            return $this;
+        }
+
+        $this->bytes = $this->bytes - $previous + $size;
+
+        // No length limit on the value, deliberately. Cutting one
+        // before redaction sees it destroys the evidence redaction
+        // matches on: truncating
+        // `…https://alice:hunter2@example.test/` at the `@` leaves a
+        // string the userinfo pattern no longer recognises, and the
+        // password ships. Length is the redactor's to cap, after it
+        // has redacted.
         $this->attributes[$key] = $value;
 
         return $this;
@@ -253,10 +292,19 @@ final class Span
         $bytes = 0;
 
         foreach ($attributes as $key => $value) {
-            $bytes += strlen((string) $key) + (is_string($value) ? strlen($value) : 8) + 48;
+            $bytes += self::sizeOfEntry($key, $value);
         }
 
         return $bytes;
+    }
+
+    /**
+     * @param  array-key  $key
+     * @param  scalar|null  $value
+     */
+    private static function sizeOfEntry(string|int $key, mixed $value): int
+    {
+        return strlen((string) $key) + (is_string($value) ? strlen($value) : 8) + 48;
     }
 
     /**
@@ -281,7 +329,10 @@ final class Span
      */
     public function forgetAttribute(string $key): self
     {
-        unset($this->attributes[$key]);
+        if (array_key_exists($key, $this->attributes)) {
+            $this->bytes -= self::sizeOfEntry($key, $this->attributes[$key]);
+            unset($this->attributes[$key]);
+        }
 
         return $this;
     }

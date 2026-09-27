@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Contracts\Queue\Job;
@@ -10,8 +11,15 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\JobReleasedAfterException;
 
-function fakeJob(int $attempts = 1, string $uuid = 'fake-job-uuid'): Job
+/**
+ * A job double. The uuid defaults to a UNIQUE one, as Laravel's does —
+ * two live jobs sharing a uuid is not a state the framework produces,
+ * and a fixture that pretends otherwise tests the wrong thing.
+ */
+function fakeJob(int $attempts = 1, ?string $uuid = null): Job
 {
+    $uuid ??= 'fake-job-'.bin2hex(random_bytes(6));
+
     $job = Mockery::mock(Job::class);
     $job->shouldReceive('resolveName')->andReturn('App\Jobs\FlakyJob');
     $job->shouldReceive('isReleased')->andReturn(false);
@@ -155,4 +163,37 @@ it('keeps nested job spans on a stack so the outer span survives', function () {
     $byParent = $spans->keyBy(fn ($span) => $span->parentSpanId ?? 'root');
 
     expect($spans->pluck('traceId')->unique())->toHaveCount(1);
+});
+
+it('does not end the outer job span when a nested attempt has none of its own', function () {
+    // A job dispatches a sync child. SyncQueue raises the queue events
+    // too, so the child's completion arrives while the outer job's
+    // span is still open — and a completion that pops the top of the
+    // stack takes the OUTER span, ending it early and recording its
+    // duration against the child's outcome.
+    $collector = new CollectingExporter;
+    Telemetry::addExporter($collector);
+
+    app('queue');
+    $events = app('events');
+
+    $outer = fakeJob(uuid: 'outer');
+    $events->dispatch(new JobProcessing('redis', $outer));
+
+    // The child never got a span of its own (sampling, a guard that
+    // failed, an instrumentation switched off mid-flight), and its
+    // completion still arrives.
+    $orphan = fakeJob(uuid: 'inner');
+    $events->dispatch(new JobProcessed('sync', $orphan));
+
+    $stack = new ReflectionProperty(QueueInstrumentation::class, 'jobSpans');
+    $open = $stack->getValue(app(QueueInstrumentation::class));
+
+    expect($open)->toHaveCount(1)
+        ->and($open[0]->hasEnded())->toBeFalse();
+
+    // And the outer job still closes normally afterwards.
+    $events->dispatch(new JobProcessed('redis', $outer));
+
+    expect($stack->getValue(app(QueueInstrumentation::class)))->toBeEmpty();
 });

@@ -54,9 +54,9 @@ way it can in Node or Python. The ecosystem has two standard answers:
   unblocked by fire-and-forgetting the payload to a separate local
   process (a socket write), which does the actual telemetry work. This
   package's spool (`TELEMETRY_OTLP_SPOOL=true` + `telemetry:flush
-  --daemon`) is the same shape: requests do one `RPUSH` and return, and
-  a separate daemon process ships the batches — Redis standing in for
-  the local socket.
+  --daemon`) is the same shape: requests do one `RPUSH` (plus the
+  `LTRIM` that caps the list) and return, and a separate daemon process
+  ships the batches — Redis standing in for the local socket.
 - **The in-process shape.** External monitoring SDKs without an agent
   do the export work in the request itself, and typically recommend a
   local relay/collector process to absorb it at scale. This package's
