@@ -130,3 +130,23 @@ it('does not report an unreadable response as a clean export', function () {
 
     expect(ExportOutcome::of('otlp', $result)->status)->toBe(ExportStatus::Partial);
 });
+
+it('does not lose rejections when another signal failed outright', function () {
+    // The mixed batch: traces got a 503, logs was accepted with seven
+    // rejected. The failure is what decides the retry, so it has to be
+    // the result — but the seven are real data loss and were
+    // disappearing with the result that carried them.
+    //
+    // A 503 rather than an unreachable collector, because unreachable
+    // stops the batch before logs is ever posted — there is no mixed
+    // result to lose in that case.
+    $transport = new FakeTransport;
+    $transport->responses['/v1/traces'] = ExportResult::retryable('HTTP 503: overloaded', 30);
+    $transport->responses['/v1/logs'] = ExportResult::partial(7, 'bad resource');
+
+    $result = (new OtlpExporter($transport, new OtlpSerializer([])))->export(otlpBatch());
+
+    expect($result->success)->toBeFalse()
+        ->and($result->retryable)->toBeTrue()
+        ->and($result->reason)->toContain('7 data points rejected');
+});

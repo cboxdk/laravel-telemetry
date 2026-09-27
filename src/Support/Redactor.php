@@ -717,14 +717,23 @@ final class Redactor implements RedactsTelemetry
             // signature, which is where a long token's secret actually
             // lives, unbounded. 4096 base64 characters is far more
             // header than any real token carries, x5c chains included.
-            // `eyJ` is base64 of `{"`, and a JWT header is JSON — so
-            // one written with whitespace or a leading newline starts
-            // `ewo` or `eyA` instead, and is just as much a
-            // credential. Known gap: a token whose header exceeds the
-            // bound above (an x5c chain), and one with an empty claims
-            // set, whose `e30` payload is shorter than the minimum
-            // that keeps ordinary text out.
-            '/\b(?:eyJ|ewo|eyA)[\w-]{10,4096}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
+            // `e[yw]`, derived rather than listed.
+            //
+            // A JWT header is JSON, so its first byte is `{` and its
+            // second is `"` or whitespace. Base64 packs the first byte
+            // and the top bits of the second into the first two
+            // characters, and every byte JSON allows in that position
+            // yields `ey` or `ew` — nothing else. Enumerating
+            // three-character prefixes was a losing game: `eyJ` for
+            // `{"`, `ewo` for a newline, `eyA` for a space, and a
+            // header written with CRLF or a tab produced `ew0` and
+            // `ewk`, which a list of three kept missing.
+            //
+            // Known gap: a header longer than the bound (an x5c
+            // certificate chain), and a token with an empty claims set,
+            // whose `e30` payload is below the minimum that keeps
+            // ordinary prose out.
+            '/\be[yw][\w-]{11,4096}+\.[\w-]{6,}+\.[\w-]{6,}/' => '[REDACTED:jwt]',
             // HTTP credential schemes embedded in messages.
             //
             // Two ways to qualify, because a flat length threshold cannot

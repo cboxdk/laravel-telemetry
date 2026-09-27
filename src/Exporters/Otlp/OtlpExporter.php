@@ -137,20 +137,10 @@ final class OtlpExporter implements Exporter
             SharedState::remember(self::CIRCUIT_KEY, time() + $cooldown);
         }
 
-        foreach ($results as $result) {
-            if (! $result->success) {
-                return $result;
-            }
-        }
-
-        // A rejection, or a response we could not read — either way
-        // the batch was accepted but something about it is unknown,
-        // and both have to survive the fold. Reporting a clean success
-        // here is how a partial loss goes unnoticed.
-        //
-        // Summed and joined across signals: traces rejecting three and
-        // logs rejecting seven is ten, not three, and the operator
-        // needs both reasons.
+        // A mixed batch: one signal failed and another was accepted
+        // with rejections. The failure is what the caller must act on —
+        // it decides the retry — but the rejections are real data loss
+        // and were disappearing with the result that carried them.
         $rejected = 0;
         $reasons = [];
 
@@ -162,6 +152,32 @@ final class OtlpExporter implements Exporter
             }
         }
 
+        foreach ($results as $result) {
+            if ($result->success) {
+                continue;
+            }
+
+            if ($rejected <= $result->rejected) {
+                return $result;
+            }
+
+            $reason = implode('; ', $reasons)." (and {$rejected} data points rejected by another signal)";
+
+            return match (true) {
+                $result->unreachable => ExportResult::unreachable($reason, $result->retryAfterSeconds),
+                $result->retryable => ExportResult::retryable($reason, $result->retryAfterSeconds),
+                default => ExportResult::failed($reason),
+            };
+        }
+
+        // A rejection, or a response we could not read — either way
+        // the batch was accepted but something about it is unknown,
+        // and both have to survive the fold. Reporting a clean success
+        // here is how a partial loss goes unnoticed.
+        //
+        // Summed and joined across signals: traces rejecting three and
+        // logs rejecting seven is ten, not three, and the operator
+        // needs both reasons.
         if ($rejected > 0 || $reasons !== []) {
             return ExportResult::partial($rejected, $reasons === [] ? null : implode('; ', $reasons));
         }

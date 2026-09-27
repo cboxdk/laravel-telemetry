@@ -234,3 +234,25 @@ it('still leaves an auth-param list alone', function (string $value) {
     'Bearer realm=api',
     'Bearer Authentication',
 ]);
+
+it('redacts a JWT however its header was formatted', function (string $header) {
+    // A JWT header is JSON, so its second byte can be any whitespace
+    // JSON allows — and base64 turns each of those into a different
+    // third character. Enumerating prefixes kept missing one; the
+    // first TWO characters are always `ey` or `ew`, and that is
+    // derivable rather than guessable.
+    $token = implode('.', [
+        rtrim(strtr(base64_encode($header), '+/', '-_'), '='),
+        'eyJzdWIiOiIxMjM0NTY3ODkwIn0',
+        'dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+    ]);
+
+    expect(Redactor::fromConfig(config('telemetry.redaction'))->value('log.context.message', "token {$token} rejected"))
+        ->not->toContain('dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U');
+})->with([
+    'compact' => ['{"alg":"HS256","typ":"JWT"}'],
+    'leading space' => ['{ "alg":"HS256","typ":"JWT"}'],
+    'leading newline' => ["{\n  \"alg\":\"HS256\"}"],
+    'leading CRLF' => ["{\r\n  \"alg\":\"HS256\"}"],
+    'leading tab' => ["{\t\"alg\":\"HS256\"}"],
+]);
