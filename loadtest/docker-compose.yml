@@ -27,7 +27,10 @@ services:
       TELEMETRY_ENABLED: "${TELEMETRY_ENABLED:-1}"
       TELEMETRY_STORE: "${TELEMETRY_STORE:-array}"
       TELEMETRY_EXPORTERS: "${TELEMETRY_EXPORTERS:-}"
-      TELEMETRY_OTLP_ENDPOINT: "http://collector:4318"
+      # Overridable so the stalling `tarpit` below can be substituted for
+      # the real collector. Hardcoded, it silently ignored the override
+      # and the stall test measured a healthy collector.
+      TELEMETRY_OTLP_ENDPOINT: "${TELEMETRY_OTLP_ENDPOINT:-http://collector:4318}"
       TELEMETRY_OTLP_SPOOL: "${TELEMETRY_OTLP_SPOOL:-0}"
       TELEMETRY_TRACES_SAMPLE_RATE: "${TELEMETRY_TRACES_SAMPLE_RATE:-1.0}"
       REDIS_HOST: redis
@@ -36,6 +39,18 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # A collector that ACCEPTS and then says nothing, which is the failure
+  # mode worth fearing. A refused connection is cheap — it comes back
+  # immediately and trips the breaker. One that holds the socket open
+  # holds an FPM worker for the whole HTTP timeout, and with the spool
+  # off that is paid on the request path.
+  #
+  #   TELEMETRY_OTLP_ENDPOINT=http://tarpit:4318 \
+  #     docker compose -f loadtest/docker-compose.yml up -d --no-deps app
+  tarpit:
+    image: alpine/socat:latest
+    command: ["-T", "300", "TCP-LISTEN:4318,fork,reuseaddr", "SYSTEM:'sleep 300'"]
 
   # A real collector, so the export path is a real HTTP round trip
   # rather than a fake. It throws the data away on purpose: this rig

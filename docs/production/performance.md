@@ -239,10 +239,49 @@ simply absent.
 
 ## When the OTLP backend is down
 
-Exports never retry in-request; a retryable failure trips a per-process
-circuit breaker so subsequent requests skip the export entirely for 30 s
-(or the server's `Retry-After`). Worst case is one timeout per worker per
-cooldown window — not per request.
+Exports never retry in-request; a retryable failure trips a circuit
+breaker so subsequent requests skip the export entirely for 30 s (or the
+server's `Retry-After`). The breaker's deadline lives in APCu where it is
+available, so the cooldown is shared by every worker in the pool; without
+APCu it is per-process, which under PHP-FPM means per request —
+`telemetry:doctor` says which applies.
+
+### Measured, under load, against both kinds of broken collector
+
+From `loadtest/`, on the production base image with php-fpm (32 workers),
+a real Redis metric store and a real collector. Throughput figures belong
+to that rig and are not a capacity number for anything; the columns to
+read are the ones that compare against the healthy baseline.
+
+| Collector | rps | p50 | p99 | max | 2xx |
+|---|---|---|---|---|---|
+| healthy | 348 | 42.7 ms | 96.4 ms | — | 100 % |
+| **refusing** (stopped) | 357 | 42.1 ms | 94.1 ms | — | 100 % |
+| **stalling**, spool off | 283 | 49.0 ms | 120.4 ms | 3035 ms | 100 % |
+| **stalling**, spool on | 214 | 68.1 ms | 177.5 ms | 372 ms | 100 % |
+
+- **A collector that refuses costs nothing.** Connection refused returns
+  immediately, and the breaker means it is attempted once per cooldown
+  window rather than once per request. Throughput and latency are
+  indistinguishable from healthy.
+- **A collector that stalls costs one timeout per cooldown window**, and
+  that is what the 3 s max is — the configured `otlp.timeout`. Around
+  0.1 % of requests paid it; p50 and p99 did not move. The herd is
+  inherent and bounded: the breaker can only open once the first failure
+  returns, so the requests already in flight when a window opens each pay
+  the timeout.
+- **The spool takes the stall off the request path entirely** — max drops
+  from 3035 ms to 372 ms — and keeps the data: 8 277 payloads queued
+  during the outage and all 8 279 shipped afterwards, with the collector
+  refusing none of them. It costs throughput while the backend is down
+  (214 vs 283 rps) for the honest reason that it is doing work: the
+  direct exporter is cheap there precisely because it is discarding.
+
+Cardinality held: after ~50 000 requests the store had nine families of
+12–34 hash fields each and none in overflow. Memory held: once the
+workers were warm, RSS grew 0.1 KB per request per worker with telemetry
+on and 0.0 KB with it off, which is the same as nothing. Resident cost of
+having the package loaded at all was ~12 MB per worker.
 
 ## Octane (Swoole, RoadRunner, FrankenPHP)
 

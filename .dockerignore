@@ -3,7 +3,14 @@
 .git
 .github
 node_modules
+# Excluded except the one fixture composer's dev autoloader requires.
+# `autoload-dev.files` puts it in vendor/composer/autoload_static.php, so
+# `require vendor/autoload.php` fatals without it and the image cannot
+# serve a single request — which is exactly what happened, invisibly,
+# because a stray `php -S` on the same port answered instead.
 tests
+!tests/fixtures
+!tests/fixtures/nativephp-screen-events.php
 docs
 resources/grafana
 loadtest/workbench/storage/logs

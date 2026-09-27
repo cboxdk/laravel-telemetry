@@ -34,6 +34,39 @@ a table to be misread.
 
 Raise `LOADTEST_ARMS` for more passes and a tighter noise floor.
 
+It also checks that the thing answering on the port is the thing it
+started. A `php -S` left over from a `--target builtin` run binds
+127.0.0.1 specifically, which beats the container's wildcard bind for
+loopback traffic — so every request went to a stale host process while
+the script dutifully recreated containers between arms. That produced a
+full results table, twenty thousand healthy requests and an empty Redis,
+and nothing in the output suggested the container had never been touched.
+One `Server:` header settles it, and the run now stops rather than
+reporting.
+
+## The stalling collector
+
+A collector that refuses is the easy case — it answers immediately and
+the breaker takes it from there. One that accepts the socket and says
+nothing holds an FPM worker for the whole HTTP timeout, which is the
+failure mode worth fearing, so the rig ships one:
+
+```sh
+TELEMETRY_OTLP_ENDPOINT=http://tarpit:4318 \
+  docker compose -f loadtest/docker-compose.yml up -d --no-deps app
+```
+
+`tarpit` accepts and sleeps. Results from both kinds of broken collector
+are in `docs/production/performance.md`.
+
+To drain the spool afterwards — the daemon side, which the rig could not
+reach at all before:
+
+```sh
+docker compose -f loadtest/docker-compose.yml exec app php loadtest/flush.php
+docker compose -f loadtest/docker-compose.yml exec app php loadtest/flush.php --daemon --interval=1
+```
+
 ## What it cannot tell you
 
 **On Docker Desktop, nothing.** The container filesystem alone costs
@@ -44,11 +77,8 @@ it on Linux against a local filesystem. The per-operation figures in
 not have this problem; they are the right source for a number, and
 this rig is the right source for "does the whole thing hold up".
 
-**A collector that is slow rather than absent.** The circuit breaker
-covers a collector that refuses. One that answers in 500ms holds an
-FPM worker for 500ms, three times a request with the spool off, and
-that is the failure mode worth fearing at scale. Simulating it needs a
-collector that stalls on purpose; the one here answers immediately.
+**The metric store under a fleet.** One app writing is not a thousand
+apps writing to the same Redis.
 
 **The metric store under a fleet.** One app writing is not a thousand
 apps writing to the same Redis.

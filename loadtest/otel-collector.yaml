@@ -5,7 +5,7 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 exporters:
-  # Throws it away on purpose: this rig measures what it costs the
+  # Throws the data away on purpose: this rig measures what it costs the
   # application to ship telemetry, not what it costs a backend to keep
   # it. A collector that wrote to disk would be measuring the disk.
   nop:
@@ -15,3 +15,19 @@ service:
     traces:  {receivers: [otlp], exporters: [nop]}
     metrics: {receivers: [otlp], exporters: [nop]}
     logs:    {receivers: [otlp], exporters: [nop]}
+
+  # The collector's own counters, on :8888. Without these the rig cannot
+  # tell a run that shipped telemetry from one where the exporter was
+  # silently off — which is not a hypothetical: a first pass here
+  # reported 18,000 healthy requests and an empty Redis, and `nop`
+  # meant there was nothing to check it against.
+  #
+  #   curl -s http://collector:8888/metrics | grep otelcol_receiver_accepted
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

@@ -84,12 +84,42 @@ start_fpm() {
 
 wait_for_server() {
   for _ in $(seq 1 100); do
-    curl -fsS "http://127.0.0.1:$PORT/flat" >/dev/null 2>&1 && return 0
+    curl -fsS "http://127.0.0.1:$PORT/flat" >/dev/null 2>&1 && { assert_target; return 0; }
     sleep 0.3
   done
   echo "nothing answering on $PORT."
   [[ "$TARGET" == "fpm" ]] && echo "  start the rig first: $COMPOSE up -d --build"
   exit 1
+}
+
+# Whatever answers on the port is not necessarily what we started.
+#
+# A `php -S` left over from a --target builtin run binds 127.0.0.1
+# specifically, which beats the container's wildcard bind for loopback
+# traffic — so every request went to a stale host process while this
+# script dutifully recreated containers between arms. It produced a
+# full results table, twenty thousand healthy requests, and an empty
+# Redis, and nothing in the output suggested the container had not been
+# touched. One header settles it.
+assert_target() {
+  local server
+  server=$(curl -fsS -o /dev/null -D- "http://127.0.0.1:$PORT/flat" 2>/dev/null | tr -d '\r' | awk 'tolower($1)=="server:"{print tolower($2)}')
+
+  case "$TARGET" in
+    fpm)
+      [[ "$server" == nginx* ]] && return 0
+      echo "Something other than the container is answering on $PORT (Server: ${server:-none})."
+      echo "  A leftover 'php -S' from --target builtin binds loopback and wins over the container."
+      echo "  Find it with: lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+      exit 1
+      ;;
+    builtin)
+      [[ -z "$server" ]] && return 0
+      echo "Expected PHP's built-in server on $PORT but something else answered (Server: $server)."
+      echo "  Stop the container rig first: $COMPOSE down"
+      exit 1
+      ;;
+  esac
 }
 
 measure() {
