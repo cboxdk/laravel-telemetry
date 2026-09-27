@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0] - unreleased
+## [3.0.0] - 2026-09-27
 
 A major for three reasons, and then a long tail of hardening that found
 its way in because the same review that checked the conformance work kept
