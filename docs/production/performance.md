@@ -43,6 +43,43 @@ separate, already-bounded cost: OTLP posts run at terminate with a
 per-process circuit breaker after one failure so it costs one timeout
 per cooldown window, not per request (see below).
 
+### On the production image, attributed by phase
+
+From `loadtest/inproc.php` and `loadtest/boot.php`, on the production base
+image, xdebug off, 600 requests per arm, three interleaved passes. These
+resolve to ±0.06 ms, which is why they are the numbers to quote.
+
+| Phase | Cost | Paid |
+|---|---|---|
+| Service provider at boot | **+0.49 ms** | every PHP-FPM request; once per Octane worker |
+| — of which, having it registered at all | +0.22 ms | (config merge, registrations) |
+| — of which, wiring the instrumentations | +0.27 ms | |
+| Request: middleware + terminate + flush | **+0.58 ms** | every request |
+| Per instrumented operation (query, cache op) | **~20 µs** | per operation |
+
+End to end over HTTP, at two concurrent connections so the measurement is
+work rather than queueing: **+1.97 ms** per request with an array store
+and no exporter, **+2.25 ms** with the Redis store, **+2.49 ms** with a
+synchronous OTLP post to a local collector. The gap between +1.07 ms
+in-process and +1.97 ms over HTTP is PHP-FPM: a fresh heap per request,
+the autoloader, and the container being handed back.
+
+So: **about 2 ms a request under PHP-FPM with everything on.** On a
+trivial route that doubles the request, and on a real one that does
+30–50 ms of work it is 4–6 %. There is no single feature worth disabling
+to recover it — the largest one, resource capture, is ~0.15 ms — and the
+one lever that matters is `TELEMETRY_OTLP_SPOOL`, which takes the export
+off the request path entirely.
+
+**If you re-measure this, check for xdebug first.** The rig originally
+used the `-dev` base image, which ships xdebug with
+`xdebug.mode=develop,debug,coverage` — loaded and active. Xdebug costs
+per function call, and the telemetry path makes many more calls than the
+baseline it is compared against, so it inflated the measured overhead
+**four-fold**: +1.79 ms instead of +0.45 ms for the same code. A profiler
+that is loaded is not a neutral observer. `loadtest/` now uses the
+production tag and disables xdebug regardless.
+
 ### The structural constraint (and both answers to it)
 
 In-process telemetry in PHP has a constraint no SDK escapes: **PHP has
@@ -248,10 +285,18 @@ APCu it is per-process, which under PHP-FPM means per request —
 
 ### Measured, under load, against both kinds of broken collector
 
-From `loadtest/`, on the production base image with php-fpm (32 workers),
-a real Redis metric store and a real collector. Throughput figures belong
-to that rig and are not a capacity number for anything; the columns to
-read are the ones that compare against the healthy baseline.
+From `loadtest/`, with php-fpm (32 workers), a real Redis metric store
+and a real collector. Throughput figures belong to that rig and are not
+a capacity number for anything; the columns to read are the ones that
+compare against the healthy baseline.
+
+These were taken at 32 concurrent connections on a 12-core laptop, so
+the absolute latencies are mostly queueing, and on a base image that
+still had xdebug active — which inflates everything and inflates the
+telemetry path most. **The shape of each row is the finding; the
+absolute numbers in this table are not comparable with the per-request
+costs above.** They are kept because the comparison between rows is
+what matters and all four rows carry the same inflation.
 
 | Collector | rps | p50 | p99 | max | 2xx |
 |---|---|---|---|---|---|

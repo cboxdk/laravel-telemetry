@@ -20,7 +20,15 @@ services:
       dockerfile: loadtest/Dockerfile
       args:
         NATIVE: "${NATIVE:-off}"
-        PHP_IMAGE: "${PHP_IMAGE:-ghcr.io/cboxdk/php-baseimages/php-fpm-nginx:8.5-bookworm-dev}"
+        # The PRODUCTION tag, not -dev. The dev tag ships xdebug with
+        # `xdebug.mode=develop,debug,coverage` — active, not off — which
+        # costs every function call and therefore costs the telemetry
+        # path far more than the baseline it is being compared against.
+        # It inflated the measured per-request overhead 4x, from 0.45ms
+        # to 1.79ms, and the rig reported the inflated figure as the
+        # package's cost. The native extension is staged in both tags,
+        # so -dev bought nothing else.
+        PHP_IMAGE: "${PHP_IMAGE:-ghcr.io/cboxdk/php-baseimages/php-fpm-nginx:8.5-bookworm}"
     ports: ["8931:80"]
     environment:
       NGINX_WEBROOT: /app/loadtest/public

@@ -67,6 +67,31 @@ docker compose -f loadtest/docker-compose.yml exec app php loadtest/flush.php
 docker compose -f loadtest/docker-compose.yml exec app php loadtest/flush.php --daemon --interval=1
 ```
 
+## Per-phase attribution
+
+The HTTP rig measures nginx, php-fpm, the network and the queue as well
+as the package, and on a laptop those dominate. For "what does this cost
+and where does it go", two in-process harnesses answer better:
+
+```sh
+C="docker compose -f loadtest/docker-compose.yml exec"
+for s in 0 1; do $C -e TELEMETRY_ENABLED=$s app php loadtest/inproc.php work 600; done
+$C app php loadtest/boot.php without 50
+$C app php loadtest/boot.php with 50
+```
+
+They resolve to ±0.06ms. Results are in
+`docs/production/performance.md`.
+
+**Check for xdebug before trusting any number from here.** The rig used
+the `-dev` base image, which ships xdebug loaded and active
+(`mode=develop,debug,coverage`). It costs per function call, the
+telemetry path makes many more calls than the baseline, and it inflated
+the measured overhead four-fold — +1.79ms instead of +0.45ms for the
+same code. The default image is now the production tag and the
+Dockerfile disables xdebug regardless, but anyone pointing `PHP_IMAGE`
+somewhere else should check.
+
 ## What it cannot tell you
 
 **On Docker Desktop, nothing.** The container filesystem alone costs

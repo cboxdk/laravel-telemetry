@@ -50,5 +50,17 @@ RUN { \
 # the thing being measured — the rig has to be faster than its subject
 # or it measures itself. An immutable image is also one fewer variable
 # between the two halves of a run.
+# Belt and braces for anyone who points PHP_IMAGE at a -dev tag: a
+# profiler that is loaded and active is not a neutral observer. Xdebug
+# costs per function call, the telemetry path makes many more calls than
+# the baseline, and the difference lands in the delta as though it were
+# the package.
+RUN set -eux; \
+    for ini in /usr/local/etc/php/conf.d/*xdebug*.ini; do \
+      [ -e "$ini" ] || continue; \
+      mv "$ini" "$ini.disabled"; \
+      echo "loadtest: disabled $ini"; \
+    done
+
 COPY . /app
 WORKDIR /app
