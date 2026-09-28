@@ -18,15 +18,23 @@ function adversarial(string $value, array $overrides = []): float
         $overrides + ['pii' => ['detectors' => PersonalData::availableDetectors()]] + config('telemetry.redaction'),
     );
 
-    // The best of three. A shared CI runner stalls a single run by more
-    // than the margin (51.8ms against a 50ms bound, on input that takes
-    // a few ms here); backtracking does not stall — it costs every run.
+    // CPU time, the best of three. Wall time measured the box: a shared
+    // runner stalled one sample past the bound, and a throttled one
+    // stalled the longer of two runs more than the shorter. Neither
+    // stall is CPU this process spent; backtracking is, on every run.
+    $cpu = static function (): float {
+        $usage = getrusage();
+
+        return ($usage['ru_utime.tv_sec'] + $usage['ru_stime.tv_sec']) * 1_000
+            + ($usage['ru_utime.tv_usec'] + $usage['ru_stime.tv_usec']) / 1_000;
+    };
+
     $best = INF;
 
     for ($run = 0; $run < 3; $run++) {
-        $start = hrtime(true);
+        $start = $cpu();
         $redactor->value('log.context.message', $value);
-        $best = min($best, (hrtime(true) - $start) / 1_000_000);
+        $best = min($best, $cpu() - $start);
     }
 
     return $best;
@@ -155,7 +163,17 @@ it('stays fast on a run of JWT prefixes', function () {
     // another scan of the remainder. 218KiB of it cost 635ms once the
     // payload bound came off; the fix was to bound the header segment
     // instead, which cannot hide a secret.
-    $value = str_repeat('eyJaaaaaaaaaa-', 16_000).'.aaaaaa.!';
+    //
+    // What was wrong was the growth, so that is what this measures: twice
+    // the input may cost twice the time, not four times. A wall-clock
+    // bound measured the runner instead — 22ms on a laptop, 61ms on a
+    // shared CI box, same code.
+    $run = static fn (int $n): float => adversarial(str_repeat('eyJaaaaaaaaaa-', $n).'.aaaaaa.!', ['max_value_length' => 0]);
 
-    expect(adversarial($value, ['max_value_length' => 0]))->toBeLessThan(50.0);
+    $single = $run(16_000);
+    $double = $run(32_000);
+
+    expect($double / max($single, 0.001))->toBeLessThan(3.0)
+        // And never the old order of magnitude, however slow the box.
+        ->and($single)->toBeLessThan(250.0);
 });
