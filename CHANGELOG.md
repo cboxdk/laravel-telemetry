@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-28
+
+Every exported resource now carries `service.instance.id`. After the
+upgrade, series pushed over OTLP to Prometheus or Mimir gain an
+`instance` label; a query or recording rule that matches on the exact
+label set, rather than filtering by label, sees them as new series.
+
+### Fixed
+
+- **`service.instance.id` on the resource, always.** Prometheus's and
+  Mimir's OTLP receivers derive the `instance` label from it and nothing
+  else, so hosts that each keep their own metric store pushed every
+  counter into one series whose value jumped between their totals: each
+  jump down a counter reset, and `increase()` reporting traffic that
+  never happened. The default follows whatever holds the counters: for a
+  store on this host (APCu, SQLite, array, Redis on loopback or a socket)
+  it is `host.name`, which stays the same across PHP-FPM workers. For a
+  shared Redis it is `redis-<fingerprint>` of the store (never its
+  credentials), the same on every host, so its one fleet-wide total
+  stays one series. `TELEMETRY_SERVICE_INSTANCE_ID` (new
+  `service.instance_id` key) or `OTEL_RESOURCE_ATTRIBUTES` override it.
+
 ## [3.0.0] - 2026-09-27
 
 A major for three reasons, and then a long tail of hardening that found

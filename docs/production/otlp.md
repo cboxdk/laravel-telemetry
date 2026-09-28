@@ -36,6 +36,20 @@ Schedule::command('telemetry:flush')->everyMinute()->onOneServer();
 `onOneServer()` matters in multi-node setups: the store is cluster-wide,
 so one flusher is enough (and avoids duplicate datapoints).
 
+That holds for a shared store. When each host keeps its own — APCu,
+SQLite, or a Redis on loopback — drop `onOneServer()`: every host has to
+flush its own totals.
+
+Either way the series come out right, because the resource always
+carries `service.instance.id`, which Prometheus's and Mimir's OTLP
+receivers turn into the `instance` label. For a store on this host it is
+`host.name`, so each host's totals are their own series. For a shared
+Redis it is a fingerprint of the store (`redis-3f9a…`, from its host,
+port, database and prefixes, never its credentials): every host derives
+the same one, so the fleet's single total stays one series no matter
+which host exported it. Set your own with `TELEMETRY_SERVICE_INSTANCE_ID`
+or `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=…`.
+
 Metrics are exported with cumulative temporality — backends see monotonic
 series regardless of how many PHP processes contributed.
 

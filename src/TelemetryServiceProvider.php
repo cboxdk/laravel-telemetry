@@ -78,6 +78,7 @@ use Cbox\Telemetry\Support\GeoResolver;
 use Cbox\Telemetry\Support\GitVersion;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
+use Cbox\Telemetry\Support\ServiceInstance;
 use Cbox\Telemetry\Support\Symbolicator;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
@@ -641,6 +642,12 @@ class TelemetryServiceProvider extends ServiceProvider
             $resource['service.version'] = $version;
         }
 
+        $instanceId = $config->get('telemetry.service.instance_id');
+
+        if (is_string($instanceId) && $instanceId !== '') {
+            $resource['service.instance.id'] = $instanceId;
+        }
+
         // Deployment marker: explicit config wins; otherwise the current
         // git commit identifies the deploy (two file reads, no exec).
         $deployment = $config->get('telemetry.service.deployment');
@@ -665,6 +672,12 @@ class TelemetryServiceProvider extends ServiceProvider
         // container's hostname is a random id and the real machine has a
         // name worth reading.
         $resource['host.name'] ??= (string) gethostname();
+
+        // Prometheus's and Mimir's OTLP receivers derive `instance` from
+        // `service.instance.id` and nothing else — without one, two hosts'
+        // counters share a series. What the default names, and why, is in
+        // ServiceInstance.
+        $resource['service.instance.id'] ??= ServiceInstance::id($config, Cast::string($resource['host.name']));
 
         return $resource;
     }

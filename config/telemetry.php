@@ -54,6 +54,13 @@ return [
         // Deployment marker (git sha, release tag) — shows on every
         // signal so regressions map to deploys.
         'deployment' => env('TELEMETRY_SERVICE_DEPLOYMENT'),
+
+        // service.instance.id — what Prometheus's and Mimir's OTLP
+        // receivers turn into the `instance` label. Always set: unset
+        // here, it is host.name for a store on this host (the same in
+        // every FPM worker), or a fingerprint of a shared Redis (the same
+        // on every host, since its one total must stay one series).
+        'instance_id' => env('TELEMETRY_SERVICE_INSTANCE_ID'),
     ],
 
     // Auto-detect host/container/k8s/cloud resource attributes (host.name,
