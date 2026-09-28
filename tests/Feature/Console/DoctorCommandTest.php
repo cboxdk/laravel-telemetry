@@ -357,14 +357,19 @@ it('explains an unreachable store instead of crashing on it', function () {
     // before the body ran — an apcu store on a build without the
     // extension, or a Redis nobody is running, threw out of the command
     // and printed nothing at all.
-    config()->set('telemetry.store', 'apcu');
+    //
+    // SQLite in a directory that cannot exist is unreachable on every
+    // machine. apcu was, until CI loaded the extension and the store
+    // simply worked.
+    config()->set('telemetry.store', 'sqlite');
+    config()->set('telemetry.stores.sqlite.path', '/dev/null/telemetry/metrics.sqlite');
 
     $this->artisan('telemetry:doctor')
         // It reports the store by name and exits non-zero. Before, the
         // exception escaped and the command printed nothing whatsoever
         // — no store line, no collision warning, no exit code worth
         // reading.
-        ->expectsOutputToContain('Metric store [apcu]')
+        ->expectsOutputToContain('Metric store [sqlite]')
         ->expectsOutputToContain('One or more checks failed')
         ->assertFailed();
 });

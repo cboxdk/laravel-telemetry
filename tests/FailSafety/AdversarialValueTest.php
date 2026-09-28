@@ -18,10 +18,18 @@ function adversarial(string $value, array $overrides = []): float
         $overrides + ['pii' => ['detectors' => PersonalData::availableDetectors()]] + config('telemetry.redaction'),
     );
 
-    $start = hrtime(true);
-    $redactor->value('log.context.message', $value);
+    // The best of three. A shared CI runner stalls a single run by more
+    // than the margin (51.8ms against a 50ms bound, on input that takes
+    // a few ms here); backtracking does not stall — it costs every run.
+    $best = INF;
 
-    return (hrtime(true) - $start) / 1_000_000;
+    for ($run = 0; $run < 3; $run++) {
+        $start = hrtime(true);
+        $redactor->value('log.context.message', $value);
+        $best = min($best, (hrtime(true) - $start) / 1_000_000);
+    }
+
+    return $best;
 }
 
 it('stays fast on the input that used to take a second', function () {
