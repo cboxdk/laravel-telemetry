@@ -45,4 +45,9 @@ it('discards the span for a notification that was never sent', function () {
     // A span measuring a decision not to act is not a measurement.
     Telemetry::assertSpanNotRecorded('notification.send');
     Telemetry::assertCounterIncremented('notifications.skipped');
-});
+})->skip(
+    // The event is newer than the oldest Laravel this package supports;
+    // there the listener waits for an event that is never dispatched.
+    fn (): bool => ! class_exists(NotificationSkipped::class),
+    'NotificationSkipped is not in this Laravel',
+);

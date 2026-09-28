@@ -92,14 +92,14 @@ final class LifecycleInstrumentation
     private function migrationStarted(MigrationStarted $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $this->started[$this->name($event->migration::class, $event->name)] = hrtime(true);
+            $this->started[$this->name($event->migration::class, $event->name ?? null)] = hrtime(true);
         });
     }
 
     private function migrationEnded(MigrationEnded $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $name = $this->name($event->migration::class, $event->name);
+            $name = $this->name($event->migration::class, $event->name ?? null);
             $start = $this->started[$name] ?? null;
             unset($this->started[$name]);
 
@@ -183,11 +183,24 @@ final class LifecycleInstrumentation
 
     private function name(string $class, ?string $file): string
     {
-        $name = $file !== null && $file !== '' ? $file : $class;
+        // Laravel 13 names the migration on the event; 12 has no `name`
+        // property at all, and reading it threw inside the guard, so no
+        // migration was ever recorded there.
+        if ($file !== null && $file !== '') {
+            return basename($file, '.php');
+        }
 
-        // Anonymous migration classes carry the file they were declared in
-        // after a null byte; the path is the only readable part.
-        return basename(explode("\0", $name)[0], '.php');
+        // An anonymous migration class — every `return new class extends
+        // Migration` — is named `…@anonymous`, a null byte, then the file
+        // it was declared in and a line suffix. The file is the migration's
+        // name; the part before the null byte is the same for all of them.
+        if (str_contains($class, "\0")) {
+            $declared = explode("\0", $class, 2)[1];
+
+            return basename(preg_match('/^(.*?\.php)/', $declared, $m) === 1 ? $m[1] : $declared, '.php');
+        }
+
+        return basename(str_replace('\\', '/', $class));
     }
 
     /**

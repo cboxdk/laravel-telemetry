@@ -29,6 +29,14 @@ label set, rather than filtering by label, sees them as new series.
   stays one series. `TELEMETRY_SERVICE_INSTANCE_ID` (new
   `service.instance_id` key) or `OTEL_RESOURCE_ATTRIBUTES` override it.
 
+- **Migrations are recorded on Laravel 12.** The instrumentation read
+  the migration's name from the event, which only Laravel 13's events
+  carry; on 12 the read threw inside the fail-safe guard, so no
+  `db.migration.duration` or `db.migration.ran` was ever recorded. The
+  fallback it would have used was wrong as well: it named every
+  anonymous migration `Migration@anonymous` instead of by the file it
+  was declared in. Both versions now give the migration's file name.
+
 ## [3.0.0] - 2026-09-27
 
 A major for three reasons, and then a long tail of hardening that found

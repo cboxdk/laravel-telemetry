@@ -194,8 +194,8 @@ function everyInstrumentedEvent(): array
             new ForgettingKey('redis', 'k'),
             new CacheFailedOver('redis', $throwable),
             new CacheFlushFailed('redis'),
-            new CacheLocksFlushed('redis'),
-            new CacheLocksFlushFailed('redis'),
+            // Newer than the oldest supported Laravel.
+            ...(class_exists(CacheLocksFlushed::class) ? [new CacheLocksFlushed('redis'), new CacheLocksFlushFailed('redis')] : []),
         ],
         'queue' => [
             new JobProcessing('redis', hostileJob()),
