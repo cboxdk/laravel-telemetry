@@ -6011,16 +6011,16 @@
         },
         {
             "name": "cboxdk/system-metrics",
-            "version": "v3.0.1",
+            "version": "v3.0.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/cboxdk/system-metrics.git",
-                "reference": "af7d4e48dd04a3fb65392ee6df3a2a3ee9b6cd4b"
+                "reference": "accc658970d7e1cdc4a4a322b6a0ca0555e797d9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/cboxdk/system-metrics/zipball/af7d4e48dd04a3fb65392ee6df3a2a3ee9b6cd4b",
-                "reference": "af7d4e48dd04a3fb65392ee6df3a2a3ee9b6cd4b",
+                "url": "https://api.github.com/repos/cboxdk/system-metrics/zipball/accc658970d7e1cdc4a4a322b6a0ca0555e797d9",
+                "reference": "accc658970d7e1cdc4a4a322b6a0ca0555e797d9",
                 "shasum": ""
             },
             "require": {
@@ -6073,7 +6073,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-07-13T13:47:06+00:00"
+            "time": "2026-09-24T17:00:54+00:00"
         },
         {
             "name": "clue/redis-protocol",
