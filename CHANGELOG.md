@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-01
+
 ### Added
 
 - **`traces.continue_incoming_parent`** (`TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT`,
