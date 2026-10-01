@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:ab500b5d-8078-e124-3401-128be7860a89",
+    "serialNumber": "urn:uuid:92c89674-09e1-c34b-878a-731bf4c141ed",
     "version": 1,
     "metadata": {
         "component": {
@@ -261,10 +261,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/commonmark@2.10.1",
+            "bom-ref": "pkg:composer/league/commonmark@2.10.3",
             "name": "league/commonmark",
-            "version": "2.10.1",
-            "purl": "pkg:composer/league/commonmark@2.10.1",
+            "version": "2.10.3",
+            "purl": "pkg:composer/league/commonmark@2.10.3",
             "licenses": [
                 {
                     "license": {
