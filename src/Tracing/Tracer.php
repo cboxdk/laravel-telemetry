@@ -230,6 +230,25 @@ final class Tracer
     }
 
     /**
+     * Join a remote trace by its id alone, with no parent: the next span
+     * starts as the root of this process's part of the trace.
+     *
+     * For a parent span id that names no span anyone will export — a load
+     * balancer that injects traceparent so its access log joins the
+     * backend's trace, but traces nothing itself. Continuing from it makes
+     * every request the child of a span that never arrives, and trace
+     * backends list those traces as missing their root. The trace id still
+     * joins the two; the caller links the remote span instead of parenting
+     * it (SpanLink) so the reference is kept without claiming an ancestor.
+     */
+    public function adoptTraceId(TraceParent $parent, bool $trustSampling = true): void
+    {
+        $this->remoteParent = null;
+        $this->traceId = $parent->traceId;
+        $this->sampled = $trustSampling ? $parent->sampled : null;
+    }
+
+    /**
      * @param  array<string, scalar|null>  $attributes
      * @param  list<SpanLink>  $links  Causal references to related but
      *                                 non-ancestor spans (e.g. a retried

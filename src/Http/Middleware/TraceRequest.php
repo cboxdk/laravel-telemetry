@@ -19,10 +19,12 @@ use Cbox\Telemetry\Support\FrameworkBoot;
 use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceUsage;
+use Cbox\Telemetry\Support\TraceParent;
 use Cbox\Telemetry\Support\UserAgentParser;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanLink;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Closure;
 use Illuminate\Http\Request;
@@ -115,11 +117,21 @@ final class TraceRequest
         }
 
         FailSafe::guard(function () use ($request, $bootstrapMs) {
+            $links = [];
+
             if (config('telemetry.traces.continue_incoming')) {
-                $this->telemetry->continueTrace(
-                    $request->headers->get('traceparent'),
-                    trustSampling: (bool) config('telemetry.traces.trust_incoming_sampling', true),
-                );
+                $trustSampling = (bool) config('telemetry.traces.trust_incoming_sampling', true);
+
+                if (config('telemetry.traces.continue_incoming_parent', true)) {
+                    $this->telemetry->continueTrace($request->headers->get('traceparent'), trustSampling: $trustSampling);
+                } elseif (($incoming = TraceParent::parse($request->headers->get('traceparent'))) !== null) {
+                    // An edge that injects traceparent but exports no span:
+                    // keep its trace id so its log joins this trace, and link
+                    // the span it named rather than parenting a span that will
+                    // never arrive. See Tracer::adoptTraceId().
+                    $this->telemetry->tracer()->adoptTraceId($incoming, $trustSampling);
+                    $links[] = new SpanLink($incoming->traceId, $incoming->spanId);
+                }
             }
 
             // W3C baggage: inherit the CALLER's Telemetry::context()
@@ -154,6 +166,7 @@ final class TraceRequest
                     'network.protocol.name' => 'http',
                     'network.protocol.version' => $this->protocolVersion($request),
                 ], static fn ($value) => $value !== null && $value !== ''),
+                $links,
             );
 
             $request->attributes->set(self::SPAN_KEY, $span);
