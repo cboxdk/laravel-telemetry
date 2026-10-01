@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`traces.continue_incoming_parent`** (`TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT`,
+  default `true`, so nothing changes unless you turn it off). Some load
+  balancers and proxies inject a `traceparent` on every request so their
+  access log joins the backend's trace, but export no span of their own.
+  Continuing that header made every request span the child of a span that
+  never arrives, and trace backends listed those traces as missing their
+  root. Set to `false`, the request adopts the incoming trace id and
+  sampled flag but starts as the root span, with a span link to the span
+  id the edge named.
+
 ## [3.1.0] - 2026-09-28
 
 Every exported resource now carries `service.instance.id`. After the

@@ -42,6 +42,9 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
    `gauge('x')->set()` and `gauge('x', fn () => ...)`.
 5. **Full W3C traceparent propagation** (trace id AND parent span id) —
    queue payloads, incoming/outgoing HTTP. Children, never detached roots.
+   The one opt-in exception is `traces.continue_incoming_parent=false` for
+   an edge whose parent span id names no exported span: the trace id is
+   kept and the edge span is linked, never silently dropped.
 6. **Zero cost when disabled**: no listeners registered, no-op instruments,
    no providers booted.
 7. **One naming vocabulary**: OTel semantic conventions

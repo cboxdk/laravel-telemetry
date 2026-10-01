@@ -187,6 +187,43 @@ it('continues an incoming traceparent as a child span', function () {
         ->and($span->parentSpanId)->toBe('b7ad6b7169203331');
 });
 
+it('adopts an incoming trace id without its parent, linking the edge span instead', function () {
+    config()->set('telemetry.traces.continue_incoming_parent', false);
+
+    $this->get('/users/7', [
+        'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    ]);
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->traceId)->toBe('0af7651916cd43dd8448eb211c80319c')
+        ->and($span->parentSpanId)->toBeNull()
+        ->and($span->links())->toHaveCount(1)
+        ->and($span->links()[0]->traceId)->toBe('0af7651916cd43dd8448eb211c80319c')
+        ->and($span->links()[0]->spanId)->toBe('b7ad6b7169203331');
+});
+
+it('keeps the incoming sampling decision when adopting only the trace id', function () {
+    config()->set('telemetry.traces.continue_incoming_parent', false);
+
+    $this->get('/users/7', [
+        'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-00',
+    ]);
+
+    expect(requestSpans($this->collector))->toBeEmpty();
+});
+
+it('starts a fresh unlinked root when adopting and no traceparent arrives', function () {
+    config()->set('telemetry.traces.continue_incoming_parent', false);
+
+    $this->get('/users/7');
+
+    $span = requestSpans($this->collector)[0];
+
+    expect($span->parentSpanId)->toBeNull()
+        ->and($span->links())->toBe([]);
+});
+
 it('does not export when the incoming trace is not sampled', function () {
     $this->get('/users/7', [
         'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-00',

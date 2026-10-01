@@ -215,6 +215,26 @@ incoming `baggage` header back into its own context
 too, since baggage is caller-supplied, unvalidated data and should
 follow the same trust boundary as continuing the trace itself.
 
+### Behind an edge that injects traceparent
+
+Some load balancers and proxies set a `traceparent` on every request so
+their access log carries a trace id that joins the backend's trace, but
+export no span themselves. Continuing such a header makes every request
+span the child of a span that never arrives, and trace backends list
+those traces as missing their root.
+
+```dotenv
+TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT=false
+```
+
+The request then adopts the incoming trace id (the edge's log line still
+joins the trace) and the incoming sampled flag (subject to
+`trust_incoming_sampling`), but starts as the root span, carrying a
+[span link](#span-links-retries) to the span id the edge named. Leave it
+on (the default) whenever the caller does export that span, a service
+calling you with `Http::withTraceparent()` or an edge that traces itself,
+so your request span hangs under it.
+
 ## Span links (retries)
 
 Not every causal relationship is a parent. A retried job's attempt N+1

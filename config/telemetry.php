@@ -280,6 +280,15 @@ return [
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 
+        // Parent the request span to the incoming traceparent's span id.
+        // Disable behind an edge (load balancer, proxy) that injects
+        // traceparent so its access log joins your trace, but exports no
+        // span of its own: every request then hangs under a span that never
+        // arrives, and trace backends list it as missing its root. Off, the
+        // trace id is still adopted (the edge's log still joins), the
+        // request span is the root, and the edge's span id becomes a link.
+        'continue_incoming_parent' => env('TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT', true),
+
         // Tail detail retention: keep detail spans (cache ops, queries)
         // only for traces with errors or slowness — MANY details when it
         // hurts, a lean skeleton + aggregates when all is well. The
