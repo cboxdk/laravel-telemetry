@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`redis.connect` for predis.** The handshake was only timed for
+  phpredis, because predis opens the socket on the first command and
+  timing its connector would report object construction. predis clients
+  are now handed a connection factory whose connections time their own
+  connect (DNS, TCP, TLS and the AUTH/SELECT init commands) when it
+  actually happens. Every node goes through that factory, so under
+  Sentinel a cold request shows one span for the sentinel asked and one
+  for the master it named, each with the address actually dialled. A
+  connection that sets its own predis `connections` option is left alone.
+
 ### Fixed
 
 - **`db.connect` spans no longer disappear when another provider registers

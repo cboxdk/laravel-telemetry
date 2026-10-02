@@ -808,7 +808,12 @@ return [
         // slow trace is trimmed.
         //
         // redis_connect honours redis_ignore_connections and always skips
-        // the package's own store and spool connections.
+        // the package's own store and spool connections. phpredis is timed
+        // in the connector; predis connects on the first command, so each
+        // node connection times itself then — under Sentinel that is one
+        // span for the sentinel asked and one for the master it named. A
+        // connection that sets its own predis `connections` factory is
+        // left alone.
         'db_connect' => env('TELEMETRY_INSTRUMENT_DB_CONNECT', true),
         'redis_connect' => env('TELEMETRY_INSTRUMENT_REDIS_CONNECT', true),
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
 use Cbox\Telemetry\Instrumentation\InstrumentedRedisManager;
+use Cbox\Telemetry\Instrumentation\TimedPredisConnector;
 use Cbox\Telemetry\Instrumentation\TimedRedisConnector;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -194,12 +195,13 @@ it('leaves the decorated managers mockable', function () {
     expect((new ReflectionClass(app('redis')))->isFinal())->toBeFalse();
 });
 
-it('does not time predis, which connects lazily', function () {
+it('does not time the predis connector, which connects lazily', function () {
     // PredisConnector::connect() returns `new Client(...)`, and predis's
     // constructor only assembles objects — the socket opens on the first
     // command. Timing it there reports the handshake as a few microseconds
     // of object construction, which is worse than no span at all: it rules
-    // out a slow connect that may be exactly what is wrong.
+    // out a slow connect that may be exactly what is wrong. predis is handed
+    // a timed connection factory instead (PredisConnectionTimingTest).
     config()->set('database.redis.client', 'predis');
 
     app()->forgetInstance('redis');
@@ -211,7 +213,9 @@ it('does not time predis, which connects lazily', function () {
     $connector = (new ReflectionClass($manager))->getMethod('connector');
     $connector->setAccessible(true);
 
-    expect($connector->invoke($manager))->not->toBeInstanceOf(TimedRedisConnector::class);
+    expect($connector->invoke($manager))
+        ->not->toBeInstanceOf(TimedRedisConnector::class)
+        ->toBeInstanceOf(TimedPredisConnector::class);
 });
 
 it('times phpredis, which opens the socket in connect()', function () {

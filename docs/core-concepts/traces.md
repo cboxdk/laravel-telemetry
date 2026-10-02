@@ -488,6 +488,22 @@ hundred. The same lazy resolution is why the timing wraps the resolver closure
 rather than `ConnectionFactory::make()`, which returns before any socket is
 opened.
 
+Redis depends on the client:
+
+- **phpredis** opens the socket in Laravel's connector, so the connector is
+  timed.
+- **predis** opens it on the first command, long after the connector has
+  returned. Timing the connector would report a few microseconds of object
+  construction, so instead the client is handed a connection factory whose
+  connections time their own handshake (DNS, TCP, TLS and the AUTH/SELECT
+  init commands) when they actually connect. Every node predis talks to goes
+  through that factory, so under Sentinel a cold request shows two
+  `redis.connect` spans: one for the sentinel it asked, one for the master
+  it was sent to. `server.address` is the node actually dialled. A
+  connection that sets its own predis `connections` option keeps its own
+  factory and is not timed, and neither is a scheme mapped to anything other
+  than predis's stream connection (Relay, a custom class).
+
 These spans are **not** detail-marked. A connect is rare and high-signal, so
 it survives `traces.details.mode=tail` trimming — which is exactly when you
 want it, since a trace is trimmed for being healthy and kept for being slow.
