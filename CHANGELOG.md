@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`db.connect` spans no longer disappear when another provider registers
+  the database services again.** The connection factory was replaced with
+  `singleton()`, so any provider registered later that ran
+  `DatabaseServiceProvider::register()` again (a package provider that
+  extends it without overriding `register()` does exactly that) silently
+  rebound `db.factory`. The `db.connect` span and the
+  `db.client.connection.create_time` histogram were gone, and the connect
+  time showed up as a slow first query instead. The factory is now
+  decorated with `extend()`, like `redis`, and survives the rebinding.
+
 ## [3.2.0] - 2026-10-01
 
 ### Added
