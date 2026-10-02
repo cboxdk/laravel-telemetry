@@ -10,6 +10,7 @@ use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Illuminate\Contracts\Redis\Connector;
+use Illuminate\Database\DatabaseServiceProvider;
 use Illuminate\Redis\Connections\Connection as RedisConnection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
@@ -149,6 +150,34 @@ it('leaves the telemetry store and spool connections untimed', function () {
 it('decorates both managers', function () {
     expect(app('db.factory'))->toBeInstanceOf(InstrumentedConnectionFactory::class);
     expect(app('redis'))->toBeInstanceOf(InstrumentedRedisManager::class);
+});
+
+it('keeps the factory decorated when a later provider registers the database services again', function () {
+    // A package provider that extends DatabaseServiceProvider without
+    // overriding register() runs Laravel's database registration a second
+    // time, after this package. A replaced binding is lost to that; db.connect
+    // disappeared from every trace and connect time read as a slow first
+    // query instead.
+    app()->register(new class(app()) extends DatabaseServiceProvider {}, force: true);
+
+    $manager = app('db');
+    $factory = new ReflectionProperty($manager, 'factory');
+
+    expect(app('db.factory'))->toBeInstanceOf(InstrumentedConnectionFactory::class);
+    expect($factory->getValue($manager))->toBeInstanceOf(InstrumentedConnectionFactory::class);
+
+    config()->set('database.connections.reregistered', [
+        'driver' => 'sqlite',
+        'database' => ':memory:',
+        'prefix' => '',
+    ]);
+
+    Telemetry::span('root', function () {
+        DB::connection('reregistered')->select('select 1');
+    });
+    Telemetry::flush();
+
+    expect(connectSpans($this->collector, 'db.connect'))->toHaveCount(1);
 });
 
 it('leaves the decorated managers mockable', function () {

@@ -93,7 +93,6 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Contracts\Routing\Registrar as Router;
-use Illuminate\Database\Connectors\ConnectionFactory;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Foundation\Events\Terminating;
 use Illuminate\Foundation\Http\Events\RequestHandled;
@@ -347,9 +346,16 @@ class TelemetryServiceProvider extends ServiceProvider
             // when disabled (AGENTS.md invariant 6) — otherwise every query
             // would resolve TelemetryManager, its registry, resource
             // detection and the exporters, only to discard the observation.
-            $this->app->singleton('db.factory', fn (Application $app): ConnectionFactory => $app->make('config')->get('telemetry.enabled')
-                ? new InstrumentedConnectionFactory($app)
-                : new ConnectionFactory($app));
+            //
+            // extend(), not singleton(), for the same reason as `redis`
+            // below: a provider registered after this one that runs
+            // DatabaseServiceProvider::register() again — a package provider
+            // that extends it without overriding register() does exactly
+            // that — rebinds `db.factory` and would silently drop a
+            // replacement. An extender survives the rebinding.
+            $this->app->extend('db.factory', fn (mixed $factory, Application $app): mixed => $factory instanceof InstrumentedConnectionFactory || ! $app->make('config')->get('telemetry.enabled')
+                ? $factory
+                : new InstrumentedConnectionFactory($app));
         }
 
         if ($config->get('telemetry.instrument.redis_connect', true)) {
