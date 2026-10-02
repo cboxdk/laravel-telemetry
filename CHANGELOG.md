@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-02
+
 Both changes below add spans without any configuration change. Apps on
 predis, and apps where `db.connect` was being dropped, will see new
 `redis.connect` / `db.connect` spans and `db.client.connection.create_time`
