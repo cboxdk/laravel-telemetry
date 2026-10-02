@@ -773,9 +773,10 @@ return [
         'batches' => env('TELEMETRY_INSTRUMENT_BATCHES', true),
 
         // Redis command spans + redis.commands counter. Off by default —
-        // high volume. The telemetry store/spool connections are always
-        // ignored (self-instrumentation would loop); override the ignore
-        // list with redis_ignore_connections.
+        // high volume. The package's own connections are always ignored
+        // (self-instrumentation would loop): the metric store's when the
+        // store is redis, the spool's when a redis spool is on. Add your
+        // own with redis_ignore_connections; it is unioned with those.
         'redis' => env('TELEMETRY_INSTRUMENT_REDIS', false),
         'redis_ignore_connections' => null,
 
@@ -808,7 +809,8 @@ return [
         // slow trace is trimmed.
         //
         // redis_connect honours redis_ignore_connections and always skips
-        // the package's own store and spool connections. phpredis is timed
+        // the package's own connections (the redis store's, a redis
+        // spool's). phpredis is timed
         // in the connector; predis connects on the first command, so each
         // node connection times itself then — under Sentinel that is one
         // span for the sentinel asked and one for the master it named. A
