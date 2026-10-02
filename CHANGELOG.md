@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Both changes below add spans without any configuration change. Apps on
+predis, and apps where `db.connect` was being dropped, will see new
+`redis.connect` / `db.connect` spans and `db.client.connection.create_time`
+observations after upgrading: about one per connection per request, two for
+predis behind Sentinel. Turn them off with
+`TELEMETRY_INSTRUMENT_REDIS_CONNECT=false` / `TELEMETRY_INSTRUMENT_DB_CONNECT=false`.
+
 ### Added
 
 - **`redis.connect` for predis.** The handshake was only timed for
