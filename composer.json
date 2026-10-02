@@ -45,7 +45,8 @@
         "pestphp/pest-plugin-laravel": "^4.0",
         "phpstan/extension-installer": "^1.4",
         "phpstan/phpstan-deprecation-rules": "^2.0",
-        "phpstan/phpstan-phpunit": "^2.0"
+        "phpstan/phpstan-phpunit": "^2.0",
+        "predis/predis": "^2.3 || ^3.0"
     },
     "suggest": {
         "cboxdk/system-metrics": "Host CPU/memory/load metrics via the built-in provider AND real per-request/per-job process footprint (peak RSS, CPU utilization) on spans.",

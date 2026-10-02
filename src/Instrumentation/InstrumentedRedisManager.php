@@ -55,23 +55,22 @@ class InstrumentedRedisManager extends RedisManager
     }
 
     /**
-     * Clients whose `connect()` actually opens the socket.
+     * Time each client where its socket is actually opened.
      *
-     * phpredis does: `PhpRedisConnector::connect()` builds the client and
-     * calls `connect()` on it. predis does NOT — `PredisConnector::connect()`
-     * returns `new Client(...)`, whose constructor only assembles objects,
-     * and predis opens the socket lazily on the first command. Timing it
-     * there would report the handshake as a few microseconds of object
-     * construction: not merely useless but misleading, because it rules out
-     * a slow connect that may be exactly what is wrong.
+     * phpredis opens it in the connector: `PhpRedisConnector::connect()`
+     * builds the client and calls `connect()` on it, so the connector is
+     * timed. predis does NOT — `PredisConnector::connect()` returns
+     * `new Client(...)`, whose constructor only assembles objects, and the
+     * socket opens on the first command. Timing the connector there would
+     * report the handshake as a few microseconds of object construction:
+     * not merely useless but misleading, because it rules out a slow
+     * connect that may be exactly what is wrong. So predis is handed a
+     * connection factory instead, and each connection times itself when it
+     * connects ({@see TimedPredisConnector}).
      *
      * A custom creator is left alone for the same reason — we cannot know
      * whether it connects eagerly, and a wrong number is worse than none.
-     *
-     * @var list<string>
      */
-    private const EAGER_CLIENTS = ['phpredis'];
-
     protected function connector(): ?Connector
     {
         $connector = parent::connector();
@@ -80,15 +79,14 @@ class InstrumentedRedisManager extends RedisManager
             return null;
         }
 
-        if (! in_array($this->driver, self::EAGER_CLIENTS, true) || isset($this->customCreators[$this->driver])) {
+        if (isset($this->customCreators[$this->driver])) {
             return $connector;
         }
 
-        return new TimedRedisConnector(
-            $connector,
-            $this->app,
-            $this->resolving ?? 'default',
-            $this->ignoreConnections,
-        );
+        return match ($this->driver) {
+            'phpredis' => new TimedRedisConnector($connector, $this->app, $this->resolving ?? 'default', $this->ignoreConnections),
+            'predis' => new TimedPredisConnector($connector, $this->app, $this->resolving ?? 'default', $this->ignoreConnections),
+            default => $connector,
+        };
     }
 }
