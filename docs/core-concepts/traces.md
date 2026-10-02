@@ -45,7 +45,7 @@ started while another is active becomes its child.
 | Blade/PHP views | `view components.button` — nested, real durations, detail-marked | `instrument.views` |
 | DB transactions | `db.transaction` (nested via savepoints, outcome attribute) | `instrument.transactions` |
 | Redis commands | `redis GET` (client, backdated, key only) | `instrument.redis` (off by default) |
-| Redis connects | `redis.connect` (client) — the handshake; telemetry's own store/spool skipped | `instrument.redis_connect` |
+| Redis connects | `redis.connect` (client) — the handshake; connections telemetry itself uses (redis store, redis spool) skipped | `instrument.redis_connect` |
 | Cache counters | `cache.operations{operation,store}` | `instrument.cache` (off by default) |
 | Cache timeline spans | `cache.hit`/`miss`/`write`/`forget` with key + duration | `instrument.cache_spans` (off by default) |
 | Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |

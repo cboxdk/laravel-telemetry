@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Redis instrumentation no longer ignores the app's `default` connection
+  when telemetry does not use it.** The package's own connections are left
+  uninstrumented so it does not trace itself, but "own" was taken to be
+  `stores.redis.connection` and `otlp.spool.connection` unconditionally.
+  Both default to `default`, which is also where most apps cache and
+  rate-limit. An app on the array/apcu/sqlite store, or without a redis
+  spool, therefore got no `redis.connect` spans, no command spans and no
+  `redis.commands.failed` for that connection. The metric store's
+  connection is now ignored only when `store` is `redis`, and the spool's
+  only when a redis spool is enabled. After upgrading, such apps will see
+  Redis spans for `default` that were missing before; list it in
+  `instrument.redis_ignore_connections` to keep it quiet.
+
 ## [3.3.0] - 2026-10-02
 
 Both changes below add spans without any configuration change. Apps on
