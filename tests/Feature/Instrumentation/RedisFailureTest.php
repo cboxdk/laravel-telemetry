@@ -49,10 +49,20 @@ it('marks the span as the thing that broke', function (): void {
         && $span->status() === SpanStatus::Error);
 });
 
-it('leaves the telemetry package own connections alone', function (): void {
+it('counts failures on the default connection when telemetry itself does not use it', function (): void {
+    // The suite runs the array store with the spool off, so `default` is
+    // the app's connection, not the package's. It used to be ignored all the
+    // same, because the store and spool connection settings both default to
+    // it, which hid the app's cache and rate limiter from every Redis span.
+    // Which connections ARE the package's is covered in
+    // RedisIgnoredConnectionsTest.
     Telemetry::fake();
 
     Event::dispatch(redisFailure('get', new RuntimeException('down'), 'default'));
 
-    Telemetry::assertCounterNotIncremented('redis.commands.failed');
+    Telemetry::assertCounterIncremented('redis.commands.failed', [
+        'db.operation.name' => 'GET',
+        'laravel.db.connection' => 'default',
+        'error.type' => 'RuntimeException',
+    ]);
 });

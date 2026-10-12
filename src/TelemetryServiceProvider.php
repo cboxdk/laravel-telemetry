@@ -334,6 +334,40 @@ class TelemetryServiceProvider extends ServiceProvider
      * waits until boot is a decoration that arrives after the singleton it
      * meant to replace is already built.
      */
+    /**
+     * The Redis connections no instrumentation may touch.
+     *
+     * The package's own connections are ALWAYS ignored — self-instrumentation
+     * would loop (telemetry writes generating spans generating writes). An
+     * explicit ignore list is UNIONED with these, never replaces them, so the
+     * guarantee holds even when an operator adds their own.
+     *
+     * "Own" means in use: the metric store's connection only when the store
+     * IS redis, the spool's only when a redis spool is on. Both settings
+     * default to `default`, which is also the connection most apps do their
+     * own caching and rate limiting on — ignoring it unconditionally hid that
+     * traffic from an app whose telemetry never touched Redis at all.
+     *
+     * @return list<string>
+     */
+    private function ignoredRedisConnections(Repository $config): array
+    {
+        $own = [];
+
+        if (Cast::string($config->get('telemetry.store'), 'redis') === 'redis') {
+            $own[] = Cast::string($config->get('telemetry.stores.redis.connection'), 'default');
+        }
+
+        if ($config->get('telemetry.otlp.spool.enabled') && Cast::string($config->get('telemetry.otlp.spool.driver'), 'redis') === 'redis') {
+            $own[] = Cast::string($config->get('telemetry.otlp.spool.connection'), 'default');
+        }
+
+        return array_values(array_unique([
+            ...$own,
+            ...Cast::stringList($config->get('telemetry.instrument.redis_ignore_connections', [])),
+        ]));
+    }
+
     private function registerConnectionTiming(): void
     {
         $config = $this->app->make('config');
@@ -359,15 +393,9 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         if ($config->get('telemetry.instrument.redis_connect', true)) {
-            // Unioned with the package's own connections exactly as the
-            // command instrumentation does: timing the spool's own connect
-            // would be written back into the spool.
-            $ignored = Cast::stringList($config->get('telemetry.instrument.redis_ignore_connections', []));
-            $ignored = array_values(array_unique([
-                Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
-                Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
-                ...$ignored,
-            ]));
+            // Ignored exactly as the command instrumentation does: timing
+            // the spool's own connect would be written back into the spool.
+            $ignored = $this->ignoredRedisConnections($config);
 
             // extend(), not singleton(): Laravel's RedisServiceProvider is
             // deferred, so it registers when `redis` is first resolved —
@@ -1084,17 +1112,7 @@ class TelemetryServiceProvider extends ServiceProvider
         $redisFailures = (bool) $config->get('telemetry.instrument.redis_failures', true);
 
         if ($redisCommands || $redisFailures) {
-            // The package's own connections are ALWAYS ignored — self-
-            // instrumentation would loop (telemetry writes generating
-            // spans generating writes). An explicit ignore list is
-            // UNIONED with these, never replaces them, so the documented
-            // guarantee holds even when an operator adds their own.
-            $ignored = Cast::stringList($config->get('telemetry.instrument.redis_ignore_connections', []));
-            $ignored = array_values(array_unique([
-                Cast::string($config->get('telemetry.stores.redis.connection'), 'default'),
-                Cast::string($config->get('telemetry.otlp.spool.connection'), 'default'),
-                ...$ignored,
-            ]));
+            $ignored = $this->ignoredRedisConnections($config);
 
             $this->app->singleton(RedisInstrumentation::class);
             $this->app->make(RedisInstrumentation::class)->register($events, $ignored, $redisCommands, $redisFailures);
