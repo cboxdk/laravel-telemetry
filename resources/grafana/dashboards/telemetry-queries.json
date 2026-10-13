@@ -129,7 +129,7 @@
   ],
   "panels": [
     {
-      "id": 151,
+      "id": 157,
       "type": "table",
       "title": "Slowest queries (> $minms ms) \u2014 SQL text on the span",
       "datasource": {
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 152,
+      "id": 158,
       "type": "table",
       "title": "N+1 suspects \u2014 requests running \u2265 $minqueries queries",
       "datasource": {
@@ -210,7 +210,7 @@
       "description": "db.query.count/time_ms tallies live on every root span."
     },
     {
-      "id": 153,
+      "id": 159,
       "type": "table",
       "title": "Query-heaviest jobs",
       "datasource": {
@@ -250,18 +250,195 @@
       }
     },
     {
-      "id": 154,
-      "type": "text",
-      "title": "Tip",
+      "id": 160,
+      "type": "table",
+      "title": "N+1 detected \u2014 same query shape, different values (eager load it)",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
       "gridPos": {
-        "h": 3,
+        "h": 9,
         "w": 24,
         "x": 0,
         "y": 27
       },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && span.laravel.db.query.repeat=\"n_plus_one\"} | select(span.db.query.text, span.code.file.path, span.code.line.number)",
+          "limit": 20,
+          "spss": 3,
+          "tableType": "spans"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm"
+      },
+      "description": "The span that crossed the threshold carries the app line that ran it (code.file.path:code.line.number)."
+    },
+    {
+      "id": 161,
+      "type": "table",
+      "title": "Duplicates \u2014 same SQL, same values (memoize it)",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "{resource.service.name=~\"$service\" && resource.deployment.environment.name=~\"$environment\" && resource.host.name=~\"$host\" && span.laravel.db.query.repeat=\"duplicate\"} | select(span.db.query.text, span.code.file.path, span.code.line.number)",
+          "limit": 20,
+          "spss": 3,
+          "tableType": "spans"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 164,
+      "type": "timeseries",
+      "title": "N+1 and duplicate detections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "targets": [
+        {
+          "refId": "Q162",
+          "expr": "sum(increase(db_queries_n_plus_one_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
+          "legendFormat": "N+1",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "Q163",
+          "expr": "sum(increase(db_queries_duplicated_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
+          "legendFormat": "duplicate",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 18,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "N+1"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duplicate"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 165,
+      "type": "text",
+      "title": "Tip",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
       "options": {
         "mode": "markdown",
-        "content": "Every root span carries `db.query.count` / `db.query.time_ms` tallies \u2014 even when individual query spans are filtered by `queries_min_duration` or tail mode."
+        "content": "Every root span carries `db.query.count` / `db.query.time_ms` / `db.query.n_plus_one.count` / `db.query.slow.count` tallies \u2014 even when individual query spans are filtered by `queries_min_duration` or tail mode."
       },
       "fieldConfig": {
         "defaults": {},

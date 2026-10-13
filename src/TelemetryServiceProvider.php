@@ -1117,6 +1117,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->make(ScheduleInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
+            (bool) $this->app->make('config')->get('telemetry.instrument.schedule_monitoring', true),
         );
     }
 

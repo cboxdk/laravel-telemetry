@@ -391,6 +391,13 @@ D["schedule"] = dashboard("cbox-tel-schedule", "Telemetry / Scheduled Tasks", [
     timeseries("p95 duration by task", [target(f'histogram_quantile(0.95, sum by (le, task) (rate(schedule_task_duration_seconds_bucket{{{SF}}}[$__rate_interval])))', '{{task}}')], 12, 4, unit="s"),
     traces("Task runs", f'{{{TSVC} && name=~"schedule .*"}}', 0, 12),
     traces("Failed task runs", f'{{{TSVC} && name=~"schedule .*" && status=error}}', 0, 21),
+    stat("Scheduler last ran", f'time() - max(schedule_run_last_seen_seconds{{{SVC}}})', 0, 30, w=6, unit="s", decimals=0,
+         thresholds=ok_at([{"color": "orange", "value": 90}, {"color": "red", "value": 180}]),
+         description="Seconds since schedule:run last started. Over 180 s fires SchedulerNotRunning."),
+    table("Behind schedule (due − last seen)", f'(max by (task) (schedule_task_previous_due_seconds{{{SF}}}) - max by (task) (schedule_task_last_seen_seconds{{{SF}}})) > 0', 6, 30, w=9, unit="s", decimals=0,
+          description="How long each task has been due without starting or being skipped. Over 300 s fires ScheduledTaskMissed."),
+    table("Running now (for)", f'time() - max by (task) (schedule_task_running_since_seconds{{{SF}}} > 0)', 15, 30, w=9, unit="s", decimals=0,
+          description="Runs that started and have not finished. A process that died mid-task stays here — over an hour fires ScheduledTaskOverrunning."),
 ], variables=[qvar("task", "schedule_tasks_processed_total", "task")])
 
 # ── 6 · Exceptions ───────────────────────────────────────────────────
@@ -414,7 +421,16 @@ D["queries"] = dashboard("cbox-tel-queries", "Telemetry / Queries", [
            f'{{{TSVC} && kind=server && span.db.query.count >= $minqueries}} | select(span.db.query.count, span.db.query.time_ms)', 0, 9,
            description="db.query.count/time_ms tallies live on every root span."),
     traces("Query-heaviest jobs", f'{{{TSVC} && kind=consumer && span.db.query.count >= $minqueries}} | select(span.db.query.count, span.db.query.time_ms)', 0, 18),
-    text("Tip", "Every root span carries `db.query.count` / `db.query.time_ms` tallies — even when individual query spans are filtered by `queries_min_duration` or tail mode.", 0, 27),
+    traces("N+1 detected — same query shape, different values (eager load it)",
+           f'{{{TSVC} && span.laravel.db.query.repeat="n_plus_one"}} | select(span.db.query.text, span.code.file.path, span.code.line.number)', 0, 27, table_type="spans",
+           description="The span that crossed the threshold carries the app line that ran it (code.file.path:code.line.number)."),
+    traces("Duplicates — same SQL, same values (memoize it)",
+           f'{{{TSVC} && span.laravel.db.query.repeat="duplicate"}} | select(span.db.query.text, span.code.file.path, span.code.line.number)', 0, 36, table_type="spans"),
+    timeseries("N+1 and duplicate detections", [
+        target(f'sum(increase(db_queries_n_plus_one_total{{{SVC}}}[$__rate_interval]))', 'N+1'),
+        target(f'sum(increase(db_queries_duplicated_total{{{SVC}}}[$__rate_interval]))', 'duplicate'),
+    ], 0, 45, colors={"N+1": "orange", "duplicate": "yellow"}),
+    text("Tip", "Every root span carries `db.query.count` / `db.query.time_ms` / `db.query.n_plus_one.count` / `db.query.slow.count` tallies — even when individual query spans are filtered by `queries_min_duration` or tail mode.", 12, 45, w=12, h=8),
 ], variables=[textvar("minms", "10", "min query ms"), textvar("minqueries", "25", "min queries/request")])
 
 # ── 8 · Cache ────────────────────────────────────────────────────────

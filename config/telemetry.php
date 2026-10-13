@@ -774,6 +774,12 @@ return [
         // counters and schedule.task.duration histogram.
         'scheduled_tasks' => env('TELEMETRY_INSTRUMENT_SCHEDULED_TASKS', true),
 
+        // Missed / late / overrunning scheduled tasks: every schedule:run
+        // publishes when each task was last due, every start or skip when
+        // it was last seen — gauges the bundled alert rules compare. Needs
+        // a metric store shared by the hosts that run the scheduler.
+        'schedule_monitoring' => env('TELEMETRY_INSTRUMENT_SCHEDULE_MONITORING', true),
+
         // CPU profiling via ext-excimer (PECL, not bundled) — batteries
         // included: enabled by default, a silent no-op without the
         // extension. Profiling always runs (sampling overhead is low),
