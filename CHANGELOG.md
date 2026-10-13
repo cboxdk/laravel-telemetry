@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-13
+
 Two things to know on upgrade. `db.query.duplicate_detected` and
 `db.queries.duplicated` now mean *identical* SQL **and** values; a query
 that repeats with different values — the classic N+1 — moves to the new
