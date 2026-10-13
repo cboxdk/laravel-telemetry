@@ -22,6 +22,10 @@ beforeEach(function () {
     OtlpExporter::resetCircuit();
 });
 
+// These tests open the breaker on purpose. With APCu on in the CLI (as in CI) the state outlives
+// the test, and an open circuit would make the next file's spool tests silently skip the spool.
+afterEach(fn () => SpoolingOtlpExporter::resetCircuit());
+
 /** A spool that records pushes and can be told to fail like an unreachable Redis. */
 final class BreakerSpool implements Spool
 {
