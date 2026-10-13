@@ -350,8 +350,10 @@ cases and logs back to the trace:
 - **`traceresponse` response header** (W3C Trace Context Level 2):
   `00-<trace id>-<server span id>-<flags>`, so a client — telemetry-browser
   after an Inertia visit — can parent what follows to the span that served
-  it (`traces.traceresponse`, default on). Both headers are skipped on
-  publicly cacheable responses.
+  it (`traces.traceresponse`, default on). The flag is the sampling
+  decision in force when the response is sent. Sent only while
+  `traces.response_header` is on — turning that off means no trace ids
+  leave the app. Both headers are skipped on publicly cacheable responses.
 - **Laravel `Context`**: `trace_id` is added at trace start — Sentry
   (≥ 4.x), Flare and every log channel pick it up automatically. An
   explicit Sentry scope tag is set too (`traces.share_context`).
@@ -436,16 +438,18 @@ Telemetry::directives()->add(
 );
 ```
 
-A matching unit of work is **kept whatever the sample rate said**, keeps
-its **detail spans** under `traces.details = tail`, and every span from
-the match on carries `telemetry.directive = <id>`. With `->profile()` it
-also gets a CPU profile: the native extension's when installed (its
-profile is kept because the trace now is), otherwise excimer, started at
-the match.
+A matching unit of work is **kept whatever the sample rate said** — a
+`Sample::never()` route or `Telemetry::sample(false)` after the match
+cannot drop it — keeps its **detail spans** under `traces.details = tail`,
+and every span from the match on carries `telemetry.directive = <id>`.
+With `->profile()` it also gets a CPU profile: the native extension's when
+installed (its profile is kept because the trace now is); without it,
+excimer, started at the match — for requests only, so a job directive
+profiles only where the native extension runs.
 
 | Match | Known at | Pattern |
 |---|---|---|
-| `path` | request start | `Str::is`, no leading slash |
+| `path` | request start | `Str::is`, no leading slash; `/` is the root |
 | `route` | `RouteMatched`; the logical route (`resolveRouteUsing`, `livewire:…`) at request end | `Str::is` on the route name, the URI template with or without leading slash (an `http_route` label value works as is, `/` included), or the logical route |
 | `user` | `Authenticated` (session guard), or request end for guards that fire none | exact `user.id` |
 | `context` | when `Telemetry::context()` sets it | exact value of that dimension |
@@ -462,7 +466,13 @@ live in the application's cache (`directives.store`), so every host sees
 them; with none active, the per-request cost is one APCu read (an empty
 list is remembered for `directives.recheck_seconds`). Without APCu under
 PHP-FPM it is one cache read per request — `TELEMETRY_DIRECTIVES=false`
-if you do not use them.
+if you do not use them. The read is the package's own: it is not
+recorded as one of the app's queries, cache operations or Redis commands.
+
+A new directive reaches a host's workers within `recheck_seconds`. Only a
+directive added from a process that shares their APCu segment — an FPM
+request, not `artisan` (`apc.enable_cli` is off by default) — clears the
+remembered empty list at once.
 
 **From another app** — a telemetry UI or insights install that is not
 this application — set `TELEMETRY_DIRECTIVES_SECRET`, and
@@ -471,10 +481,14 @@ appear. Every call is signed:
 
 ```
 X-Telemetry-Timestamp: <unix seconds>
-X-Telemetry-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>">
+X-Telemetry-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<METHOD>.<id>.<raw body>">
 ```
 
-Five minutes of clock skew is allowed. A POST body is the directive:
+`<id>` is the directive id for `DELETE` and empty otherwise, so a signed
+list call cannot be replayed as a delete. Each signature is accepted once
+— re-sign on retry. Five minutes of clock skew is allowed. PHP clients can
+call `DirectivesController::signature($secret, $timestamp, $method, $id,
+$body)`. A POST body is the directive:
 `{"match":"route","value":"checkout.*","minutes":15,"profile":true,"reason":"…","created_by":"insights"}`
 (`key` for `context`); the id is always assigned by this app.
 

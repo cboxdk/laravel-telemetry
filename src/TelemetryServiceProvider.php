@@ -821,11 +821,6 @@ class TelemetryServiceProvider extends ServiceProvider
     }
 
     /**
-     * The optional browser/RUM span ingest route. Off by default; when on,
-     * the frontend POSTs its spans here and they join the same trace as
-     * the backend. Protected by throttling + payload bounding, not a token.
-     */
-    /**
      * Directives: time-limited "record everything for this slice" rules,
      * matched as facts become known — path (middleware), route
      * (RouteMatched), user (Authenticated), job (queue), context.
@@ -899,6 +894,11 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->ignoreOwnRoute($path.'/*');
     }
 
+    /**
+     * The optional browser/RUM span ingest route. Off by default; when on,
+     * the frontend POSTs its spans here and they join the same trace as
+     * the backend. Protected by throttling + payload bounding, not a token.
+     */
     private function registerSpanIngestRoute(): void
     {
         $config = Cast::stringKeyedArray($this->app->make('config')->get('telemetry.ingest.spans', []));
@@ -1181,9 +1181,13 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->make(TelemetryManager::class)->captureLaravelContext(
-            Cast::stringList($config->get('telemetry.instrument.laravel_context_keys', [])),
-        );
+        $keys = Cast::stringList($config->get('telemetry.instrument.laravel_context_keys', []));
+        $capture = static fn (TelemetryManager $telemetry) => $telemetry->captureLaravelContext($keys);
+
+        // Never build the manager while booting (BootHygieneTest).
+        $this->app->resolved(TelemetryManager::class)
+            ? $capture($this->app->make(TelemetryManager::class))
+            : $this->app->afterResolving(TelemetryManager::class, $capture);
     }
 
     private function registerScheduleInstrumentation(): void

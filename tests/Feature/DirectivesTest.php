@@ -165,15 +165,17 @@ it('manages directives from artisan', function () {
     expect(Telemetry::directives()->all())->toBe([]);
 });
 
-function signedDirectiveCall($test, string $method, string $uri, array $body = [], ?int $timestamp = null, string $secret = 's3cret')
+function signedDirectiveCall($test, string $method, string $uri, array $body = [], ?int $timestamp = null, string $secret = 's3cret', ?string $signature = null)
 {
     $raw = $body === [] ? '' : json_encode($body);
     $timestamp ??= time();
+    $id = preg_match('#/telemetry/directives/(.+)$#', $uri, $m) === 1 ? $m[1] : '';
+    $signature ??= DirectivesController::signature($secret, (string) $timestamp, $method, $id, $raw);
 
     return $test->call($method, $uri, [], [], [], [
         'CONTENT_TYPE' => 'application/json',
         'HTTP_X_TELEMETRY_TIMESTAMP' => (string) $timestamp,
-        'HTTP_X_TELEMETRY_SIGNATURE' => 'sha256='.hash_hmac('sha256', $timestamp.'.'.$raw, $secret),
+        'HTTP_X_TELEMETRY_SIGNATURE' => $signature,
     ], $raw);
 }
 
@@ -196,7 +198,8 @@ describe('signed endpoint', function () {
 
         signedDirectiveCall($this, 'GET', '/telemetry/directives')->assertOk()->assertJsonPath('directives.0.id', $created['id']);
         signedDirectiveCall($this, 'DELETE', '/telemetry/directives/'.$created['id'])->assertNoContent();
-        signedDirectiveCall($this, 'DELETE', '/telemetry/directives/'.$created['id'])->assertNotFound();
+        // A fresh signature: the same one twice is a replay (see below).
+        signedDirectiveCall($this, 'DELETE', '/telemetry/directives/'.$created['id'], timestamp: time() + 1)->assertNotFound();
     });
 
     it('rejects a bad directive', function () {
@@ -208,6 +211,25 @@ describe('signed endpoint', function () {
         $this->getJson('/telemetry/directives')->assertUnauthorized();
         signedDirectiveCall($this, 'GET', '/telemetry/directives', secret: 'wrong')->assertUnauthorized();
         signedDirectiveCall($this, 'GET', '/telemetry/directives', timestamp: time() - 600)->assertUnauthorized();
+    });
+
+    it('accepts each signature once', function () {
+        $timestamp = time();
+        $signature = DirectivesController::signature('s3cret', (string) $timestamp, 'GET', '', '');
+
+        signedDirectiveCall($this, 'GET', '/telemetry/directives', timestamp: $timestamp, signature: $signature)->assertOk();
+        signedDirectiveCall($this, 'GET', '/telemetry/directives', timestamp: $timestamp, signature: $signature)->assertUnauthorized();
+    });
+
+    it('binds the method and the id, so a list call cannot be replayed as a delete', function () {
+        $created = signedDirectiveCall($this, 'POST', '/telemetry/directives', ['match' => 'user', 'value' => '1', 'minutes' => 5])->json('directive');
+        $timestamp = time();
+        $listSignature = DirectivesController::signature('s3cret', (string) $timestamp, 'GET', '', '');
+
+        signedDirectiveCall($this, 'DELETE', '/telemetry/directives/'.$created['id'], timestamp: $timestamp, signature: $listSignature)
+            ->assertUnauthorized();
+
+        expect(Telemetry::directives()->all())->toHaveCount(1);
     });
 
     it('refuses everything when no secret is configured', function () {

@@ -107,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 144,
+      "id": 1,
       "type": "stat",
       "title": "Reported / h",
       "datasource": {
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "refId": "Q145",
+          "refId": "Q1",
           "expr": "(sum(increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -165,7 +165,7 @@
       "description": "Everything passed to report() \u2014 handled exceptions included."
     },
     {
-      "id": 146,
+      "id": 2,
       "type": "stat",
       "title": "5xx responses / h",
       "datasource": {
@@ -180,7 +180,7 @@
       },
       "targets": [
         {
-          "refId": "Q147",
+          "refId": "Q1",
           "expr": "(sum(increase(http_server_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"5..\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -222,7 +222,7 @@
       }
     },
     {
-      "id": 148,
+      "id": 3,
       "type": "stat",
       "title": "Failed jobs+tasks / h",
       "datasource": {
@@ -237,7 +237,7 @@
       },
       "targets": [
         {
-          "refId": "Q149",
+          "refId": "Q1",
           "expr": "(sum(increase(queue_jobs_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h])) or vector(0)) + (sum(increase(schedule_tasks_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h])) or vector(0))",
           "legendFormat": "__auto",
           "datasource": {
@@ -279,7 +279,7 @@
       }
     },
     {
-      "id": 151,
+      "id": 4,
       "type": "timeseries",
       "title": "Exceptions by class",
       "datasource": {
@@ -294,7 +294,7 @@
       },
       "targets": [
         {
-          "refId": "Q150",
+          "refId": "Q1",
           "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "{{exception}}",
           "datasource": {
@@ -335,7 +335,7 @@
       }
     },
     {
-      "id": 152,
+      "id": 5,
       "type": "table",
       "title": "Total by class (1h)",
       "datasource": {
@@ -350,7 +350,7 @@
       },
       "targets": [
         {
-          "refId": "Q153",
+          "refId": "Q1",
           "expr": "sum by (exception) (increase(exceptions_reported_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -397,7 +397,7 @@
       }
     },
     {
-      "id": 154,
+      "id": 6,
       "type": "table",
       "title": "Failing requests \u2014 full detail retained even in tail mode",
       "datasource": {
@@ -437,7 +437,7 @@
       }
     },
     {
-      "id": 155,
+      "id": 7,
       "type": "table",
       "title": "Failing jobs & tasks",
       "datasource": {
@@ -477,7 +477,7 @@
       }
     },
     {
-      "id": 156,
+      "id": 8,
       "type": "logs",
       "title": "Error logs",
       "datasource": {

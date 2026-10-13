@@ -17,6 +17,7 @@ use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Registry;
 use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\ExportResult;
@@ -315,7 +316,7 @@ class TelemetryManager
 
                 $this->appliedDirectives[$directive->id] = true;
 
-                $this->tracer->resample(true);
+                $this->tracer->force();
                 // On every span from here, so the tail policy keeps the
                 // trace's detail and a reader can see why it was recorded.
                 $this->tracer->addContext(['telemetry.directive' => $directive->id]);
@@ -511,7 +512,7 @@ class TelemetryManager
             $attributes = [];
 
             foreach (array_slice($values, 0, self::MAX_LARAVEL_CONTEXT_KEYS, true) as $key => $value) {
-                $name = 'laravel.context.'.trim((string) preg_replace('/[^a-z0-9._]+/', '_', Str::snake((string) $key)), '_');
+                $name = 'laravel.context.'.trim(Cast::string(preg_replace('/[^a-z0-9._]+/', '_', Str::snake(Cast::string($key)))), '_');
 
                 if ($value === null || is_scalar($value)) {
                     $attributes[$name] = $value;

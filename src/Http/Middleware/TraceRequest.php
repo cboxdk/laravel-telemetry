@@ -242,23 +242,35 @@ final class TraceRequest
             }
 
             $header = config('telemetry.traces.response_header', 'X-Trace-Id');
+            $span = $request->attributes->get(self::SPAN_KEY);
 
-            if (is_string($header) && $header !== '') {
-                $response->headers->set($header, $traceId);
+            // Timings, not ids — independent of the trace-id header.
+            if ($span instanceof Span && config('telemetry.traces.server_timing', false)) {
+                $response->headers->set('Server-Timing', $this->serverTiming($span), false);
             }
+
+            // Turning the trace-id header off is the app deciding not to
+            // expose trace ids at all; `traceresponse` follows it.
+            if (! is_string($header) || $header === '') {
+                return;
+            }
+
+            $response->headers->set($header, $traceId);
 
             // W3C Trace Context Level 2 `traceresponse`: the trace id AND
             // the server span, so a browser SDK can parent what follows an
             // Inertia visit (JSON, no meta tag to read) to the span that
-            // served it rather than leaving it a sibling.
-            $span = $request->attributes->get(self::SPAN_KEY);
-
+            // served it rather than leaving it a sibling. The flag is the
+            // decision in force NOW — a `Sample` middleware or a directive
+            // may have changed the head decision — so a client never
+            // parents to a span that will not be exported.
             if ($span instanceof Span && config('telemetry.traces.traceresponse', true)) {
-                $response->headers->set('traceresponse', sprintf('00-%s-%s-%s', $span->traceId, $span->spanId, $span->sampled ? '01' : '00'));
-            }
-
-            if ($span instanceof Span && config('telemetry.traces.server_timing', false)) {
-                $response->headers->set('Server-Timing', $this->serverTiming($span), false);
+                $response->headers->set('traceresponse', sprintf(
+                    '00-%s-%s-%s',
+                    $span->traceId,
+                    $span->spanId,
+                    $this->telemetry->tracer()->currentlySampled($span) ? '01' : '00',
+                ));
             }
         });
 

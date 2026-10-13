@@ -183,7 +183,7 @@ pass `-H 'Accept: application/openmetrics-text'`.
 | `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
 | `traces.share_context` | `TELEMETRY_TRACES_SHARE_CONTEXT` | `true` — publishes `trace_id` into Laravel `Context` (Sentry/Flare/logs pick it up) + a Sentry scope tag |
 | `traces.response_header` | `TELEMETRY_TRACES_RESPONSE_HEADER` | `X-Trace-Id` — the support reference id on every response; `null` disables. Skipped on publicly cacheable responses (`Cache-Control: public`/`s-maxage`) so caches never replay a stale id |
-| `traces.traceresponse` | `TELEMETRY_TRACES_TRACERESPONSE` | `true` — W3C `traceresponse` header (trace id + server span id) on the same responses |
+| `traces.traceresponse` | `TELEMETRY_TRACES_TRACERESPONSE` | `true` — W3C `traceresponse` header (trace id + server span id) on the same responses; only while `response_header` is on |
 | `traces.server_timing` | `TELEMETRY_TRACES_SERVER_TIMING` | `false` — `Server-Timing` header with db/cache/redis time and counts, telemetry overhead and app time |
 | `traces.label_header` | `TELEMETRY_TRACES_LABEL_HEADER` | `X-Telemetry-Label` — request header copied to the root span as `laravel.trace.label` (64 safe chars) for before/after comparison; `null` disables |
 | `traces.propagate_to_processes` | `TELEMETRY_TRACES_PROPAGATE_TO_PROCESSES` | `true` — `TRACEPARENT` in the environment of children started via the `Process` facade |

@@ -8,6 +8,7 @@ use BackedEnum;
 use Cbox\Telemetry\Support\DbSystem;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Overhead;
+use Cbox\Telemetry\Support\OwnWork;
 use Cbox\Telemetry\Support\SourceLocator;
 use Cbox\Telemetry\Support\SqlShape;
 use Cbox\Telemetry\TelemetryManager;
@@ -97,6 +98,14 @@ final class QueryInstrumentation
     /** Whether the query just inspected crossed a threshold — the one occurrence that gets an origin. */
     private bool $crossed = false;
 
+    /**
+     * The crossing query's origin, located once for its event and reused
+     * for its span.
+     *
+     * @var array<string, string|int>|null
+     */
+    private ?array $crossingOrigin = null;
+
     public function __construct(private readonly Container $container) {}
 
     public function register(
@@ -120,6 +129,10 @@ final class QueryInstrumentation
 
     private function queryExecuted(QueryExecuted $event): void
     {
+        if (OwnWork::active()) {
+            return;
+        }
+
         Overhead::measure(fn () => FailSafe::guard(fn () => $this->record($event)));
     }
 
@@ -148,6 +161,7 @@ final class QueryInstrumentation
 
         $repeat = null;
         $this->crossed = false;
+        $this->crossingOrigin = null;
 
         // Guarded as a whole: this listener fires for EVERY query, and even
         // instrument registration (a type conflict on `db.queries`) must
@@ -203,7 +217,7 @@ final class QueryInstrumentation
             // thousand queries would otherwise pay a thousand backtraces to
             // learn the same line. The others share its shape.
             if ($this->wantsOrigin($this->crossed || $event->time >= $this->slowMs)) {
-                $attributes += SourceLocator::locate($this->basePath) ?? [];
+                $attributes += $this->crossingOrigin ?? SourceLocator::locate($this->basePath) ?? [];
             }
 
             $telemetry->tracer()->recordSpan(
@@ -291,7 +305,7 @@ final class QueryInstrumentation
 
         $repeat = $count >= $this->duplicateThreshold ? self::REPEAT_DUPLICATE : null;
 
-        if (! SqlShape::isRead($event->sql)) {
+        if (! SqlShape::isRead($event->sql) || SqlShape::isPagination($event->sql)) {
             return $repeat;
         }
 
@@ -354,7 +368,11 @@ final class QueryInstrumentation
      */
     private function eventOrigin(): array
     {
-        return $this->origin === self::ORIGIN_OFF ? [] : (SourceLocator::locate($this->basePath) ?? []);
+        if ($this->origin === self::ORIGIN_OFF) {
+            return [];
+        }
+
+        return $this->crossingOrigin ??= SourceLocator::locate($this->basePath) ?? [];
     }
 
     /**

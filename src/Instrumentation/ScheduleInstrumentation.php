@@ -119,8 +119,16 @@ final class ScheduleInstrumentation
     private function taskStarting(ScheduledTaskStarting $event): void
     {
         // Before the background early-return: a background task starts
-        // here too, and it is due like any other.
-        FailSafe::guard(fn () => $this->markStarted($event->task));
+        // here too, and it is due like any other. Flushed at once: with the
+        // write buffer (the default) the gauges would otherwise sit in this
+        // process until the task ended — after running_since was already
+        // back to 0, so a hung or killed task would never be seen running.
+        FailSafe::guard(function () use ($event): void {
+            if ($this->monitor) {
+                $this->markStarted($event->task);
+                $this->telemetry()->flush();
+            }
+        });
 
         if ($event->task->runInBackground) {
             return;
@@ -286,6 +294,9 @@ final class ScheduleInstrumentation
             /** @var array<string, int> $due */
             $due = [];
 
+            /** @var array<string, int> $interval */
+            $interval = [];
+
             foreach ($this->container->make(Schedule::class)->events() as $task) {
                 // Not this environment's task, or maintenance mode is holding
                 // it: not due here, so it cannot be missed here.
@@ -298,8 +309,10 @@ final class ScheduleInstrumentation
                 if ($previous !== null) {
                     $name = $this->taskName($task);
                     // Tasks sharing a (bounded) name share a series: the
-                    // latest due time is the one that has to be met.
+                    // latest due time is the one that has to be met, and
+                    // the shortest interval the one that says how soon.
                     $due[$name] = max($due[$name] ?? 0, $previous);
+                    $interval[$name] = min($interval[$name] ?? PHP_INT_MAX, $this->interval($task, $now) ?? PHP_INT_MAX);
                 }
             }
 
@@ -311,6 +324,16 @@ final class ScheduleInstrumentation
                 // deleted from the schedule stops being refreshed, so the
                 // alert rules can tell it from a task that stopped running.
                 $telemetry->gauge('schedule.task.listed', description: 'When schedule:run last listed the task (unix time)', unit: 's')->set($now, $labels);
+
+                if (($interval[$name] ?? PHP_INT_MAX) < PHP_INT_MAX) {
+                    $telemetry->gauge('schedule.task.interval', description: 'Seconds between the task\'s current and next cron match', unit: 's')->set($interval[$name], $labels);
+                }
+
+                // Created at 0 while nothing has happened, so the first
+                // failure is a change Prometheus can see: a counter series
+                // that appears at 1 reads as no increase at all.
+                $telemetry->counter('schedule.tasks.failed', 'Scheduled task runs by outcome')->inc(0, $labels);
+                $telemetry->counter('schedule.tasks.processed', 'Scheduled task runs by outcome')->inc(0, $labels);
             }
 
             $telemetry->flush();
@@ -319,10 +342,6 @@ final class ScheduleInstrumentation
 
     private function markStarted(object $task): void
     {
-        if (! $this->monitor) {
-            return;
-        }
-
         $name = $this->taskName($task);
         $now = microtime(true);
 
@@ -335,7 +354,10 @@ final class ScheduleInstrumentation
         // How late it started against its own cron — a scheduler whose
         // earlier tasks run long starts the later ones late, and nothing
         // else shows that until they start missing.
-        $previous = $this->previousDue($task, (int) $now);
+        // Sub-minute tasks repeat inside the minute their cron matched; their
+        // offset in it is the schedule, not lateness.
+        $repeats = ($task->repeatSeconds ?? null) !== null;
+        $previous = $repeats ? null : $this->previousDue($task, (int) $now);
 
         if ($previous !== null && ($delay = $now - $previous) >= 0 && $delay < 3600) {
             $this->telemetry()
@@ -371,6 +393,27 @@ final class ScheduleInstrumentation
     }
 
     /**
+     * Seconds from the most recent cron match to the next one — how often
+     * the task is due right now (a weekday-only task's Friday interval is
+     * three days). Sub-minute tasks repeat every minute at least.
+     */
+    private function interval(object $task, int $now): ?int
+    {
+        $previous = $this->previousDue($task, $now);
+        $expression = $task->expression ?? null;
+
+        if ($previous === null || ! is_string($expression)) {
+            return null;
+        }
+
+        $next = (new CronExpression($expression))
+            ->getNextRunDate(new DateTimeImmutable('@'.$now), 0, false, $this->timezone($task))
+            ->getTimestamp();
+
+        return max(60, $next - $previous);
+    }
+
+    /**
      * The most recent time at or before $now the task's cron matched, in
      * the task's own timezone. Null for anything that is not a cron
      * expression the parser accepts.
@@ -383,16 +426,20 @@ final class ScheduleInstrumentation
             return null;
         }
 
+        return (new CronExpression($expression))
+            ->getPreviousRunDate(new DateTimeImmutable('@'.$now), 0, true, $this->timezone($task))
+            ->getTimestamp();
+    }
+
+    private function timezone(object $task): string
+    {
         $timezone = $task->timezone ?? null;
-        $timezone = match (true) {
+
+        return match (true) {
             $timezone instanceof DateTimeZone => $timezone->getName(),
             is_string($timezone) && $timezone !== '' => $timezone,
             default => Cast::string(config('app.timezone'), 'UTC'),
         };
-
-        return (new CronExpression($expression))
-            ->getPreviousRunDate(new DateTimeImmutable('@'.$now), 0, true, $timezone)
-            ->getTimestamp();
     }
 
     /**

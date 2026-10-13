@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-`db.query.duplicate_detected` and `db.queries.duplicated` now mean
-*identical* SQL **and** values. A query that repeats with different
-values — the classic N+1 — moves to the new `db.query.n_plus_one_detected`
-event and `db.queries.n_plus_one` counter. Dashboards or alerts that read
-the duplicate signals as "N+1" should add the new ones.
+Two things to know on upgrade. `db.query.duplicate_detected` and
+`db.queries.duplicated` now mean *identical* SQL **and** values; a query
+that repeats with different values — the classic N+1 — moves to the new
+`db.query.n_plus_one_detected` event and `db.queries.n_plus_one` counter,
+so dashboards or alerts reading the duplicate signals as "N+1" should add
+the new ones. And responses now carry a `traceresponse` header next to
+`X-Trace-Id`; an app that set `traces.response_header` to `null` gets
+neither.
+
+### Changed
+
+- **Duplicate queries require identical bindings** — see above.
+- **Grafana dashboards number their panels per dashboard.** One global
+  counter meant a panel added to one dashboard renumbered every dashboard
+  after it. This release renumbers them once; `viewPanel=` links saved
+  from the bundled dashboards need updating.
 
 ### Added
 
@@ -19,56 +30,62 @@ the duplicate signals as "N+1" should add the new ones.
   *shape* and different values are N+1 (eager load them); the same SQL
   with the same values is a duplicate (memoize it). The shape takes
   literals out and collapses `in (…)` lists, so `whereIn()` over 3 ids and
-  over 5 are one query. Query spans carry `laravel.db.query.shape`, and
+  over 5 are one query. Pagination (`chunk()`, `chunkById()`) is not
+  N+1. Query spans carry `laravel.db.query.shape`, and
   `laravel.db.query.repeat` once they are part of a repeat; root spans
-  get `db.query.n_plus_one.count` and `db.query.slow.count`. Under `traces.details = tail`, a trace
-  with a repeated query keeps its detail spans.
+  get `db.query.n_plus_one.count` and `db.query.slow.count`. Under
+  `traces.details = tail`, a trace with a repeated query keeps its detail
+  spans.
 - **Where a query came from.** `code.file.path`, `code.line.number` and
-  `code.function.name` — the first frame outside `vendor/` — on slow and
-  repeated queries and on both events (`instrument.query_origin`:
-  `flagged` by default, `all`, `off`).
+  `code.function.name` — the first frame outside `vendor/` — on slow
+  queries, on the query that crosses a repeat threshold and on both
+  events (`instrument.query_origin`: `flagged` by default, `all`, `off`).
+  A query run from a Blade view names the `.blade.php` template.
 - **`telemetry.overhead_ms` on root spans:** the time the package's own
   per-operation hooks and request middleware took in that trace.
-- **Request labels.** `X-Telemetry-Label: before-fix` lands on the root
-  span — and every span and dispatched job of that request — as
-  `laravel.trace.label`, for before/after comparison
-  (`traces.label_header`).
+- **Request labels.** `X-Telemetry-Label: before-fix` lands on every span
+  of the request and the jobs it dispatches as `laravel.trace.label`, for
+  before/after comparison (`traces.label_header`).
 - **`TRACEPARENT` for child processes.** Processes started through the
   `Process` facade get it in their environment, and an artisan command
   started with it continues the trace as a child
   (`traces.propagate_to_processes`, `traces.continue_from_environment`).
-- **`traceresponse` response header** (W3C Trace Context Level 2) next to
-  `X-Trace-Id`, so telemetry-browser can parent requests after an Inertia
-  visit to the server span (`traces.traceresponse`). `@telemetryBrowser`
-  passes a renamed `traces.response_header` to the SDK as
-  `data-trace-header`.
+- **`traceresponse` response header** (W3C Trace Context Level 2), so
+  telemetry-browser can parent requests after an Inertia visit to the
+  server span (`traces.traceresponse`). Its sampled flag is the decision
+  in force when the response is sent, not the head decision.
+- **`Server-Timing` header (opt-in, `traces.server_timing`):** db, cache
+  and redis time and counts, the package's own overhead, and app time.
+- **`Telemetry::sample(true|false|rate)`:** re-decide sampling for the
+  active trace from application code, like the `Sample` middleware.
 - **Laravel Context, opt-in.** `instrument.laravel_context` reads the
   app's `Context` (never hidden context) onto root spans, log records and
   exception records as `laravel.context.*`
   (`instrument.laravel_context_keys` to limit it).
 - **Scheduled task monitoring: missed, late, overrunning, scheduler
-  stopped.** `schedule:run` publishes when each task was last due; starts
-  and skips record when it was last seen; a start with no finish leaves
-  `running_since` set. New `schedule.task.start_delay` histogram. Bundled
-  alert rules `SchedulerNotRunning`, `ScheduledTaskMissed`,
-  `ScheduledTaskOverrunning` and `ScheduledTasksStartingLate`, and three
-  new panels on the Scheduled Tasks dashboard
-  (`instrument.schedule_monitoring`, default on).
-- **`Server-Timing` header (opt-in, `traces.server_timing`):** db, cache
-  and redis time and counts, the package's own overhead, and app time —
-  for browser DevTools and telemetry-browser.
-- **`Telemetry::sample(true|false|rate)`:** re-decide sampling for the
-  active trace from application code (force-keep admin traces), like the
-  `Sample` middleware.
+  stopped.** `schedule:run` publishes when each task was last due, how
+  often it is due, and that it is still listed, and creates its outcome
+  counters at zero so the first failure is visible to `increase()`;
+  starts and skips record when it was last seen; a start with no finish
+  leaves `running_since` set, written through at once. New
+  `schedule.task.start_delay` histogram (not for sub-minute tasks).
+  Bundled alert rules `SchedulerNotRunning`, `ScheduledTaskMissed`,
+  `ScheduledTaskOverrunning` and `ScheduledTasksStartingLate`, with
+  promtool tests in `tests/alerts/`, and new panels on the Scheduled
+  Tasks dashboard (`instrument.schedule_monitoring`, default on).
 - **Directives: record more of one slice of traffic, for a while.**
   `php artisan telemetry:watch --user=42 --minutes=120 --profile`, or
   `Telemetry::directives()->add(Directive::route('checkout.*'))`. A
-  matching request or job is kept whatever the sample rate, keeps its
-  detail spans, carries `telemetry.directive`, and can get a CPU profile.
-  Matches on path, route, user, a context dimension or job class; every
-  directive expires. Stored in the app's cache; an HMAC-signed
-  `telemetry/directives` endpoint (when `directives.secret` is set) lets a
-  telemetry UI or insights install elsewhere manage them. With none
+  matching request or job is kept whatever the sample rate — a later
+  `Sample::never()` cannot undo it — keeps its detail spans, carries
+  `telemetry.directive`, and can get a CPU profile. Matches on path,
+  route (name, URI or an `http_route` label value), user, a context
+  dimension or job class; every directive expires. Stored in the app's
+  cache, read without being instrumented as the app's own queries or
+  cache misses. An HMAC-signed `telemetry/directives` endpoint (only when
+  `directives.secret` is set) lets a telemetry UI or insights install
+  elsewhere manage them: the signature covers timestamp, method,
+  directive id and body, and each signature is accepted once. With none
   active the per-request cost is one APCu read.
 - Queries dashboard: N+1 and duplicate panels with the app line that ran
   them.

@@ -91,3 +91,15 @@ it('opens no database or cache connection while booting', function () {
 
     expect($redis->connections() ?? [])->toBe([]);
 });
+
+it('does not build the manager while booting with the opt-in captures on either', function () {
+    config()->set('telemetry.instrument.laravel_context', true);
+    config()->set('telemetry.directives.secret', 'x');
+
+    $this->app->forgetInstance(TelemetryManager::class);
+    $this->app->forgetInstance('telemetry');
+
+    (new TelemetryServiceProvider($this->app))->boot();
+
+    expect($this->app->resolved(TelemetryManager::class))->toBeFalse();
+});

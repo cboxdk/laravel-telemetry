@@ -72,10 +72,14 @@ final readonly class Directive
         return self::make(self::MATCH_ROUTE, null, $pattern);
     }
 
-    /** A request path, no leading slash, e.g. `admin/*`. */
+    /** A request path, no leading slash, e.g. `admin/*`; `/` is the root. */
     public static function path(string $pattern): self
     {
-        return self::make(self::MATCH_PATH, null, ltrim($pattern, '/'));
+        // Laravel's $request->path() is `/` for the root and has no leading
+        // slash otherwise.
+        $path = ltrim($pattern, '/');
+
+        return self::make(self::MATCH_PATH, null, $path === '' && $pattern !== '' ? '/' : $path);
     }
 
     /** The authenticated user's id (`user.id`). */
@@ -135,11 +139,11 @@ final readonly class Directive
         if ($this->match === self::MATCH_CONTEXT) {
             $actual = $facts['context:'.$this->key] ?? null;
 
-            return $actual !== null && (string) $actual === $this->value;
+            return $actual !== null && Cast::string($actual) === $this->value;
         }
 
         if ($this->match === self::MATCH_USER) {
-            return isset($facts['user']) && (string) $facts['user'] === $this->value;
+            return isset($facts['user']) && Cast::string($facts['user']) === $this->value;
         }
 
         // A route matches by name, by its URI template with or without the
@@ -147,14 +151,14 @@ final readonly class Directive
         // not — and the root route is `/` either way), or by the logical
         // route an app or Livewire resolved (`livewire:counter`), so the
         // value of an `http_route` metric label can be used as it is.
-        $uri = isset($facts['route.uri']) ? (string) $facts['route.uri'] : null;
+        $uri = isset($facts['route.uri']) ? Cast::string($facts['route.uri']) : null;
 
         $candidates = $this->match === self::MATCH_ROUTE
             ? [$facts['route'] ?? null, $uri, $uri === null ? null : '/'.ltrim($uri, '/'), $facts['route.logical'] ?? null]
             : [$facts[$this->match] ?? null];
 
         foreach ($candidates as $actual) {
-            if ($actual !== null && $actual !== '' && Str::is($this->value, (string) $actual)) {
+            if ($actual !== null && $actual !== '' && Str::is($this->value, Cast::string($actual))) {
                 return true;
             }
         }
@@ -189,7 +193,8 @@ final readonly class Directive
             match: Cast::string($data['match'] ?? null),
             key: isset($data['key']) ? Cast::string($data['key']) : null,
             value: Cast::string($data['value'] ?? null),
-            profile: (bool) ($data['profile'] ?? false),
+            // JSON `"false"` is a string, and (bool) "false" is true.
+            profile: filter_var($data['profile'] ?? false, FILTER_VALIDATE_BOOL),
             expiresAt: Cast::int($data['expires_at'] ?? null, 0),
             reason: isset($data['reason']) ? Str::limit(Cast::string($data['reason']), 200, '') : null,
             createdBy: isset($data['created_by']) ? Str::limit(Cast::string($data['created_by']), 100, '') : null,

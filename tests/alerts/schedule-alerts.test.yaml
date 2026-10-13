@@ -1,0 +1,118 @@
+# promtool test rules tests/alerts/schedule-alerts.test.yaml
+#
+# Times are seconds since the epoch of the test (0). Gauges carry unix
+# timestamps, so a value of 3600 means "at 60m".
+rule_files:
+  - ../../resources/grafana/alerts/telemetry-alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A daily task due at 60m that never starts: missed once 5 minutes pass.
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_previous_due_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0x59 3600x30'
+      - series: 'schedule_task_last_seen_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0x90'
+      - series: 'schedule_task_listed_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0+60x90'
+      - series: 'schedule_task_interval_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '86400x90'
+    alert_rule_test:
+      - eval_time: 64m
+        alertname: ScheduledTaskMissed
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: ScheduledTaskMissed
+        exp_alerts:
+          - exp_labels: {severity: warning, service_name: app, deployment_environment_name: prod, task: report}
+            exp_annotations:
+              summary: "Scheduled task report missed on app (prod)"
+              description: "report was due and has not started or been skipped; last seen 4200s ago."
+
+  # The same task queued behind a long one, starting 4 minutes late: not missed.
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_previous_due_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0x59 3600x30'
+      - series: 'schedule_task_last_seen_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0x63 3840x26'
+      - series: 'schedule_task_listed_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '0+60x90'
+      - series: 'schedule_task_interval_seconds{service_name="app",deployment_environment_name="prod",task="report"}'
+        values: '86400x90'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: ScheduledTaskMissed
+        exp_alerts: []
+
+  # An every-minute task whose previous due is always recent, stuck since 0.
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_previous_due_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '0+60x30'
+      - series: 'schedule_task_last_seen_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '0x30'
+      - series: 'schedule_task_listed_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '0+60x30'
+      - series: 'schedule_task_interval_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '60x30'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ScheduledTaskMissed
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ScheduledTaskMissed
+        exp_alerts:
+          - exp_labels: {severity: warning, service_name: app, deployment_environment_name: prod, task: tick}
+            exp_annotations:
+              summary: "Scheduled task tick missed on app (prod)"
+              description: "tick was due and has not started or been skipped; last seen 600s ago."
+
+  # A healthy every-minute task.
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_previous_due_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '0+60x30'
+      - series: 'schedule_task_last_seen_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '1+60x30'
+      - series: 'schedule_task_listed_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '0+60x30'
+      - series: 'schedule_task_interval_seconds{service_name="app",deployment_environment_name="prod",task="tick"}'
+        values: '60x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ScheduledTaskMissed
+        exp_alerts: []
+
+  # A task removed from the schedule: no longer listed, never "missed".
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_previous_due_seconds{service_name="app",deployment_environment_name="prod",task="old"}'
+        values: '3600x90'
+      - series: 'schedule_task_last_seen_seconds{service_name="app",deployment_environment_name="prod",task="old"}'
+        values: '0x90'
+      - series: 'schedule_task_listed_seconds{service_name="app",deployment_environment_name="prod",task="old"}'
+        values: '60x90'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: ScheduledTaskMissed
+        exp_alerts: []
+
+  # A run that started and never finished.
+  - interval: 1m
+    input_series:
+      - series: 'schedule_task_running_since_seconds{service_name="app",deployment_environment_name="prod",task="export"}'
+        values: '60x130'
+    alert_rule_test:
+      - eval_time: 62m
+        alertname: ScheduledTaskOverrunning
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: ScheduledTaskOverrunning
+        exp_alerts:
+          - exp_labels: {severity: warning, service_name: app, deployment_environment_name: prod, task: export}
+            exp_annotations:
+              summary: "Scheduled task export running for over an hour on app"
+              description: "export started 4140s ago and has not finished (prod)."

@@ -45,5 +45,15 @@ it('tells reads from writes', function () {
         ->and(SqlShape::isRead('  WITH x as (select 1) select * from x'))->toBeTrue()
         ->and(SqlShape::isRead('(select 1) union (select 2)'))->toBeTrue()
         ->and(SqlShape::isRead('insert into t values (?)'))->toBeFalse()
-        ->and(SqlShape::isRead('update t set a = ?'))->toBeFalse();
+        ->and(SqlShape::isRead('update t set a = ?'))->toBeFalse()
+        ->and(SqlShape::isRead("/* controller='orders' */ select * from t"))->toBeTrue()
+        ->and(SqlShape::isRead("-- trace\nselect 1"))->toBeTrue();
+});
+
+it('recognises pagination', function () {
+    // chunk(): limit/offset, inlined by Laravel's grammar.
+    expect(SqlShape::isPagination('select * from "users" order by "id" asc limit 100 offset 200'))->toBeTrue()
+        // chunkById() / lazyById(): a keyset predicate, an order, a limit.
+        ->and(SqlShape::isPagination('select * from "users" where "id" > ? order by "id" asc limit 100'))->toBeTrue()
+        ->and(SqlShape::isPagination('select * from "posts" where "user_id" = ? limit 1'))->toBeFalse();
 });

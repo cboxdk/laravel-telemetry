@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Directives;
 
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\OwnWork;
 use Cbox\Telemetry\Support\SharedState;
 use Closure;
 use Illuminate\Contracts\Cache\Repository;
@@ -128,9 +129,18 @@ final class DirectiveStore
         return true;
     }
 
+    /**
+     * True the first time a key is claimed within the TTL, false after —
+     * the replay guard of the signed endpoint.
+     */
+    public function claimOnce(string $key, int $ttlSeconds): bool
+    {
+        return OwnWork::run(fn (): bool => ($this->cache)()->add(self::KEY.':'.$key, true, $ttlSeconds));
+    }
+
     public function clear(): void
     {
-        ($this->cache)()->forget(self::KEY);
+        OwnWork::run(fn () => ($this->cache)()->forget(self::KEY));
         $this->loaded = null;
     }
 
@@ -139,7 +149,7 @@ final class DirectiveStore
      */
     private function read(): array
     {
-        $raw = ($this->cache)()->get(self::KEY);
+        $raw = OwnWork::run(fn (): mixed => ($this->cache)()->get(self::KEY));
 
         if (! is_array($raw)) {
             return [];
@@ -165,15 +175,19 @@ final class DirectiveStore
      */
     private function write(array $directives): void
     {
-        $cache = ($this->cache)();
+        OwnWork::run(function () use ($directives): void {
+            $cache = ($this->cache)();
 
-        if ($directives === []) {
-            $cache->forget(self::KEY);
-        } else {
+            if ($directives === []) {
+                $cache->forget(self::KEY);
+
+                return;
+            }
+
             $until = max(array_map(static fn (Directive $d): int => $d->expiresAt, $directives));
 
             $cache->put(self::KEY, array_map(static fn (Directive $d): array => $d->toArray(), $directives), max(1, $until - time()));
-        }
+        });
 
         // This host sees the change now; others within recheck_seconds.
         SharedState::forget(self::EMPTY_KEY);

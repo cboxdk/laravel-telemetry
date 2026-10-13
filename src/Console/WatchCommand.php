@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Console;
 
 use Cbox\Telemetry\Directives\Directive;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
 use InvalidArgumentException;
@@ -53,18 +54,18 @@ final class WatchCommand extends Command
             return $removed ? self::SUCCESS : self::FAILURE;
         }
 
-        $directive = $this->directive();
-
-        if ($directive === null) {
-            $this->list($store->all());
-
-            return self::SUCCESS;
-        }
-
         try {
+            $directive = $this->directive();
+
+            if ($directive === null) {
+                $this->list($store->all());
+
+                return self::SUCCESS;
+            }
+
             $directive = $store->add(
                 $directive->profile((bool) $this->option('profile'))
-                    ->for(max(1, (int) $this->option('minutes')))
+                    ->for(max(1, Cast::int($this->option('minutes'), 60)))
                     ->because(is_string($this->option('reason')) ? $this->option('reason') : null)
                     ->by('artisan'),
             );

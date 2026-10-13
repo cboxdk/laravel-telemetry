@@ -8,6 +8,7 @@ use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Overhead;
+use Cbox\Telemetry\Support\OwnWork;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Closure;
@@ -196,7 +197,7 @@ final class CacheInstrumentation implements ManagesRequestState
 
     private function begin(?string $store, string $key): void
     {
-        if (in_array($store ?? 'default', $this->ignoreStores, true)) {
+        if (OwnWork::active() || in_array($store ?? 'default', $this->ignoreStores, true)) {
             return;
         }
 
@@ -209,6 +210,10 @@ final class CacheInstrumentation implements ManagesRequestState
 
     private function complete(string $operation, ?string $store, string $key): void
     {
+        if (OwnWork::active()) {
+            return;
+        }
+
         Overhead::measure(fn () => FailSafe::guard(function () use ($operation, $store, $key) {
             if (in_array($store ?? 'default', $this->ignoreStores, true)) {
                 return;

@@ -129,7 +129,7 @@
   ],
   "panels": [
     {
-      "id": 157,
+      "id": 1,
       "type": "table",
       "title": "Slowest queries (> $minms ms) \u2014 SQL text on the span",
       "datasource": {
@@ -169,7 +169,7 @@
       }
     },
     {
-      "id": 158,
+      "id": 2,
       "type": "table",
       "title": "N+1 suspects \u2014 requests running \u2265 $minqueries queries",
       "datasource": {
@@ -210,7 +210,7 @@
       "description": "db.query.count/time_ms tallies live on every root span."
     },
     {
-      "id": 159,
+      "id": 3,
       "type": "table",
       "title": "Query-heaviest jobs",
       "datasource": {
@@ -250,7 +250,7 @@
       }
     },
     {
-      "id": 160,
+      "id": 4,
       "type": "table",
       "title": "N+1 detected \u2014 same query shape, different values (eager load it)",
       "datasource": {
@@ -291,7 +291,7 @@
       "description": "The span that crossed the threshold carries the app line that ran it (code.file.path:code.line.number)."
     },
     {
-      "id": 161,
+      "id": 5,
       "type": "table",
       "title": "Duplicates \u2014 same SQL, same values (memoize it)",
       "datasource": {
@@ -331,7 +331,7 @@
       }
     },
     {
-      "id": 164,
+      "id": 6,
       "type": "timeseries",
       "title": "N+1 and duplicate detections",
       "datasource": {
@@ -346,7 +346,7 @@
       },
       "targets": [
         {
-          "refId": "Q162",
+          "refId": "Q1",
           "expr": "sum(increase(db_queries_n_plus_one_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "N+1",
           "datasource": {
@@ -355,7 +355,7 @@
           }
         },
         {
-          "refId": "Q163",
+          "refId": "Q2",
           "expr": "sum(increase(db_queries_duplicated_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "duplicate",
           "datasource": {
@@ -427,7 +427,7 @@
       }
     },
     {
-      "id": 165,
+      "id": 7,
       "type": "text",
       "title": "Tip",
       "gridPos": {

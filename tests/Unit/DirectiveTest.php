@@ -48,3 +48,12 @@ it('refuses what it cannot match on', function (Closure $make) {
     'context without key' => [fn () => new Directive('x', 'context', null, '7')],
     'empty value' => [fn () => Directive::path('')],
 ]);
+
+it('targets the root path', function () {
+    expect(Directive::path('/')->matches(['path' => '/']))->toBeTrue()
+        ->and(Directive::path('/')->matches(['path' => 'about']))->toBeFalse();
+});
+
+it('reads a JSON "false" profile flag as false', function () {
+    expect(Directive::fromArray(['match' => 'user', 'value' => '1', 'expires_at' => time() + 60, 'profile' => 'false'])->profile)->toBeFalse();
+});
