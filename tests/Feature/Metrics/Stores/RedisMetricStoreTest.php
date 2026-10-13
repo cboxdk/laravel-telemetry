@@ -14,6 +14,7 @@ use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tests\Doubles\PoolMemory;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Redis\Events\CommandExecuted;
+use Illuminate\Redis\RedisManager;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Redis;
 
@@ -418,3 +419,104 @@ it('refuses a non-finite observation instead of half-writing one', function () {
         ->and(array_sum($sample->bucketCounts))->toBe(1)
         ->and(is_finite($sample->sum))->toBeTrue();
 });
+
+/**
+ * A predis-backed Factory on the same server, so the batched path is exercised
+ * on both clients the store supports.
+ */
+function predisFactory(int $port = 0): RedisManager
+{
+    return new RedisManager(app(), 'predis', [
+        // The same options (prefix) as the default connection, so both
+        // clients read and write the same keys.
+        'options' => config('database.redis.options', []),
+        'default' => [
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'port' => $port ?: (int) env('REDIS_PORT', 6379),
+            'database' => 0,
+            'timeout' => 0.5,
+        ],
+    ]);
+}
+
+it('sends a whole buffered flush as one pipeline, on both clients', function (string $client) {
+    $factory = $client === 'predis' ? predisFactory() : app(Factory::class);
+    $buffered = new BufferedMetricStore(new RedisMetricStore($factory, 'default', $this->prefix));
+    $counter = new MetricDefinition('orders.created', MetricType::Counter);
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
+
+    foreach (range(1, 20) as $i) {
+        $buffered->incrementCounter($counter, ['tenant' => "t{$i}"], 1);
+        $buffered->recordHistogram($histogram, ['route' => '/orders'], (float) $i);
+    }
+
+    // Per-series writes went out as individual commands, one round trip
+    // each; the pipeline goes out on the raw client, so none of them do.
+    $commands = [];
+    app(Factory::class)->enableEvents();
+    Event::listen(CommandExecuted::class, function (CommandExecuted $event) use (&$commands): void {
+        $commands[] = $event->command;
+    });
+
+    $buffered->flushBuffer();
+
+    expect($commands)->toBe([]);
+
+    // And it all landed, bookkeeping included: collect() drops any family
+    // whose __meta is missing.
+    $families = collect((new RedisMetricStore(app(Factory::class), 'default', $this->prefix))->collect())
+        ->keyBy(fn ($family) => $family->name());
+
+    expect($families['orders.created']->samples)->toHaveCount(20)
+        ->and(collect($families['orders.created']->samples)->sum(fn ($sample) => $sample->value))->toBe(20.0)
+        ->and($families['req.duration']->samples[0]->count)->toBe(20)
+        ->and($families['req.duration']->samples[0]->bucketCounts)->toBe([10, 10, 0])
+        ->and($families['req.duration']->samples[0]->sum)->toBe(210.0);
+})->with(['phpredis', 'predis']);
+
+it('memoizes the bookkeeping a batch wrote', function () {
+    $definition = new MetricDefinition('orders.created', MetricType::Counter);
+    $buffered = new BufferedMetricStore($this->store);
+
+    $buffered->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+    $buffered->flushBuffer();
+
+    $commands = [];
+    app(Factory::class)->enableEvents();
+    Event::listen(CommandExecuted::class, function (CommandExecuted $event) use (&$commands): void {
+        $commands[] = $event->command;
+    });
+
+    // Another process in the same pool writes straight through: the
+    // batch's bookkeeping counts, so only the script runs.
+    (new RedisMetricStore(app(Factory::class), 'default', $this->prefix))
+        ->incrementCounter($definition, ['tenant' => 'acme'], 1.0);
+
+    expect($commands)->toBe(['eval']);
+});
+
+it('throws before sending anything when the server cannot be reached', function () {
+    // Nothing listens on port 1. The buffer must keep its writes for the
+    // next flush, which only holds if nothing was applied.
+    $buffered = new BufferedMetricStore(new RedisMetricStore(predisFactory(1), 'default', $this->prefix));
+    $buffered->incrementCounter(new MetricDefinition('orders.created', MetricType::Counter), [], 1.0);
+
+    expect(fn () => $buffered->flushBuffer())->toThrow(Exception::class);
+});
+
+it('lets one caller claim the metric export per window, on both clients', function (string $client) {
+    $factory = $client === 'predis' ? predisFactory() : app(Factory::class);
+    $first = new RedisMetricStore($factory, 'default', $this->prefix);
+    $second = new RedisMetricStore(app(Factory::class), 'default', $this->prefix);
+
+    expect($first->claimExport(15))->toBeTrue()
+        ->and($second->claimExport(15))->toBeFalse()
+        ->and($first->claimExport(15))->toBeFalse();
+
+    // The claim lapses on its own; deleting it stands in for the expiry.
+    app(Factory::class)->connection()->del("{$this->prefix}:export-claim");
+
+    expect($second->claimExport(15))->toBeTrue();
+
+    app(Factory::class)->connection()->del("{$this->prefix}:export-claim");
+})->with(['phpredis', 'predis']);

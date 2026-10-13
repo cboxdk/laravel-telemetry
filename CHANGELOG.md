@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A request's metric flush is one Redis round trip.** With the Redis store
+  behind the write buffer (the default), every series a request touched was
+  its own EVAL at terminate, one round trip each: a few dozen per API request
+  against a Redis over the network. `RedisMetricStore` now implements the new
+  `BatchesWrites` contract and `BufferedMetricStore` sends the whole flush, and
+  any bookkeeping it needs, in one pipeline. Scripts stay single-key, so
+  nothing depends on a cross-slot transaction. A server that cannot be reached
+  throws before anything is sent and the buffer is kept for the next flush;
+  a failure after sending is reported and that flush dropped rather than
+  retried, since a retry would count what landed twice. Redis Cluster
+  connections and servers that refuse EVAL keep the per-command path.
+- **Only one host exports a shared metric store per interval.** Every host
+  running `telemetry:flush --daemon` against a shared Redis store read the
+  whole store and exported the same series, under the same
+  `service.instance.id`, every `--metrics-interval`. The daemon now takes a
+  short claim in the store (`SET NX EX`, new `ClaimsMetricExport` contract)
+  and only the holder exports; per-host stores (APCu, SQLite, Redis on
+  loopback) are still exported by every host. Observable gauges are evaluated
+  in the exporting process only, so a gauge that differs per host is now
+  reported by one host per interval instead of colliding across all of them.
+
 ### Added
 
 - **A circuit breaker on the spool push.** With the spool enabled, every

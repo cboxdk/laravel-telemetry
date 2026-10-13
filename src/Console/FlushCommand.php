@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Console;
 
+use Cbox\Telemetry\Contracts\ClaimsMetricExport;
+use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
 use Cbox\Telemetry\Exporters\Spool\ShipResult;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
+use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
 use Cbox\Telemetry\Native\CrashReporter;
 use Cbox\Telemetry\Support\ExportOutcome;
 use Cbox\Telemetry\Support\ExportReport;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\ServiceInstance;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -192,6 +196,41 @@ final class FlushCommand extends Command
         return $healthy ? self::SUCCESS : self::FAILURE;
     }
 
+    /**
+     * Whether this daemon exports metrics this interval.
+     *
+     * A store shared by every host (Redis, off loopback) holds one total per
+     * series under one service.instance.id. When every host's daemon
+     * exported it, the backend received the same series from each of them
+     * and every host read the whole store each interval. One claim per
+     * interval picks a single exporter; the others skip. A per-host store
+     * (APCu, SQLite, Redis on loopback) is still exported by every host,
+     * because each owns its own totals.
+     *
+     * A store that cannot be reached cannot be claimed and could not have
+     * been exported either, so that interval is skipped.
+     */
+    private function ownsMetricsExport(int $seconds): bool
+    {
+        $store = $this->laravel->make(MetricStore::class);
+
+        if ($store instanceof BufferedMetricStore) {
+            $store = $store->inner();
+        }
+
+        if (! $store instanceof ClaimsMetricExport) {
+            return true;
+        }
+
+        // ServiceInstance answers with the host name for a per-host store
+        // and with a fingerprint of the store for a shared one.
+        if (ServiceInstance::id($this->laravel->make('config'), '') === '') {
+            return true;
+        }
+
+        return FailSafe::guard(fn (): bool => $store->claimExport($seconds)) ?? false;
+    }
+
     private function daemon(TelemetryManager $telemetry, ?SpoolShipper $shipper): int
     {
         $interval = max(1, (int) $this->option('interval'));
@@ -237,7 +276,11 @@ final class FlushCommand extends Command
                 // Before the metric flush, so a crash counted now leaves
                 // with this export rather than the next one.
                 $this->reportCrashes();
-                $this->watchExport(FailSafe::guard(fn () => $telemetry->flushMetrics()), 'metrics');
+
+                if ($this->ownsMetricsExport($metricsInterval)) {
+                    $this->watchExport(FailSafe::guard(fn () => $telemetry->flushMetrics()), 'metrics');
+                }
+
                 $this->watchExport(FailSafe::guard(fn () => $telemetry->flush()), 'spans and events');
 
                 $lastMetricsFlush = microtime(true);

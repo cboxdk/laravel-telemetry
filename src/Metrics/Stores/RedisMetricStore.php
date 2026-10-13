@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Metrics\Stores;
 
+use Cbox\Telemetry\Contracts\BatchesWrites;
+use Cbox\Telemetry\Contracts\ClaimsMetricExport;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Contracts\ReportsOverflow;
 use Cbox\Telemetry\Metrics\Exemplar;
@@ -13,10 +15,16 @@ use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
 use Cbox\Telemetry\Metrics\Sample;
+use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\SharedState;
+use Closure;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Redis\Connections\Connection;
+use Illuminate\Redis\Connections\PhpRedisClusterConnection;
 use Illuminate\Redis\Connections\PhpRedisConnection;
+use Illuminate\Redis\Connections\PredisClusterConnection;
+use Predis\Client;
+use Predis\Pipeline\Pipeline;
 use Throwable;
 
 /**
@@ -38,7 +46,7 @@ use Throwable;
  *
  * Collect is SMEMBERS + HGETALL per family — never KEYS or SCAN.
  */
-final class RedisMetricStore implements MetricStore, ReportsOverflow
+final class RedisMetricStore implements BatchesWrites, ClaimsMetricExport, MetricStore, ReportsOverflow
 {
     /**
      * Applies a flat list of (op, field, value) triples to one hash.
@@ -88,12 +96,167 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
     /** How long a server that refused EVAL is left alone before we ask again. */
     private const RETRY_SCRIPTING_AFTER_SECONDS = 300;
 
+    /**
+     * Writes queued while batch() runs, sent together at its end. Null
+     * outside a batch, where every write is its own round trip.
+     *
+     * @var list<array{0: 'eval', 1: string, 2: list<string>}|array{0: 'hset'|'hsetnx', 1: string, 2: string, 3: string}|array{0: 'sadd', 1: string, 2: string}>|null
+     */
+    private ?array $batched = null;
+
+    /**
+     * Bookkeeping memos to set once the batch carrying their writes has
+     * landed — the same "memoize only once the writes landed" rule as the
+     * unbatched path.
+     *
+     * @var array<string, int>
+     */
+    private array $batchedMemos = [];
+
     public function __construct(
         private readonly Factory $redis,
         private readonly string $connection = 'default',
         private readonly string $prefix = 'telemetry',
         private readonly int $maxFields = 50_000,
     ) {}
+
+    /**
+     * Send every write $writes produces in one pipeline.
+     *
+     * A request's flush touches a few dozen series, and each series was
+     * an EVAL with its own round trip; behind an API request that was
+     * most of what telemetry cost against a Redis over the network. In
+     * one pipeline the whole flush is one round trip, and the script
+     * per series stays single-key, so nothing here needs Redis Cluster
+     * to accept a cross-slot transaction.
+     *
+     * The connection is opened before anything is queued on the wire,
+     * so a Redis that cannot be reached throws here with nothing
+     * applied, and the caller keeps its buffer. Past that point the
+     * pipeline may have partly landed, so a failure is reported and the
+     * batch dropped rather than thrown: a retry would count what landed
+     * twice.
+     */
+    public function batch(Closure $writes): void
+    {
+        // Nested, or on a server that refuses EVAL: the writes go out
+        // one by one exactly as they would without a batch — the
+        // fallback path is per command and cannot be pipelined as one.
+        if ($this->batched !== null || $this->scriptingIsRefused()) {
+            $writes();
+
+            return;
+        }
+
+        $connection = $this->connection();
+        $redis = $connection->client();
+
+        // A pipeline needs one server: phpredis' RedisCluster has none,
+        // and a cluster would split it by slot anyway. Those keep the
+        // per-command path.
+        if (! ($redis instanceof \Redis || $redis instanceof Client)
+            || $connection instanceof PhpRedisClusterConnection
+            || $connection instanceof PredisClusterConnection) {
+            $writes();
+
+            return;
+        }
+
+        $this->batched = [];
+        $this->batchedMemos = [];
+
+        try {
+            $writes();
+            $commands = $this->batched ?? [];
+            $memos = $this->batchedMemos;
+        } finally {
+            $this->batched = null;
+            $this->batchedMemos = [];
+        }
+
+        if ($commands === []) {
+            return;
+        }
+
+        // Predis connects lazily; phpredis already did when the
+        // connection was built. Either way an unreachable server throws
+        // here, before a single command is sent.
+        if ($redis instanceof Client) {
+            $redis->connect();
+        }
+
+        try {
+            $evalRefused = $redis instanceof \Redis
+                ? $this->sendWithPhpRedis($redis, $commands)
+                : $this->sendWithPredis($redis, $commands);
+        } catch (Throwable $e) {
+            FailSafe::guard(static function () use ($e): never {
+                throw $e;
+            });
+
+            return;
+        }
+
+        foreach ($memos as $memo => $until) {
+            SharedState::remember($memo, $until);
+        }
+
+        // phpredis answers a refused EVAL with false rather than an
+        // exception. A batch where that happened is gone, but the next
+        // flush must take the per-command path, so ask once — the same
+        // probe the unbatched path uses.
+        if ($evalRefused && $this->scriptingIsRefusedByProbe($connection, $commands[0][1])) {
+            SharedState::remember($this->scriptingKey(), time() + self::RETRY_SCRIPTING_AFTER_SECONDS);
+        }
+    }
+
+    /**
+     * @param  non-empty-list<array{0: 'eval', 1: string, 2: list<string>}|array{0: 'hset'|'hsetnx', 1: string, 2: string, 3: string}|array{0: 'sadd', 1: string, 2: string}>  $commands
+     * @return bool whether a script came back false (scripting refused)
+     */
+    private function sendWithPhpRedis(\Redis $redis, array $commands): bool
+    {
+        $pipe = $redis->pipeline();
+
+        if (! $pipe instanceof \Redis) {
+            throw new \RuntimeException('phpredis did not open a pipeline.');
+        }
+
+        foreach ($commands as $command) {
+            match ($command[0]) {
+                // phpredis takes (script, args, numKeys), as in apply().
+                'eval' => $pipe->eval(self::APPLY_SCRIPT, [$command[1], ...$command[2]], 1),
+                'hset' => $pipe->hSet($command[1], $command[2], $command[3]),
+                'hsetnx' => $pipe->hSetNx($command[1], $command[2], $command[3]),
+                'sadd' => $pipe->sAdd($command[1], $command[2]),
+            };
+        }
+
+        $results = $pipe->exec();
+
+        return is_array($results) && in_array(false, $results, true);
+    }
+
+    /**
+     * @param  non-empty-list<array{0: 'eval', 1: string, 2: list<string>}|array{0: 'hset'|'hsetnx', 1: string, 2: string, 3: string}|array{0: 'sadd', 1: string, 2: string}>  $commands
+     * @return bool always false: predis raises a refused script as an exception
+     */
+    private function sendWithPredis(Client $client, array $commands): bool
+    {
+        $client->pipeline(function (Pipeline $pipe) use ($commands): void {
+            foreach ($commands as $command) {
+                match ($command[0]) {
+                    // predis takes (script, numKeys, ...args), as in apply().
+                    'eval' => $pipe->eval(self::APPLY_SCRIPT, 1, $command[1], ...$command[2]),
+                    'hset' => $pipe->hset($command[1], $command[2], $command[3]),
+                    'hsetnx' => $pipe->hsetnx($command[1], $command[2], $command[3]),
+                    'sadd' => $pipe->sadd($command[1], [$command[2]]),
+                };
+            }
+        });
+
+        return false;
+    }
 
     public function incrementCounter(MetricDefinition $definition, array $labels, float $by): void
     {
@@ -228,17 +391,25 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
             return;
         }
 
+        $arguments = [(string) $this->maxFields];
+
+        foreach ($operations as [$op, $field, $value]) {
+            $arguments[] = $op;
+            $arguments[] = $field;
+            $arguments[] = $value;
+        }
+
+        // In a batch the script is queued and sent with the rest of the
+        // flush; batch() only batches where scripting is accepted.
+        if ($this->batched !== null) {
+            $this->batched[] = ['eval', $key, $arguments];
+
+            return;
+        }
+
         $connection = $this->connection();
 
         if (! $this->scriptingIsRefused()) {
-            $arguments = [(string) $this->maxFields];
-
-            foreach ($operations as [$op, $field, $value]) {
-                $arguments[] = $op;
-                $arguments[] = $field;
-                $arguments[] = $value;
-            }
-
             try {
                 // The two clients disagree on how EVAL is called.
                 // phpredis takes (script, args, numKeys) and Laravel's
@@ -363,6 +534,20 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
         // vanished from every scrape until a COLD process happened to write
         // it again — which, for a series with one long-lived writer, is never.
         if ($now < SharedState::deadline($memo)) {
+            return;
+        }
+
+        // In a batch the bookkeeping rides in the same pipeline as the
+        // writes, once per family however many of its series the flush
+        // carries, and the memo waits until the batch has landed.
+        if ($this->batched !== null) {
+            if (! isset($this->batchedMemos[$memo])) {
+                $this->batched[] = ['hset', $key, '__meta', $this->encodeMeta($definition)];
+                $this->batched[] = ['hsetnx', $key, '__since', (string) ((int) (microtime(true) * 1e9))];
+                $this->batched[] = ['sadd', $this->indexKey($definition->type), $definition->name];
+                $this->batchedMemos[$memo] = $now + self::REINITIALIZE_AFTER_SECONDS;
+            }
+
             return;
         }
 
@@ -660,6 +845,24 @@ final class RedisMetricStore implements MetricStore, ReportsOverflow
     private function since(array $fields): ?int
     {
         return isset($fields['__since']) ? (int) $fields['__since'] : null;
+    }
+
+    /**
+     * SET NX with an expiry: one caller per window gets it, and a claimer
+     * that dies takes nothing with it — the claim lapses on its own.
+     */
+    public function claimExport(int $seconds): bool
+    {
+        $connection = $this->connection();
+        $key = $this->prefix.':export-claim';
+        $holder = gethostname() ?: 'unknown';
+
+        $claimed = $connection instanceof PhpRedisConnection
+            ? $connection->set($key, $holder, 'EX', max(1, $seconds), 'NX')
+            : $connection->command('set', [$key, $holder, 'EX', max(1, $seconds), 'NX']);
+
+        // phpredis answers true/false, predis an OK status or null.
+        return $claimed !== false && $claimed !== null;
     }
 
     private function connection(): Connection

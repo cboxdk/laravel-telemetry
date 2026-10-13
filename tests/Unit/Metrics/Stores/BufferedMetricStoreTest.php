@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Cbox\Telemetry\Contracts\BatchesWrites;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Metrics\Exemplar;
 use Cbox\Telemetry\Metrics\MetricDefinition;
@@ -279,4 +280,138 @@ it('does not replay writes that already landed when a later one throws', functio
         ->keyBy(fn ($sample) => $sample->labels['tenant']);
 
     expect($samples['ok']->value)->toBe(1.0);
+});
+
+/**
+ * A store that sends a flush as one batch, and can refuse the batch the way an
+ * unreachable server does: before anything is applied.
+ */
+final class BatchingStore implements BatchesWrites, MetricStore
+{
+    public int $batches = 0;
+
+    public int $writesInsideBatch = 0;
+
+    public bool $unreachable = false;
+
+    private bool $inBatch = false;
+
+    public function __construct(public readonly CountingStore $inner = new CountingStore) {}
+
+    public function batch(Closure $writes): void
+    {
+        $this->batches++;
+
+        if ($this->unreachable) {
+            throw new RuntimeException('Connection refused');
+        }
+
+        $this->inBatch = true;
+
+        try {
+            $writes();
+        } finally {
+            $this->inBatch = false;
+        }
+    }
+
+    private function count(): void
+    {
+        if ($this->inBatch) {
+            $this->writesInsideBatch++;
+        }
+    }
+
+    public function incrementCounter(MetricDefinition $definition, array $labels, float $by): void
+    {
+        $this->count();
+        $this->inner->incrementCounter($definition, $labels, $by);
+    }
+
+    public function setGauge(MetricDefinition $definition, array $labels, float $value): void
+    {
+        $this->count();
+        $this->inner->setGauge($definition, $labels, $value);
+    }
+
+    public function addGauge(MetricDefinition $definition, array $labels, float $delta): void
+    {
+        $this->count();
+        $this->inner->addGauge($definition, $labels, $delta);
+    }
+
+    public function recordHistogram(MetricDefinition $definition, array $labels, float $value, ?Exemplar $exemplar = null): void
+    {
+        $this->count();
+        $this->inner->recordHistogram($definition, $labels, $value, $exemplar);
+    }
+
+    public function mergeHistogram(MetricDefinition $definition, array $labels, array $bucketCounts, float $sum, int $count, ?Exemplar $exemplar = null): void
+    {
+        $this->count();
+        $this->inner->mergeHistogram($definition, $labels, $bucketCounts, $sum, $count, $exemplar);
+    }
+
+    public function collect(): array
+    {
+        return $this->inner->collect();
+    }
+
+    public function wipe(): void
+    {
+        $this->inner->wipe();
+    }
+
+    public function forgetSeries(MetricDefinition $definition, array $labels): void
+    {
+        $this->inner->forgetSeries($definition, $labels);
+    }
+}
+
+it('sends the whole buffer inside one batch when the store batches', function () {
+    $inner = new BatchingStore;
+    $store = new BufferedMetricStore($inner);
+    $histogram = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0]);
+
+    $store->incrementCounter(counterDefinition(), ['tenant' => 'a'], 1.0);
+    $store->incrementCounter(counterDefinition(), ['tenant' => 'b'], 1.0);
+    $store->setGauge(new MetricDefinition('queue.depth', MetricType::Gauge), [], 3.0);
+    $store->recordHistogram($histogram, [], 5.0);
+
+    $store->flushBuffer();
+
+    // One batch, every series written inside it — the store can send
+    // the lot in one round trip.
+    expect($inner->batches)->toBe(1)
+        ->and($inner->writesInsideBatch)->toBe(4)
+        ->and($inner->inner->writes)->toBe(4);
+});
+
+it('clears the buffer once the batch has gone out', function () {
+    $inner = new BatchingStore;
+    $store = new BufferedMetricStore($inner);
+
+    $store->incrementCounter(counterDefinition(), [], 1.0);
+    $store->flushBuffer();
+    $store->flushBuffer();
+
+    expect($inner->batches)->toBe(1)
+        ->and($inner->inner->writes)->toBe(1);
+});
+
+it('keeps the buffer when the batch could not reach the store', function () {
+    $inner = new BatchingStore;
+    $inner->unreachable = true;
+    $store = new BufferedMetricStore($inner);
+
+    $store->incrementCounter(counterDefinition(), [], 2.0);
+
+    expect(fn () => $store->flushBuffer())->toThrow(RuntimeException::class);
+
+    // Nothing was applied, so retrying is exact rather than double.
+    $inner->unreachable = false;
+    $store->flushBuffer();
+
+    expect($inner->inner->collect()[0]->samples[0]->value)->toBe(2.0)
+        ->and($inner->inner->writes)->toBe(1);
 });
