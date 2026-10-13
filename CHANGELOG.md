@@ -46,6 +46,23 @@ the duplicate signals as "N+1" should add the new ones.
   app's `Context` (never hidden context) onto root spans, log records and
   exception records as `laravel.context.*`
   (`instrument.laravel_context_keys` to limit it).
+- **Scheduled task monitoring: missed, late, overrunning, scheduler
+  stopped.** `schedule:run` publishes when each task was last due; starts
+  and skips record when it was last seen; a start with no finish leaves
+  `running_since` set. New `schedule.task.start_delay` histogram. Bundled
+  alert rules `SchedulerNotRunning`, `ScheduledTaskMissed`,
+  `ScheduledTaskOverrunning` and `ScheduledTasksStartingLate`, and three
+  new panels on the Scheduled Tasks dashboard
+  (`instrument.schedule_monitoring`, default on).
+- Queries dashboard: N+1 and duplicate panels with the app line that ran
+  them.
+
+### Fixed
+
+- **Background scheduled tasks were all labelled `exec`.** The subshell
+  `runInBackground()` wraps a command in hid its artisan prefix, so
+  `schedule.background_tasks.*` lumped every background task into one
+  series. They now carry the command name like foreground tasks.
 
 ## [3.4.0] - 2026-10-13
 

@@ -107,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 168,
+      "id": 179,
       "type": "stat",
       "title": "Requests / min",
       "datasource": {
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "refId": "Q169",
+          "refId": "Q180",
           "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -160,7 +160,7 @@
       }
     },
     {
-      "id": 170,
+      "id": 181,
       "type": "stat",
       "title": "p95 latency",
       "datasource": {
@@ -175,7 +175,7 @@
       },
       "targets": [
         {
-          "refId": "Q171",
+          "refId": "Q182",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_request_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -217,7 +217,7 @@
       }
     },
     {
-      "id": 172,
+      "id": 183,
       "type": "stat",
       "title": "4xx+5xx / min",
       "datasource": {
@@ -232,7 +232,7 @@
       },
       "targets": [
         {
-          "refId": "Q173",
+          "refId": "Q184",
           "expr": "sum(rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",http_response_status_code=~\"[45]..\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -274,7 +274,7 @@
       }
     },
     {
-      "id": 174,
+      "id": 185,
       "type": "stat",
       "title": "Connection failures / h",
       "datasource": {
@@ -289,7 +289,7 @@
       },
       "targets": [
         {
-          "refId": "Q175",
+          "refId": "Q186",
           "expr": "(sum(increase(http_client_connection_failures_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -331,7 +331,7 @@
       }
     },
     {
-      "id": 177,
+      "id": 188,
       "type": "timeseries",
       "title": "p95 by host",
       "datasource": {
@@ -346,7 +346,7 @@
       },
       "targets": [
         {
-          "refId": "Q176",
+          "refId": "Q187",
           "expr": "histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{server_address}}",
           "datasource": {
@@ -387,7 +387,7 @@
       }
     },
     {
-      "id": 179,
+      "id": 190,
       "type": "timeseries",
       "title": "Rate by host & status",
       "datasource": {
@@ -402,7 +402,7 @@
       },
       "targets": [
         {
-          "refId": "Q178",
+          "refId": "Q189",
           "expr": "sum by (server_address, http_response_status_code) (rate(http_client_request_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{server_address}} {{http_response_status_code}}",
           "datasource": {
@@ -443,7 +443,7 @@
       }
     },
     {
-      "id": 180,
+      "id": 191,
       "type": "table",
       "title": "Outgoing call spans",
       "datasource": {

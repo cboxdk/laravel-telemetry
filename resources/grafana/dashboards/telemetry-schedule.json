@@ -602,6 +602,194 @@
       "options": {
         "cellHeight": "sm"
       }
+    },
+    {
+      "id": 138,
+      "type": "stat",
+      "title": "Scheduler last ran",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "Q139",
+          "expr": "time() - max(schedule_run_last_seen_seconds{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"})",
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 90
+              },
+              {
+                "color": "red",
+                "value": 180
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      },
+      "description": "Seconds since schedule:run last started. Over 180 s fires SchedulerNotRunning."
+    },
+    {
+      "id": 140,
+      "type": "table",
+      "title": "Behind schedule (due \u2212 last seen)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 6,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "Q141",
+          "expr": "(max by (task) (schedule_task_previous_due_seconds{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"}) - max by (task) (schedule_task_last_seen_seconds{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"})) > 0",
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Value",
+            "desc": true
+          }
+        ],
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        }
+      },
+      "description": "How long each task has been due without starting or being skipped. Over 300 s fires ScheduledTaskMissed."
+    },
+    {
+      "id": 142,
+      "type": "table",
+      "title": "Running now (for)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 9,
+        "x": 15,
+        "y": 30
+      },
+      "targets": [
+        {
+          "refId": "Q143",
+          "expr": "time() - max by (task) (schedule_task_running_since_seconds{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",task=~\"$task\"} > 0)",
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "custom": {
+            "align": "auto",
+            "filterable": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "Value",
+            "desc": true
+          }
+        ],
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        }
+      },
+      "description": "Runs that started and have not finished. A process that died mid-task stays here \u2014 over an hour fires ScheduledTaskOverrunning."
     }
   ],
   "editable": true

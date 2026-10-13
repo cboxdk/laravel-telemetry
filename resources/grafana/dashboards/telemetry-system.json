@@ -107,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 190,
+      "id": 201,
       "type": "stat",
       "title": "CPU",
       "datasource": {
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "refId": "Q191",
+          "refId": "Q202",
           "expr": "system_cpu_utilization_ratio{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -168,7 +168,7 @@
       }
     },
     {
-      "id": 192,
+      "id": 203,
       "type": "stat",
       "title": "Memory",
       "datasource": {
@@ -183,7 +183,7 @@
       },
       "targets": [
         {
-          "refId": "Q193",
+          "refId": "Q204",
           "expr": "system_memory_utilization_ratio{system_memory_state=\"used\"} * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -229,7 +229,7 @@
       }
     },
     {
-      "id": 194,
+      "id": 205,
       "type": "stat",
       "title": "Load 1m",
       "datasource": {
@@ -244,7 +244,7 @@
       },
       "targets": [
         {
-          "refId": "Q195",
+          "refId": "Q206",
           "expr": "system_cpu_load_average_1m",
           "legendFormat": "__auto",
           "datasource": {
@@ -282,7 +282,7 @@
       }
     },
     {
-      "id": 196,
+      "id": 207,
       "type": "stat",
       "title": "Disk used",
       "datasource": {
@@ -297,7 +297,7 @@
       },
       "targets": [
         {
-          "refId": "Q197",
+          "refId": "Q208",
           "expr": "sum(system_filesystem_usage_bytes{system_filesystem_state=\"used\"}) / sum(system_filesystem_usage_bytes) * 100",
           "legendFormat": "__auto",
           "datasource": {
@@ -343,7 +343,7 @@
       }
     },
     {
-      "id": 198,
+      "id": 209,
       "type": "row",
       "title": "Host",
       "collapsed": false,
@@ -356,7 +356,7 @@
       "panels": []
     },
     {
-      "id": 200,
+      "id": 211,
       "type": "timeseries",
       "title": "Memory by state",
       "datasource": {
@@ -371,7 +371,7 @@
       },
       "targets": [
         {
-          "refId": "Q199",
+          "refId": "Q210",
           "expr": "system_memory_usage_bytes",
           "legendFormat": "{{system_memory_state}}",
           "datasource": {
@@ -458,7 +458,7 @@
       }
     },
     {
-      "id": 204,
+      "id": 215,
       "type": "timeseries",
       "title": "Load averages",
       "datasource": {
@@ -473,7 +473,7 @@
       },
       "targets": [
         {
-          "refId": "Q201",
+          "refId": "Q212",
           "expr": "system_cpu_load_average_1m",
           "legendFormat": "1m",
           "datasource": {
@@ -482,7 +482,7 @@
           }
         },
         {
-          "refId": "Q202",
+          "refId": "Q213",
           "expr": "system_cpu_load_average_5m",
           "legendFormat": "5m",
           "datasource": {
@@ -491,7 +491,7 @@
           }
         },
         {
-          "refId": "Q203",
+          "refId": "Q214",
           "expr": "system_cpu_load_average_15m",
           "legendFormat": "15m",
           "datasource": {
@@ -532,7 +532,7 @@
       }
     },
     {
-      "id": 206,
+      "id": 217,
       "type": "timeseries",
       "title": "Network I/O rate",
       "datasource": {
@@ -547,7 +547,7 @@
       },
       "targets": [
         {
-          "refId": "Q205",
+          "refId": "Q216",
           "expr": "rate(system_network_io_bytes_total[$__rate_interval])",
           "legendFormat": "{{network_io_direction}}",
           "datasource": {
@@ -588,7 +588,7 @@
       }
     },
     {
-      "id": 208,
+      "id": 219,
       "type": "timeseries",
       "title": "Monitored process groups",
       "datasource": {
@@ -603,7 +603,7 @@
       },
       "targets": [
         {
-          "refId": "Q207",
+          "refId": "Q218",
           "expr": "process_memory_rss_bytes",
           "legendFormat": "{{process}}",
           "datasource": {
@@ -645,7 +645,7 @@
       "description": "telemetry:monitor samples Reverb/Horizon/workers by pgrep pattern."
     },
     {
-      "id": 209,
+      "id": 220,
       "type": "row",
       "title": "Workers",
       "collapsed": false,
@@ -658,7 +658,7 @@
       "panels": []
     },
     {
-      "id": 211,
+      "id": 222,
       "type": "timeseries",
       "title": "Worker leak curves \u2014 p95 RSS after each job, by queue",
       "datasource": {
@@ -673,7 +673,7 @@
       },
       "targets": [
         {
-          "refId": "Q210",
+          "refId": "Q221",
           "expr": "histogram_quantile(0.95, sum by (le, queue) (rate(queue_worker_memory_rss_bytes_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{queue}}",
           "datasource": {
@@ -715,7 +715,7 @@
       "description": "A distribution that drifts upward over time IS the leak. Per-pid lines were dropped in 2.0: the pid label was unbounded and its series outlived every worker the OOM killer took."
     },
     {
-      "id": 212,
+      "id": 223,
       "type": "row",
       "title": "Telemetry health (self-observability)",
       "collapsed": false,
@@ -728,7 +728,7 @@
       "panels": []
     },
     {
-      "id": 214,
+      "id": 225,
       "type": "timeseries",
       "title": "Export outcomes / min",
       "datasource": {
@@ -743,7 +743,7 @@
       },
       "targets": [
         {
-          "refId": "Q213",
+          "refId": "Q224",
           "expr": "sum by (outcome) (rate(telemetry_export_count_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{outcome}}",
           "datasource": {
@@ -861,7 +861,7 @@
       "description": "The package reporting on itself. Sustained retryable/failed means the backend is unreachable."
     },
     {
-      "id": 216,
+      "id": 227,
       "type": "timeseries",
       "title": "Export p95 duration",
       "datasource": {
@@ -876,7 +876,7 @@
       },
       "targets": [
         {
-          "refId": "Q215",
+          "refId": "Q226",
           "expr": "histogram_quantile(0.95, sum by (le, signal) (rate(telemetry_export_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])))",
           "legendFormat": "{{signal}}",
           "datasource": {
@@ -917,7 +917,7 @@
       }
     },
     {
-      "id": 217,
+      "id": 228,
       "type": "stat",
       "title": "Circuit breaker",
       "datasource": {
@@ -932,7 +932,7 @@
       },
       "targets": [
         {
-          "refId": "Q218",
+          "refId": "Q229",
           "expr": "max(telemetry_export_circuit_open_ratio{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -975,7 +975,7 @@
       "description": "1 = OTLP circuit open (recent transport failure). Alert on sustained 1."
     },
     {
-      "id": 219,
+      "id": 230,
       "type": "stat",
       "title": "Spool depth",
       "datasource": {
@@ -990,7 +990,7 @@
       },
       "targets": [
         {
-          "refId": "Q220",
+          "refId": "Q231",
           "expr": "max(telemetry_spool_depth{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
