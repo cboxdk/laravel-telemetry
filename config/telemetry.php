@@ -283,6 +283,12 @@ return [
         // Inertia visit to the span that served it.
         'traceresponse' => env('TELEMETRY_TRACES_TRACERESPONSE', true),
 
+        // `Server-Timing` header: db / cache / redis time and counts, the
+        // package's own overhead and the time so far — shown by browser
+        // DevTools, read by telemetry-browser. Off by default: it tells
+        // the client how long the database took.
+        'server_timing' => env('TELEMETRY_TRACES_SERVER_TIMING', false),
+
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 

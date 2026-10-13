@@ -349,6 +349,31 @@ class TelemetryManager
     }
 
     /**
+     * Re-decide sampling for the active trace from application code —
+     * the `Sample` middleware's decision, where a route is the wrong place
+     * to make it:
+     *
+     *     if ($request->user()?->isAdmin()) {
+     *         Telemetry::sample(true);   // keep every admin trace
+     *     }
+     *     Telemetry::sample(0.01);       // or a rate
+     *
+     * Applies to the whole active trace from here on, the open root span
+     * included. Error spans still escape sampling when
+     * `traces.always_sample_errors` is on.
+     */
+    public function sample(bool|float $decision): void
+    {
+        if (! $this->enabled) {
+            return;
+        }
+
+        FailSafe::guard(fn () => is_bool($decision)
+            ? $this->tracer->resample($decision)
+            : $this->tracer->resampleAt($decision));
+    }
+
+    /**
      * Opt in to reading Laravel's own `Context` repository — what the app
      * put there with `Context::add()` — onto root spans, log records and
      * exception records as `laravel.context.*`. Hidden context

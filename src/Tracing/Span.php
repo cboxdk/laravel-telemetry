@@ -583,6 +583,17 @@ final class Span
         return $this->endUnixNano ?? $this->startUnixNano;
     }
 
+    /**
+     * Time since the span started — its duration once ended, the running
+     * time while still open (durationMs() reads 0 until then).
+     */
+    public function elapsedMs(): float
+    {
+        return $this->endUnixNano !== null
+            ? $this->durationMs()
+            : (hrtime(true) - $this->startMonotonic) / 1_000_000;
+    }
+
     public function durationMs(): float
     {
         return ($this->endUnixNano() - $this->startUnixNano) / 1_000_000;

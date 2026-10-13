@@ -343,6 +343,10 @@ cases and logs back to the trace:
 
 - **`X-Trace-Id` response header** on every traced request
   (`traces.response_header`, set null to disable).
+- **`Server-Timing` response header** (opt-in, `traces.server_timing`):
+  `db;dur=12.3;desc="3 queries", cache;…, redis;…, telemetry;dur=0.4,
+  app;dur=48.1` — shown by browser DevTools next to the network timing.
+  Off by default: it tells the client how long your database took.
 - **`traceresponse` response header** (W3C Trace Context Level 2):
   `00-<trace id>-<server span id>-<flags>`, so a client — telemetry-browser
   after an Inertia visit — can parent what follows to the span that served
@@ -394,6 +398,19 @@ Route::get('/health', HealthController::class)->middleware(Sample::never());
 Route::post('/checkout', ...)->middleware(Sample::always());
 Route::get('/feed', ...)->middleware(Sample::rate(0.01));
 ```
+
+
+From application code, where a route is the wrong place to decide —
+force-keep an admin's traces, say:
+
+```php
+if ($request->user()?->isAdmin()) {
+    Telemetry::sample(true);   // or a rate: Telemetry::sample(0.01)
+}
+```
+
+It re-decides the whole active trace from that point, the open root span
+included, exactly like the `Sample` middleware.
 
 ## Ignoring request paths
 
