@@ -18,9 +18,14 @@ goes through the `Cbox\Telemetry\Facades\Telemetry` facade.
 
 HTTP requests, queue jobs (dispatch counts, wait time), DB queries, cache,
 scheduled tasks, mail, notifications, outgoing `Http` client calls, reported
-exceptions, Livewire, Horizon, Reverb and Pennant are instrumented
-automatically. Do not add spans or counters for those. Instrument the
+exceptions, Livewire, Horizon, Reverb, Pennant and `laravel/ai` agents
+(`gen_ai.*` spans and token metrics) are instrumented automatically. Do not add spans or counters for those. Instrument the
 business meaning instead: "order placed", "invoice overdue", "import rows".
+
+A queued job is a child span of the request that dispatched it. For a job
+delayed by hours or fanned out by the thousand, implement
+`Cbox\Telemetry\Contracts\StartsLinkedTrace` (or list the class in
+`queue.linked_traces`): it starts its own trace, linked to the dispatch.
 
 ## 2. Pick the instrument
 

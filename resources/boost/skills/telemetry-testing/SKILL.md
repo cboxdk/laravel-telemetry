@@ -1,6 +1,6 @@
 ---
 name: telemetry-testing
-description: "Test telemetry with Telemetry::fake() from cboxdk/laravel-telemetry. Use when writing or fixing a Pest/PHPUnit test that asserts a counter, gauge, histogram, span or event was recorded, when a test should prove a label value or a cardinality budget, or when testing a telemetry provider or an exporter that rejects a batch."
+description: "Test telemetry with Telemetry::fake() from cboxdk/laravel-telemetry. Use when writing or fixing a Pest/PHPUnit test that asserts a counter, gauge, histogram, span or event was recorded, when a test should prove a label value or a cardinality budget, when a test should fail on too many queries, an N+1, duplicate or slow queries, or a slow request (performance budgets), or when testing a telemetry provider or an exporter that rejects a batch."
 license: MIT
 metadata:
   author: cboxdk
@@ -47,6 +47,38 @@ test at a real store or exporter.
 Labels in `assertCounterIncremented()` match exactly. A span exposes
 `attributes()`, `events()`, `status()` and `durationMs()`; an event exposes
 `$event->attributes`.
+
+## Performance budgets
+
+The fake records every query span, so a feature test can fail on a query
+budget. Each request is checked on its own:
+
+```php
+$fake = Telemetry::fake();
+
+$this->get('/orders');
+
+$fake->assertQueryCount('<=', 10);   // or assertQueryCount(3) for exactly 3
+$fake->assertNoNPlusOne();
+$fake->assertNoDuplicateQueries();
+$fake->assertNoSlowQueries();        // threshold defaults to slow_span_ms
+$fake->assertMaxDuration(200);       // ms, the request's root span
+```
+
+`budget()` checks a closure as one unit, across any number of requests, and
+fails on N+1 or duplicates unless allowed:
+
+```php
+$fake->budget(fn () => $this->get('/orders'), queries: 10, ms: 200);
+```
+
+Failures list each offending SQL shape with its count and app line. N+1 is
+flagged from 3 repeats; set `TELEMETRY_INSTRUMENT_QUERY_DUPLICATES_THRESHOLD=2`
+in `phpunit.xml` for stricter tests, and `TELEMETRY_INSTRUMENT_QUERY_ORIGIN=all`
+to get a code line on every query. With Pest, call
+`\Cbox\Telemetry\Testing\PestExpectations::register()` in `tests/Pest.php`
+for `toStayWithinBudget()`, `toQueryAtMost()`, `toHaveNoNPlusOne()` and
+`toHaveNoDuplicateQueries()`.
 
 ## When the label value is what you are testing
 

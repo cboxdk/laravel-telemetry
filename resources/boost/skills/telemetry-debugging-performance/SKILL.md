@@ -1,6 +1,6 @@
 ---
 name: telemetry-debugging-performance
-description: "Find out why a Laravel request or job is slow using the trace data cboxdk/laravel-telemetry records. Use when a page or endpoint is slow, when you suspect an N+1 or duplicate queries, when you need to compare a request before and after a fix, or when you need every trace and a CPU profile for one user, tenant, route or job for a while."
+description: "Find out why a Laravel request or job is slow using the trace data cboxdk/laravel-telemetry records. Use when a page or endpoint is slow, when you suspect an N+1 or duplicate queries or an API called once per row, when you need to compare a request before and after a fix, or when you need every trace and a CPU profile for one user, tenant, route or job for a while."
 license: MIT
 metadata:
   author: cboxdk
@@ -36,6 +36,7 @@ spans are trimmed:
 | `db.query.n_plus_one.count` | distinct N+1 query shapes |
 | `db.query.duplicate.count` | distinct queries repeated with identical values |
 | `db.query.slow.count` | queries at or over `traces.details.slow_span_ms` |
+| `http.client.n_plus_one.count` | distinct outgoing call shapes called once per id (HTTP N+1) |
 | `model.hydrations` | models hydrated (a proxy for loading too much) |
 | `laravel.routing_ms`, `laravel.middleware_ms`, `laravel.handler_ms`, `laravel.send_ms`, `laravel.terminate_ms` | which phase took the time |
 | `php.cpu.time_ms`, `php.memory.peak_bytes` | CPU and memory of this request |
@@ -66,6 +67,13 @@ In Tempo or Grafana:
 { span.db.query.n_plus_one.count > 0 && kind = server }
 { span.laravel.db.query.repeat = "n_plus_one" }
 ```
+
+The same holds for outgoing `Http` calls: one endpoint called once per id,
+one call after another (`GET /users/17`, `GET /users/42`, …), emits
+`http.client.n_plus_one_detected` with `url.template` and the app line.
+Flagged client spans carry `laravel.http.client.repeat = "n_plus_one"`.
+Fix: the API's batch endpoint, or `Http::pool()` (calls sent together are
+not flagged). Pagination is never flagged.
 
 Set `instrument.query_origin` to `all` locally if you want the app line on
 every query span, not only the flagged ones.
@@ -102,9 +110,10 @@ also emit a `profile.captured` event with the top functions.
 
 ## 6. Verify the fix with a test
 
-Write a test with `Telemetry::fake()` that asserts the N+1 is gone, e.g.
-`$fake->assertEventNotEmitted('db.query.n_plus_one_detected')` after
-exercising the endpoint (see the `telemetry-testing` skill). The query
+Write a test with `Telemetry::fake()` that asserts the N+1 is gone:
+`$fake->assertNoNPlusOne()` (and `assertQueryCount('<=', 10)`) after
+exercising the endpoint, or `$fake->assertEventNotEmitted('http.client.n_plus_one_detected')`
+for outgoing calls (see the `telemetry-testing` skill). The query
 listeners are only registered when telemetry is enabled, so the test
 environment must not set `TELEMETRY_ENABLED=false`.
 

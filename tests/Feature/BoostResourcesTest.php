@@ -105,7 +105,9 @@ it('names only facade methods, fake methods and commands that exist', function (
 
         preg_match_all('/Telemetry::([a-zA-Z]+)\(/', $content, $calls);
         foreach (array_unique($calls[1]) as $method) {
-            expect(method_exists(TelemetryManager::class, $method) || method_exists(Telemetry::class, $method))
+            // After Telemetry::fake() the facade resolves to the fake, so its
+            // assertions are facade calls too.
+            expect(method_exists(TelemetryManager::class, $method) || method_exists(Telemetry::class, $method) || method_exists(TelemetryFake::class, $method))
                 ->toBeTrue("{$name}: Telemetry::{$method}() does not exist");
         }
 
