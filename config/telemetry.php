@@ -954,6 +954,26 @@ return [
         // histogram by host/method/status.
         'http_client' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT', true),
 
+        // Flag an N+1 in outgoing calls: one endpoint SHAPE (method, host,
+        // path with ids taken out, query parameter names) called with
+        // different values, one call after another, `threshold` times in
+        // one trace — a per-row fetch in a loop. Reads (GET/HEAD) only;
+        // pagination (?page=, ?cursor=, …) and calls sent together through
+        // Http::pool are not N+1. Gives an `http.client.n_plus_one.count`
+        // root-span tally, an `http.client.requests.n_plus_one` counter and
+        // an `http.client.n_plus_one_detected` OTLP log event with the
+        // origin, fired once per shape per trace. Client spans carry
+        // `url.template` and `laravel.http.client.shape`; spans from the
+        // crossing on carry `laravel.http.client.repeat`.
+        'http_client_n_plus_one' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT_N_PLUS_ONE', true),
+        'http_client_n_plus_one_threshold' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT_N_PLUS_ONE_THRESHOLD', 3),
+
+        // Where in the app an outgoing call was made (code.file.path,
+        // code.line.number, code.function.name). 'flagged' = the call that
+        // crosses the N+1 threshold; 'all' = every client span (a
+        // backtrace per call); 'off' = never.
+        'http_client_origin' => env('TELEMETRY_INSTRUMENT_HTTP_CLIENT_ORIGIN', 'flagged'),
+
         // Break a client span's duration into its phases: DNS, TCP, the TLS
         // handshake, time-to-first-byte and the body coming back down, plus
         // the peer address, port and negotiated protocol version. Answers

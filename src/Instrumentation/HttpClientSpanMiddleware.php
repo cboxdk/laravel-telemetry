@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Instrumentation;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\HttpMethod;
 use Cbox\Telemetry\Support\HttpTransferTimings;
+use Cbox\Telemetry\Support\SourceLocator;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -48,12 +49,24 @@ use Throwable;
  */
 final class HttpClientSpanMiddleware
 {
-    public function __construct(private readonly Container $container) {}
+    /**
+     * @param  HttpClientRepeatDetector|null  $repeats  N+1 detection; null when it is off, and then nothing is shaped
+     * @param  string  $origin  QueryInstrumentation::ORIGIN_* — where code.* goes: the hop that crosses the N+1 threshold, every hop, or none
+     */
+    public function __construct(
+        private readonly Container $container,
+        private readonly ?HttpClientRepeatDetector $repeats = null,
+        private readonly string $origin = QueryInstrumentation::ORIGIN_FLAGGED,
+        private readonly string $basePath = '',
+    ) {}
 
     public function __invoke(callable $handler): callable
     {
         return function (RequestInterface $request, array $options) use ($handler) {
-            $span = FailSafe::guard(fn (): ?Span => $this->start($request));
+            $shape = null;
+            $span = FailSafe::guard(function () use ($request, &$shape): ?Span {
+                return $this->start($request, $shape);
+            });
 
             if (! $span instanceof Span) {
                 return $handler($request, $options);
@@ -66,12 +79,16 @@ final class HttpClientSpanMiddleware
             // can skip the rejection callback, and a handler can throw before
             // returning one at all.
             $settled = false;
-            $finish = function (?ResponseInterface $response, ?Throwable $error, bool $rejected = false) use (&$settled, $span, &$stats): void {
+            $finish = function (?ResponseInterface $response, ?Throwable $error, bool $rejected = false) use (&$settled, $span, &$stats, $shape): void {
                 if ($settled) {
                     return;
                 }
 
                 $settled = true;
+
+                if ($shape !== null) {
+                    FailSafe::guard(fn () => $this->repeats?->leave($shape));
+                }
 
                 FailSafe::guard(fn () => $this->end($span, $response, $error, $stats, $rejected));
             };
@@ -106,7 +123,7 @@ final class HttpClientSpanMiddleware
         };
     }
 
-    private function start(RequestInterface $request): ?Span
+    private function start(RequestInterface $request, ?string &$shape): ?Span
     {
         $telemetry = $this->telemetry();
 
@@ -114,6 +131,54 @@ final class HttpClientSpanMiddleware
             return null;
         }
 
+        $span = $this->open($telemetry, $request);
+
+        if ($this->repeats !== null) {
+            FailSafe::guard(function () use ($telemetry, $request, $span, &$shape) {
+                $this->detectRepeat($telemetry, $request, $span, $shape);
+            });
+        }
+
+        // Guarded on its own: the span is open by now, and a failure here
+        // must not leave it unowned.
+        if ($this->origin === QueryInstrumentation::ORIGIN_ALL && $span->sampled && ! isset($span->attributes()['code.file.path'])) {
+            FailSafe::guard(fn () => $span->setAttributes(SourceLocator::locate($this->basePath) ?? []));
+        }
+
+        return $span;
+    }
+
+    /**
+     * Shape the hop, and when it is the one that makes its shape an N+1,
+     * point it — and the event — at the app line that made the call. Here,
+     * at the START of the hop, because this is the only moment the app's
+     * frame is still on the stack: the hop ends in a promise callback.
+     */
+    private function detectRepeat(TelemetryManager $telemetry, RequestInterface $request, Span $span, ?string &$shape): void
+    {
+        $repeat = $this->repeats?->enter($telemetry, $request);
+
+        if ($repeat === null) {
+            return;
+        }
+
+        $shape = $repeat['shape'];
+        $span->setAttributes($repeat['attributes']);
+
+        if (! $repeat['crossed']) {
+            return;
+        }
+
+        $origin = $this->origin === QueryInstrumentation::ORIGIN_OFF
+            ? []
+            : SourceLocator::locate($this->basePath) ?? [];
+
+        $span->setAttributes($origin);
+        $this->repeats?->report($telemetry, $request, $repeat['shape'], $repeat['count'], $origin);
+    }
+
+    private function open(TelemetryManager $telemetry, RequestInterface $request): Span
+    {
         $uri = $request->getUri();
         $host = $uri->getHost() !== '' ? $uri->getHost() : 'unknown';
         $path = $uri->getPath() !== '' ? $uri->getPath() : '/';
