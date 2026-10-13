@@ -43,6 +43,7 @@ use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
+use Cbox\Telemetry\Instrumentation\HttpClientRepeatDetector;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
 use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
 use Cbox\Telemetry\Instrumentation\InstrumentedControllerDispatcher;
@@ -1321,7 +1322,14 @@ class TelemetryServiceProvider extends ServiceProvider
             // A Guzzle middleware rather than event listeners, because the
             // events cannot say which call a redirect hop belongs to. See
             // HttpClientSpanMiddleware.
-            $this->app->make(HttpFactory::class)->globalMiddleware(new HttpClientSpanMiddleware($this->app));
+            $this->app->make(HttpFactory::class)->globalMiddleware(new HttpClientSpanMiddleware(
+                $this->app,
+                $config->get('telemetry.instrument.http_client_n_plus_one', true)
+                    ? new HttpClientRepeatDetector(Cast::int($config->get('telemetry.instrument.http_client_n_plus_one_threshold'), 3))
+                    : null,
+                Cast::string($config->get('telemetry.instrument.http_client_origin'), QueryInstrumentation::ORIGIN_FLAGGED),
+                $this->app->basePath(),
+            ));
         }
 
         if ($config->get('telemetry.instrument.exceptions', true)) {

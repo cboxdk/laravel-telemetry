@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Span links export their sampled flag.** OTLP links now carry `flags`
   when the linked context's sampled flag is known, including the link an
   edge request makes under `traces.continue_incoming_parent=false`.
+- **N+1 outgoing HTTP calls.** One endpoint called once per id, one call
+  after another — `GET /users/17`, `GET /users/42`, … — is flagged the way
+  an N+1 query is. Calls are grouped by shape: method, host, the path with
+  id-like segments (numbers, UUIDs, ULIDs, hex digests, prefixed tokens)
+  as `{id}`, and query parameter names without values. Reads only;
+  pagination (`?page=`, `?cursor=`, `/page/2`, …), repeats of the same URL
+  and calls sent together through `Http::pool` are not N+1. Gives an
+  `http.client.n_plus_one_detected` event with the app line that made the
+  call, an `http.client.requests.n_plus_one` counter and an
+  `http.client.n_plus_one.count` root tally; client spans carry
+  `url.template` and `laravel.http.client.shape`, flagged ones
+  `laravel.http.client.repeat`, and `traces.details = tail` keeps such
+  traces' detail spans (`instrument.http_client_n_plus_one`,
+  `instrument.http_client_n_plus_one_threshold`,
+  `instrument.http_client_origin`).
 
 ## [3.5.0] - 2026-10-13
 

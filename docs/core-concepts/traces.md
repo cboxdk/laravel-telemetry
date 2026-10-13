@@ -48,7 +48,7 @@ started while another is active becomes its child.
 | Redis connects | `redis.connect` (client) — the handshake; connections telemetry itself uses (redis store, redis spool) skipped | `instrument.redis_connect` |
 | Cache counters | `cache.operations{operation,store}` | `instrument.cache` (off by default) |
 | Cache timeline spans | `cache.hit`/`miss`/`write`/`forget` with key + duration | `instrument.cache_spans` (off by default) |
-| Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host | `instrument.http_client` |
+| Outgoing HTTP | `GET api.stripe.com` (client) + duration histogram by host; [N+1 calls](#n1-outgoing-calls) flagged | `instrument.http_client` |
 | Reported exceptions | `exceptions.reported{exception}` counter + span event — includes HANDLED report()s | `instrument.exceptions` |
 
 Request root spans are named `METHOD /route/{pattern}` by default.
@@ -141,6 +141,56 @@ even when every query in it was fast.
 
 Root spans also count slow queries (≥ `traces.details.slow_span_ms`) as
 `db.query.slow.count`, so "which traces have a slow query" is one search.
+
+## N+1 outgoing calls
+
+The same loop that runs a query per row can make an API call per row:
+`GET /users/17`, `GET /users/42`, … one after another. Outgoing client
+spans are grouped by *shape* the way queries are
+(`instrument.http_client_n_plus_one`, default on; threshold
+`instrument.http_client_n_plus_one_threshold`, default 3):
+
+- **The shape** is the method, the host (and port), the path with id-like
+  segments replaced by `{id}`, and the sorted query parameter *names*
+  without their values: `GET api.example.com/users/{id}?include`. An id is
+  a number or date, a UUID, a ULID, a hex digest (16+ chars), a
+  Stripe-style token (`cus_NffrFeUfNV2Hib`), a long letters-and-digits
+  token or an email address; `v2`, `oauth2` and other names stay as they
+  are, and `/orders/17.json` is `/orders/{id}.json`. Every client span
+  carries `laravel.http.client.shape` (16 hex) and `url.template`
+  (`/users/{id}`).
+- **N+1** is one shape called with *different* URLs, *one after another*,
+  `threshold` times in one trace. Reads only (`GET`/`HEAD`) — a loop of
+  `POST`s is a missing bulk endpoint, not N+1. The same URL again is a
+  retry or a missing cache, not a per-row fetch. Calls sent together
+  through `Http::pool` are the fix, so a call that starts while another of
+  its shape is in flight is not counted. Pagination is not N+1: a paging
+  query parameter (`page`, `cursor`, `offset`, `after`/`before`,
+  `starting_after`, `page_token`/`pageToken`, `since_id`/`max_id`,
+  `page[…]`, …) or a `/page/2` path exempts the call.
+
+| Signal | |
+|---|---|
+| `http.client.n_plus_one_detected` event | once per shape per trace, at the crossing: `http.request.method`, `server.address`, `url.template`, `url.full`, `laravel.http.client.shape`, `http.client.repeat_count`, `code.*` |
+| `http.client.requests.n_plus_one{server.address}` counter | the host label goes through `Telemetry::classifyHttpHostsUsing()`, like the duration histogram |
+| `http.client.n_plus_one.count` | root-span tally |
+| `laravel.http.client.repeat = "n_plus_one"` | on client spans from the crossing onward |
+
+The crossing call — and the event — get `code.file.path`,
+`code.line.number` and `code.function.name` for the app line that made
+the call. `instrument.http_client_origin` decides which client spans pay
+for the backtrace: `flagged` (default, the crossing call), `all` (every
+call) or `off`. Under `traces.details = tail`, a trace with an N+1 of
+outgoing calls keeps its detail spans.
+
+```traceql
+{ span.laravel.http.client.repeat = "n_plus_one" }
+{ span.http.client.n_plus_one.count > 0 && kind = server }
+```
+
+The shape is taken from the request as the app built it; a
+`withRequestMiddleware()` callback that rewrites the URL afterwards is
+not seen by it.
 
 ## What telemetry itself cost
 

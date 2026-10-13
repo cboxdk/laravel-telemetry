@@ -1470,8 +1470,9 @@ class TelemetryManager
      * A trace keeps its detail spans (cache ops, queries) when it has an
      * error span, any span at/over slow_request_ms, or a DETAIL span
      * at/over slow_span_ms (a slow query makes its trace interesting), or
-     * a repeated query (N+1 or duplicate) — the trace that shows the loop
-     * is the one worth keeping, even when every query in it was fast.
+     * a repeated query (N+1 or duplicate) or an N+1 of outgoing calls —
+     * the trace that shows the loop is the one worth keeping, even when
+     * every call in it was fast.
      *
      * @param  list<Span>  $spans
      * @return list<Span>
@@ -1491,6 +1492,7 @@ class TelemetryManager
                 || $span->durationMs() >= $this->slowRequestMs
                 || ($span->isDetail() && $span->durationMs() >= $this->slowSpanMs)
                 || ($span->isDetail() && isset($span->attributes()['laravel.db.query.repeat']))
+                || isset($span->attributes()['laravel.http.client.repeat'])
                 // Recorded on purpose — a directive asked for this slice.
                 || isset($span->attributes()['telemetry.directive'])
             ) {
