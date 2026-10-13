@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-10-13
+
 ### Fixed
 
 - **A stray histogram bucket field in Redis is ignored.** A `b-1` field
