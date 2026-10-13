@@ -114,6 +114,11 @@ way it can in Node or Python. The ecosystem has two standard answers:
 | `event()` | in-memory only |
 | Observable gauge | zero until scrape/flush |
 | Disabled (`TELEMETRY_ENABLED=false`) | ~zero: no listeners, no-op instruments |
+| Query repeat detection + shape | ~1–2 µs per query on top of the span (shape hash memoized per statement text) |
+| Query origin (`code.*`) | one bounded backtrace — only for slow queries and the crossing occurrence of a repeated one by default |
+
+Every root span reports what the hooks cost that trace as
+`telemetry.overhead_ms` — see [Traces](../core-concepts/traces.md#what-telemetry-itself-cost).
 
 ### Measured per-operation, not reasoned
 

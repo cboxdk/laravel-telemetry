@@ -62,6 +62,7 @@ final class TelemetryLogHandler extends AbstractProcessingHandler
                 name: $record->message,
                 timeUnixNano: (int) ((float) $record->datetime->format('U.u') * 1e9),
                 attributes: $telemetry->contextAttributes()
+                    + $telemetry->laravelContextAttributes()
                     + ['log.channel' => $record->channel]
                     + $this->contextAttributes($record->context),
                 traceId: $span->traceId ?? $telemetry->traceId(),

@@ -349,6 +349,68 @@ class TelemetryManager
     }
 
     /**
+     * Opt in to reading Laravel's own `Context` repository — what the app
+     * put there with `Context::add()` — onto root spans, log records and
+     * exception records as `laravel.context.*`. Hidden context
+     * (`addHidden`) is never read: hiding it is the app saying so.
+     *
+     * Not the same as Telemetry::context(): that is the package's own
+     * dimension set, deliberately small. Laravel's Context is whatever the
+     * app keeps there, so it is limited to the listed keys (empty = all),
+     * to MAX_LARAVEL_CONTEXT_KEYS of them, and stays off metric labels.
+     *
+     * @param  list<string>  $only
+     */
+    public function captureLaravelContext(array $only = []): void
+    {
+        $this->laravelContextKeys = $only;
+        $this->tracer->enrichRootWith(fn (): array => $this->laravelContextAttributes());
+    }
+
+    /**
+     * @return array<string, scalar|null>
+     */
+    public function laravelContextAttributes(): array
+    {
+        $keys = $this->laravelContextKeys;
+
+        if ($keys === null || ! class_exists(Context::class)) {
+            return [];
+        }
+
+        return FailSafe::guard(function () use ($keys): array {
+            $values = Context::all();
+
+            // Ours — the trace id is already on everything.
+            unset($values['trace_id']);
+
+            if ($keys !== []) {
+                $values = array_intersect_key($values, array_flip($keys));
+            }
+
+            $attributes = [];
+
+            foreach (array_slice($values, 0, self::MAX_LARAVEL_CONTEXT_KEYS, true) as $key => $value) {
+                $name = 'laravel.context.'.trim((string) preg_replace('/[^a-z0-9._]+/', '_', Str::snake((string) $key)), '_');
+
+                if ($value === null || is_scalar($value)) {
+                    $attributes[$name] = $value;
+
+                    continue;
+                }
+
+                // Redacted BEFORE encoding — see TelemetryLogHandler.
+                $value = is_array($value) ? $this->redactStructure($value) : $value;
+                $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+
+                $attributes[$name] = $encoded === false ? get_debug_type($value) : $encoded;
+            }
+
+            return $attributes;
+        }) ?? [];
+    }
+
+    /**
      * @return array<string, scalar>
      */
     public function contextAttributes(): array
@@ -363,6 +425,12 @@ class TelemetryManager
      * @var WeakMap<Throwable, array<string, scalar|null>>|null
      */
     private ?WeakMap $failureContext = null;
+
+    /** Laravel Context keys read per record — a ceiling, not a target. */
+    private const MAX_LARAVEL_CONTEXT_KEYS = 32;
+
+    /** @var list<string>|null null = Laravel Context is not read */
+    private ?array $laravelContextKeys = null;
 
     /**
      * Keep the current dimensions for whoever reports THIS throwable.
@@ -1265,7 +1333,9 @@ class TelemetryManager
      *
      * A trace keeps its detail spans (cache ops, queries) when it has an
      * error span, any span at/over slow_request_ms, or a DETAIL span
-     * at/over slow_span_ms (a slow query makes its trace interesting).
+     * at/over slow_span_ms (a slow query makes its trace interesting), or
+     * a repeated query (N+1 or duplicate) — the trace that shows the loop
+     * is the one worth keeping, even when every query in it was fast.
      *
      * @param  list<Span>  $spans
      * @return list<Span>
@@ -1284,6 +1354,7 @@ class TelemetryManager
                 $span->status() === SpanStatus::Error
                 || $span->durationMs() >= $this->slowRequestMs
                 || ($span->isDetail() && $span->durationMs() >= $this->slowSpanMs)
+                || ($span->isDetail() && isset($span->attributes()['laravel.db.query.repeat']))
             ) {
                 $interesting[$span->traceId] = true;
             }

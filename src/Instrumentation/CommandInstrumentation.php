@@ -62,6 +62,8 @@ final class CommandInstrumentation implements ManagesRequestState
         FailSafe::guard(function () use ($event) {
             $command = $event->command ?? 'unknown';
 
+            $this->continueFromEnvironment();
+
             $span = $this->telemetry()->tracer()->startSpan(
                 'artisan '.$command,
                 attributes: ['laravel.command' => $command],
@@ -80,6 +82,31 @@ final class CommandInstrumentation implements ManagesRequestState
                 }
             }
         });
+    }
+
+    /**
+     * A command started by another process — `Process::run('php artisan …')`
+     * from a request, a job or another command — continues that process's
+     * trace from `TRACEPARENT`, OpenTelemetry's environment carrier. Only
+     * for the outermost command and only when no trace is active yet: an
+     * `Artisan::call()` inside a request is already in the right trace.
+     *
+     * The variable comes from the parent process on the same host, so its
+     * sampling decision is trusted the way a queue payload's is.
+     */
+    private function continueFromEnvironment(): void
+    {
+        if ($this->stack !== []
+            || $this->telemetry()->traceId() !== null
+            || ! config('telemetry.traces.continue_from_environment', true)) {
+            return;
+        }
+
+        $traceparent = getenv('TRACEPARENT');
+
+        if (is_string($traceparent) && $traceparent !== '') {
+            $this->telemetry()->continueTrace($traceparent);
+        }
     }
 
     private function commandFinished(CommandFinished $event): void

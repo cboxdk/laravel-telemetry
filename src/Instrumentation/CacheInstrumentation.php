@@ -7,6 +7,7 @@ namespace Cbox\Telemetry\Instrumentation;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\Overhead;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Closure;
@@ -208,7 +209,7 @@ final class CacheInstrumentation implements ManagesRequestState
 
     private function complete(string $operation, ?string $store, string $key): void
     {
-        FailSafe::guard(function () use ($operation, $store, $key) {
+        Overhead::measure(fn () => FailSafe::guard(function () use ($operation, $store, $key) {
             if (in_array($store ?? 'default', $this->ignoreStores, true)) {
                 return;
             }
@@ -276,7 +277,7 @@ final class CacheInstrumentation implements ManagesRequestState
 
             $telemetry->tracer()->bumpStat('cache.event.count', 1);
             $telemetry->tracer()->bumpStat('cache.event.time_ms', $durationMs);
-        });
+        }));
     }
 
     public function flushRequestState(): void

@@ -6,6 +6,7 @@ namespace Cbox\Telemetry\Tracing;
 
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\Ids;
+use Cbox\Telemetry\Support\Overhead;
 use Cbox\Telemetry\Support\TraceParent;
 use Closure;
 use Throwable;
@@ -47,6 +48,9 @@ final class Tracer
 
     /** @var array<string, float> tallies attached to the root span when it ends */
     private array $traceStats = [];
+
+    /** @var (Closure(): array<string, scalar|null>)|null */
+    private ?Closure $rootEnricher = null;
 
     /**
      * A mid-trace re-decision (per-route Sample middleware). Overrides
@@ -561,6 +565,20 @@ final class Tracer
         $this->suppressed = false;
         $this->contextAttributes = [];
         $this->traceStats = [];
+        Overhead::reset();
+    }
+
+    /**
+     * Attributes to add to every ROOT span as it ends — read at that
+     * moment, so whatever the unit of work put there along the way is
+     * included. Guarded: an enricher that throws costs its attributes,
+     * never the span.
+     *
+     * @param  (Closure(): array<string, scalar|null>)|null  $enricher
+     */
+    public function enrichRootWith(?Closure $enricher): void
+    {
+        $this->rootEnricher = $enricher;
     }
 
     /**
@@ -609,6 +627,10 @@ final class Tracer
             array_splice($this->stack, (int) $index, 1);
         }
 
+        // Taken whether or not the root is exported, so an unsampled trace's
+        // hook time does not leak into the next trace's figure.
+        $overheadMs = $this->stack === [] ? Overhead::takeMs() : 0.0;
+
         // A suppressed unit exports nothing — no error escape either.
         if ($this->suppressed) {
             return;
@@ -630,6 +652,14 @@ final class Tracer
         // begun under one tenant carried the next tenant's user.
         if ($this->contextAttributes !== [] && ! $span->hasCapturedContext()) {
             $span->mergeMissingAttributes($this->contextAttributes);
+        }
+
+        if ($this->stack === [] && $this->rootEnricher !== null) {
+            $span->mergeMissingAttributes(FailSafe::guard($this->rootEnricher) ?? []);
+        }
+
+        if ($overheadMs > 0.0) {
+            $this->traceStats['telemetry.overhead_ms'] = $overheadMs;
         }
 
         // The root just ended: attach the per-trace tallies.

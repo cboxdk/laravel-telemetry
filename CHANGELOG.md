@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+`db.query.duplicate_detected` and `db.queries.duplicated` now mean
+*identical* SQL **and** values. A query that repeats with different
+values — the classic N+1 — moves to the new `db.query.n_plus_one_detected`
+event and `db.queries.n_plus_one` counter. Dashboards or alerts that read
+the duplicate signals as "N+1" should add the new ones.
+
+### Added
+
+- **N+1 told apart from duplicates.** Repeated reads with the same SQL
+  *shape* and different values are N+1 (eager load them); the same SQL
+  with the same values is a duplicate (memoize it). The shape takes
+  literals out and collapses `in (…)` lists, so `whereIn()` over 3 ids and
+  over 5 are one query. Query spans carry `laravel.db.query.shape`, and
+  `laravel.db.query.repeat` once they are part of a repeat; root spans
+  get `db.query.n_plus_one.count` and `db.query.slow.count`. Under `traces.details = tail`, a trace
+  with a repeated query keeps its detail spans.
+- **Where a query came from.** `code.file.path`, `code.line.number` and
+  `code.function.name` — the first frame outside `vendor/` — on slow and
+  repeated queries and on both events (`instrument.query_origin`:
+  `flagged` by default, `all`, `off`).
+- **`telemetry.overhead_ms` on root spans:** the time the package's own
+  per-operation hooks and request middleware took in that trace.
+- **Request labels.** `X-Telemetry-Label: before-fix` lands on the root
+  span — and every span and dispatched job of that request — as
+  `laravel.trace.label`, for before/after comparison
+  (`traces.label_header`).
+- **`TRACEPARENT` for child processes.** Processes started through the
+  `Process` facade get it in their environment, and an artisan command
+  started with it continues the trace as a child
+  (`traces.propagate_to_processes`, `traces.continue_from_environment`).
+- **`traceresponse` response header** (W3C Trace Context Level 2) next to
+  `X-Trace-Id`, so telemetry-browser can parent requests after an Inertia
+  visit to the server span (`traces.traceresponse`). `@telemetryBrowser`
+  passes a renamed `traces.response_header` to the SDK as
+  `data-trace-header`.
+- **Laravel Context, opt-in.** `instrument.laravel_context` reads the
+  app's `Context` (never hidden context) onto root spans, log records and
+  exception records as `laravel.context.*`
+  (`instrument.laravel_context_keys` to limit it).
+
 ## [3.4.0] - 2026-10-13
 
 ### Changed
