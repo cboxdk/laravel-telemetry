@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Incoming baggage is deny-by-default.** Every member of an incoming
+  W3C `baggage` header used to become a context dimension, so it landed
+  on every span of the request and its jobs. Browser SDKs, gateways and
+  API clients put their own state there (`sentry-*`, `UserId`, `email`,
+  `session.id`, correlation ids), which put personal data on spans. Now
+  only keys listed in the new `instrument.baggage_keys`
+  (`TELEMETRY_INSTRUMENT_BAGGAGE_KEYS`, `Str::is()` globs) are admitted,
+  and a member whose value holds an email address is dropped even when
+  its key is allowed. Services that relied on inheriting a caller's
+  dimensions must list them; see UPGRADE.md.
+
 ## [3.6.1] - 2026-10-13
 
 ### Fixed

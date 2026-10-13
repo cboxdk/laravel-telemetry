@@ -1066,6 +1066,19 @@ return [
         // Outgoing: Http::withTraceparent() attaches both headers.
         'baggage' => env('TELEMETRY_INSTRUMENT_BAGGAGE', true),
 
+        // Which incoming baggage members are admitted into context. Deny
+        // by default: anything that calls this app can send a baggage
+        // header, and browser SDKs, gateways and customers' HTTP clients
+        // fill it with their own state (sentry-*, UserId, email,
+        // session.id, …) — personal data that would otherwise land on
+        // every span of the request. List the dimensions your own
+        // services propagate. Str::is() globs, so `team.*` works. A
+        // member whose value holds an email address is dropped even
+        // when its key is allowed.
+        'baggage_keys' => env('TELEMETRY_INSTRUMENT_BAGGAGE_KEYS') === null
+            ? []
+            : array_values(array_filter(array_map('trim', explode(',', (string) env('TELEMETRY_INSTRUMENT_BAGGAGE_KEYS'))))),
+
         // Livewire component lifecycle via laravel/livewire's own
         // ComponentHook API. mount/hydrate have no "after" phase in that
         // API (our hook is one peer listener, not a wrapper) so they're

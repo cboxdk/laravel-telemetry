@@ -1,5 +1,24 @@
 # Upgrading
 
+## Incoming baggage needs an allowlist (unreleased)
+
+An incoming W3C `baggage` header no longer copies its members into
+`Telemetry::context()` wholesale. Only keys you list are admitted:
+
+```dotenv
+TELEMETRY_INSTRUMENT_BAGGAGE_KEYS=team.id,tenant.*,plan
+```
+
+or, in a published config, `'baggage_keys' => ['team.id', 'tenant.*', 'plan']`
+under `instrument`. The default is an empty list, which admits nothing.
+
+**Who needs to act:** a service that receives calls from your own
+services through `Http::withTraceparent()` and relies on inheriting the
+caller's dimensions (`team.id` on the downstream spans). List those
+keys. Nobody else does: what you lose is whatever third parties put in
+the header, which is what this change is for. A member whose value
+holds an email address is dropped even when its key is allowed.
+
 ## 2.x → 3.0
 
 Three changes need your hands on a dashboard. Nothing else in this guide

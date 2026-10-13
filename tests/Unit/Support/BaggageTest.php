@@ -62,3 +62,19 @@ it('caps the number of members at 180', function () {
 
     expect(count(Baggage::parse(Baggage::encode($attributes))))->toBeLessThanOrEqual(180);
 });
+
+it('admits nothing when no keys are allowed', function () {
+    expect(Baggage::admit(['team.id' => '42', 'email' => 'jane@example.com'], []))->toBe([]);
+});
+
+it('admits only members whose key matches an allowed key or glob', function () {
+    $members = ['team.id' => '42', 'tenant.id' => '7', 'sentry-public_key' => 'abc', 'UserId' => '1234'];
+
+    expect(Baggage::admit($members, ['team.id', 'tenant.*']))->toBe(['team.id' => '42', 'tenant.id' => '7']);
+});
+
+it('drops an admitted member whose value contains an email address', function () {
+    $members = ['team.id' => '42', 'note' => 'from Jane <jane@example.com>'];
+
+    expect(Baggage::admit($members, ['*']))->toBe(['team.id' => '42']);
+});

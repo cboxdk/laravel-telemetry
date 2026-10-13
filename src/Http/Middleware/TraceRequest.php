@@ -139,8 +139,12 @@ final class TraceRequest
             // dimensions (team, tenant, plan, …), not just the trace id —
             // gated on the same trust boundary as continuing the trace
             // itself, since baggage is caller-supplied, unvalidated data.
+            // Only the keys the app allows are admitted; see Baggage::admit().
             if (config('telemetry.instrument.baggage', true) && config('telemetry.traces.continue_incoming')) {
-                $baggage = Baggage::parse($request->headers->get('baggage'));
+                $baggage = Baggage::admit(
+                    Baggage::parse($request->headers->get('baggage')),
+                    Cast::stringList(config('telemetry.instrument.baggage_keys', [])),
+                );
 
                 if ($baggage !== []) {
                     $this->telemetry->context($baggage);
