@@ -107,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 181,
+      "id": 192,
       "type": "stat",
       "title": "Mail sent / h",
       "datasource": {
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "refId": "Q182",
+          "refId": "Q193",
           "expr": "sum(increase(mail_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -160,7 +160,7 @@
       }
     },
     {
-      "id": 183,
+      "id": 194,
       "type": "stat",
       "title": "Notifications / h",
       "datasource": {
@@ -175,7 +175,7 @@
       },
       "targets": [
         {
-          "refId": "Q184",
+          "refId": "Q195",
           "expr": "sum(increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -213,7 +213,7 @@
       }
     },
     {
-      "id": 186,
+      "id": 197,
       "type": "timeseries",
       "title": "Notifications by channel",
       "datasource": {
@@ -228,7 +228,7 @@
       },
       "targets": [
         {
-          "refId": "Q185",
+          "refId": "Q196",
           "expr": "sum by (channel) (increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval]))",
           "legendFormat": "{{channel}}",
           "datasource": {
@@ -269,7 +269,7 @@
       }
     },
     {
-      "id": 187,
+      "id": 198,
       "type": "table",
       "title": "By notification class (1h)",
       "datasource": {
@@ -284,7 +284,7 @@
       },
       "targets": [
         {
-          "refId": "Q188",
+          "refId": "Q199",
           "expr": "sum by (notification) (increase(notifications_sent_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -331,7 +331,7 @@
       }
     },
     {
-      "id": 189,
+      "id": 200,
       "type": "table",
       "title": "Send spans (mail + notifications)",
       "datasource": {

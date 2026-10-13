@@ -104,7 +104,8 @@ anonymous access.
 A bundled Prometheus rule file
 (`resources/grafana/alerts/telemetry-alerts.yaml`) fires on the same
 metrics the dashboards chart — request 5xx rate and p95 latency, exception
-spikes, queue failures and backlog, scheduled-task failures, outgoing-HTTP
+spikes, queue failures and backlog, scheduled tasks (failing, missed,
+overrunning, starting late, scheduler stopped), outgoing-HTTP
 failures, and a pipeline self-check (export failing / no telemetry). Rules
 are scoped per service + environment; thresholds are sensible defaults you
 tune to your SLOs.

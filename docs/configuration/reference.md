@@ -315,6 +315,7 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.resources_process` | `TELEMETRY_INSTRUMENT_RESOURCES_PROCESS` | unset → decide by platform. Adds real RSS + CPU utilization from cboxdk/system-metrics, which reads `/proc` on Linux (microseconds) and shells out to `ps` elsewhere (~28ms, twice per request). Taken only where it is cheap; set `true`/`false` to override |
 | `instrument.profiling` | `TELEMETRY_INSTRUMENT_PROFILING` | `true` — CPU profiling via cboxdk/telemetry-native, or ext-excimer as a fallback; a silent no-op without either. See [Profiling](#profiling) below |
 | `instrument.scheduled_tasks` | `TELEMETRY_INSTRUMENT_SCHEDULED_TASKS` | `true` — task spans + processed/failed/skipped counters |
+| `instrument.schedule_monitoring` | `TELEMETRY_INSTRUMENT_SCHEDULE_MONITORING` | `true` — due / last-seen / running-since gauges + `schedule.task.start_delay` for missed, late and overrunning alerts. See [Scheduled task monitoring](../cookbook/scheduled-task-monitoring.md) |
 | `instrument.views` | `TELEMETRY_INSTRUMENT_VIEWS` | `true` — nested render spans per Blade/PHP view/partial/component (detail-marked); `view.render.count` tally on the root span |
 | `instrument.session` | `TELEMETRY_INSTRUMENT_SESSION` | `true` — `session.driver` + `session.hash` (truncated sha256, never the raw id) on request spans; journey queries via TraceQL |
 | `instrument.cache` | `TELEMETRY_INSTRUMENT_CACHE` | `false` — cache.operations counters (hit/miss/write/forget) |

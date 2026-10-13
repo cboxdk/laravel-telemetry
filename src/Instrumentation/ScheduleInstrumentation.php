@@ -13,13 +13,19 @@ use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Cron\CronExpression;
+use DateTimeImmutable;
+use DateTimeZone;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Events\ScheduledBackgroundTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Console\Events\ScheduledTaskFinished;
 use Illuminate\Console\Events\ScheduledTaskSkipped;
 use Illuminate\Console\Events\ScheduledTaskStarting;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Contracts\Foundation\Application;
 
 /**
  * Scheduled task monitoring: a span per task run with duration, peak
@@ -31,6 +37,16 @@ use Illuminate\Contracts\Events\Dispatcher;
  * pollution between tasks. Tasks with runInBackground() finish in a
  * separate process (`schedule:finish`) and are deliberately not spanned
  * here — counting them would double-collect.
+ *
+ * Monitoring (`instrument.schedule_monitoring`): the outcome counters say
+ * how the runs that HAPPENED went. They cannot say a task did not run at
+ * all — a missed task produces no event. So every `schedule:run` also
+ * publishes, per task, when cron last said it was due, and every start or
+ * skip records when the task was last seen; the gap between the two is
+ * "missed", and a start with no finish is "running since". The bundled
+ * alert rules turn these gauges into missed / overrunning / scheduler-
+ * stopped alerts. Gauges, in the shared store, because the question is
+ * asked by Prometheus long after the process that knew the answer exited.
  */
 final class ScheduleInstrumentation
 {
@@ -52,8 +68,16 @@ final class ScheduleInstrumentation
         return $this->container->make(NativeProfiler::class);
     }
 
-    public function register(Dispatcher $events): void
+    private bool $monitor = true;
+
+    public function register(Dispatcher $events, bool $monitor = true): void
     {
+        $this->monitor = $monitor;
+
+        if ($monitor) {
+            $events->listen(CommandStarting::class, $this->commandStarting(...));
+        }
+
         $events->listen(ScheduledTaskStarting::class, $this->taskStarting(...));
         $events->listen(ScheduledTaskFinished::class, $this->taskFinished(...));
         $events->listen(ScheduledTaskFailed::class, $this->taskFailed(...));
@@ -79,6 +103,8 @@ final class ScheduleInstrumentation
     {
         FailSafe::guard(function () use ($event) {
             $exit = $event->task->exitCode;
+
+            $this->markFinished($this->taskName($event->task), $exit === 0);
             $outcome = $exit === null ? 'unknown' : ($exit === 0 ? 'processed' : 'failed');
 
             $this->telemetry()
@@ -92,6 +118,10 @@ final class ScheduleInstrumentation
 
     private function taskStarting(ScheduledTaskStarting $event): void
     {
+        // Before the background early-return: a background task starts
+        // here too, and it is due like any other.
+        FailSafe::guard(fn () => $this->markStarted($event->task));
+
         if ($event->task->runInBackground) {
             return;
         }
@@ -106,7 +136,7 @@ final class ScheduleInstrumentation
                 'schedule.task' => $name,
                 'schedule.cron' => $event->task->expression,
                 'schedule.timezone' => match (true) {
-                    $event->task->timezone instanceof \DateTimeZone => $event->task->timezone->getName(),
+                    $event->task->timezone instanceof DateTimeZone => $event->task->timezone->getName(),
                     is_string($event->task->timezone) => $event->task->timezone,
                     default => Cast::string(config('app.timezone'), 'UTC'),
                 },
@@ -153,6 +183,11 @@ final class ScheduleInstrumentation
             $this->telemetry()
                 ->counter('schedule.tasks.skipped', 'Scheduled task runs skipped by filters or overlap locks')
                 ->inc(1, ['task' => $this->taskName($event->task)]);
+
+            // A skip is the scheduler deciding, not the scheduler missing it.
+            if ($this->monitor) {
+                $this->seen($this->taskName($event->task));
+            }
         });
 
         FailSafe::guard(fn () => $this->telemetry()->flush());
@@ -207,6 +242,8 @@ final class ScheduleInstrumentation
             $this->telemetry()
                 ->counter("schedule.tasks.{$outcome}", 'Scheduled task runs by outcome')
                 ->inc(1, $labels);
+
+            $this->markFinished($running['name'], $outcome === 'processed');
         });
 
         // Whatever happened above — including a throw the guard swallowed
@@ -227,6 +264,135 @@ final class ScheduleInstrumentation
         // it costs every task after it in tonight's run.
         FailSafe::guard(fn () => $this->telemetry()->flush());
         FailSafe::guard(fn () => $this->telemetry()->resetContext());
+    }
+
+    /**
+     * `schedule:run` is starting: publish when each task was last due.
+     */
+    private function commandStarting(CommandStarting $event): void
+    {
+        if ($event->command !== 'schedule:run') {
+            return;
+        }
+
+        FailSafe::guard(function () {
+            $telemetry = $this->telemetry();
+            $now = time();
+            $app = $this->container->make(Application::class);
+            $down = $app->isDownForMaintenance();
+
+            $telemetry->gauge('schedule.run.last_seen', description: 'When schedule:run last started (unix time)', unit: 's')->set($now);
+
+            /** @var array<string, int> $due */
+            $due = [];
+
+            foreach ($this->container->make(Schedule::class)->events() as $task) {
+                // Not this environment's task, or maintenance mode is holding
+                // it: not due here, so it cannot be missed here.
+                if (! $task->runsInEnvironment($app->environment()) || ($down && ! $task->runsInMaintenanceMode())) {
+                    continue;
+                }
+
+                $previous = $this->previousDue($task, $now);
+
+                if ($previous !== null) {
+                    $name = $this->taskName($task);
+                    // Tasks sharing a (bounded) name share a series: the
+                    // latest due time is the one that has to be met.
+                    $due[$name] = max($due[$name] ?? 0, $previous);
+                }
+            }
+
+            foreach ($due as $name => $previous) {
+                $labels = ['task' => $name];
+
+                $telemetry->gauge('schedule.task.previous_due', description: 'When cron last said the task was due (unix time)', unit: 's')->set($previous, $labels);
+                // When this task was last part of the schedule — a task
+                // deleted from the schedule stops being refreshed, so the
+                // alert rules can tell it from a task that stopped running.
+                $telemetry->gauge('schedule.task.listed', description: 'When schedule:run last listed the task (unix time)', unit: 's')->set($now, $labels);
+            }
+
+            $telemetry->flush();
+        });
+    }
+
+    private function markStarted(object $task): void
+    {
+        if (! $this->monitor) {
+            return;
+        }
+
+        $name = $this->taskName($task);
+        $now = microtime(true);
+
+        $this->seen($name);
+
+        $this->telemetry()
+            ->gauge('schedule.task.running_since', description: 'When the current run of the task started, 0 when none is running (unix time)', unit: 's')
+            ->set($now, ['task' => $name]);
+
+        // How late it started against its own cron — a scheduler whose
+        // earlier tasks run long starts the later ones late, and nothing
+        // else shows that until they start missing.
+        $previous = $this->previousDue($task, (int) $now);
+
+        if ($previous !== null && ($delay = $now - $previous) >= 0 && $delay < 3600) {
+            $this->telemetry()
+                ->histogram('schedule.task.start_delay', buckets: [0.5, 1, 5, 15, 30, 60, 120, 300, 600, 1800], description: 'Time from a task being due to it starting', unit: 's')
+                ->record($delay, ['task' => $name]);
+        }
+    }
+
+    private function markFinished(string $name, bool $succeeded): void
+    {
+        if (! $this->monitor) {
+            return;
+        }
+
+        $labels = ['task' => $name];
+
+        $this->telemetry()
+            ->gauge('schedule.task.running_since', description: 'When the current run of the task started, 0 when none is running (unix time)', unit: 's')
+            ->set(0, $labels);
+
+        if ($succeeded) {
+            $this->telemetry()
+                ->gauge('schedule.task.last_succeeded', description: 'When the task last finished successfully (unix time)', unit: 's')
+                ->set(microtime(true), $labels);
+        }
+    }
+
+    private function seen(string $name): void
+    {
+        $this->telemetry()
+            ->gauge('schedule.task.last_seen', description: 'When the task last started or was skipped (unix time)', unit: 's')
+            ->set(microtime(true), ['task' => $name]);
+    }
+
+    /**
+     * The most recent time at or before $now the task's cron matched, in
+     * the task's own timezone. Null for anything that is not a cron
+     * expression the parser accepts.
+     */
+    private function previousDue(object $task, int $now): ?int
+    {
+        $expression = $task->expression ?? null;
+
+        if (! is_string($expression) || ! CronExpression::isValidExpression($expression)) {
+            return null;
+        }
+
+        $timezone = $task->timezone ?? null;
+        $timezone = match (true) {
+            $timezone instanceof DateTimeZone => $timezone->getName(),
+            is_string($timezone) && $timezone !== '' => $timezone,
+            default => Cast::string(config('app.timezone'), 'UTC'),
+        };
+
+        return (new CronExpression($expression))
+            ->getPreviousRunDate(new DateTimeImmutable('@'.$now), 0, true, $timezone)
+            ->getTimestamp();
     }
 
     /**
@@ -270,6 +436,14 @@ final class ScheduleInstrumentation
         }
 
         $summary = (string) $task->getSummaryForDisplay();
+
+        // runInBackground() wraps the command in a subshell —
+        // `('php' 'artisan' inspire > … ; … schedule:finish …) > … &` — and
+        // the opening parenthesis hid the artisan prefix below, so every
+        // background task was labelled `exec`.
+        if (str_starts_with($summary, '(')) {
+            $summary = substr($summary, 1);
+        }
 
         // Strip EXACTLY the two tokens Schedule::command() puts in front — the
         // quoted php binary and the quoted artisan path — and nothing else.

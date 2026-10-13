@@ -143,6 +143,77 @@ groups:
           summary: "Scheduled task failing on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
           description: "{{ printf \"%.0f\" $value }} scheduled task runs failed in the last 15m."
 
+      # The scheduler itself stopped: no schedule:run for 3 minutes. Without
+      # this, every rule below goes quiet exactly when it matters — their
+      # gauges are refreshed BY schedule:run.
+      - alert: SchedulerNotRunning
+        expr: |
+          time() - max by (service_name, deployment_environment_name) (
+            schedule_run_last_seen_seconds
+          ) > 180
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scheduler not running on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "schedule:run last started {{ printf \"%.0f\" $value }}s ago — check the cron entry or the schedule:work process."
+
+      # Due, but neither started nor skipped. 5 minutes of slack because
+      # schedule:run starts tasks one after another, so a task queued behind
+      # a long one starts late without having been missed (start delay is
+      # schedule_task_start_delay_seconds). Hosts are aggregated with max,
+      # so onOneServer tasks are not "missed" by the servers that lost the
+      # lock. Tasks removed from the schedule stop matching via `listed`.
+      # A task that has never run since monitoring began has no last_seen
+      # yet and is not evaluated until it has.
+      - alert: ScheduledTaskMissed
+        expr: |
+          (
+            max by (service_name, deployment_environment_name, task) (schedule_task_previous_due_seconds)
+            - max by (service_name, deployment_environment_name, task) (schedule_task_last_seen_seconds)
+          ) > 300
+          and on (service_name, deployment_environment_name, task)
+          (
+            time() - max by (service_name, deployment_environment_name, task) (schedule_task_listed_seconds)
+          ) < 600
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled task {{ $labels.task }} missed on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "{{ $labels.task }} was due {{ printf \"%.0f\" $value }}s before it last ran or was skipped."
+
+      # Started and not finished for an hour. A process that died mid-task
+      # (OOM, deploy, kill) never clears running_since, so this also catches
+      # runs that will never finish. Tune the threshold per task with a
+      # `task=~"..."` matcher if some legitimately run longer.
+      - alert: ScheduledTaskOverrunning
+        expr: |
+          time() - max by (service_name, deployment_environment_name, task) (
+            schedule_task_running_since_seconds > 0
+          ) > 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled task {{ $labels.task }} running for over an hour on {{ $labels.service_name }}"
+          description: "{{ $labels.task }} started {{ printf \"%.0f\" $value }}s ago and has not finished ({{ $labels.deployment_environment_name }})."
+
+      # Starting late against its own cron: p95 start delay over 2 minutes.
+      - alert: ScheduledTasksStartingLate
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service_name, deployment_environment_name) (
+              rate(schedule_task_start_delay_seconds_bucket[30m])
+            )
+          ) > 120
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduled tasks starting late on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
+          description: "p95 start delay is {{ printf \"%.0f\" $value }}s — tasks queue behind long-running ones in schedule:run. Consider runInBackground()."
+
   # ---------------------------------------------------------------------------
   # Egress — outgoing HTTP (third-party dependencies).
   # ---------------------------------------------------------------------------
