@@ -811,7 +811,9 @@ final class RedisMetricStore implements BatchesWrites, ClaimsMetricExport, Metri
             } elseif (str_starts_with($suffix, 'b')) {
                 $index = (int) substr($suffix, 1);
 
-                if ($index < $bucketSlots) {
+                // Only the slots array_fill() made: a stray `b-1` field would
+                // otherwise add a key and the counts would stop being a list.
+                if ($index >= 0 && $index < $bucketSlots) {
                     $series[$encoded]['bucketCounts'][$index] = (int) $value;
                 }
             }

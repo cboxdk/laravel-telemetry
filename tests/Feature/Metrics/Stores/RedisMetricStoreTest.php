@@ -117,6 +117,23 @@ it('round-trips histograms with buckets, sum and count', function () {
         ->and($this->store->collect()[0]->definition->buckets)->toBe([10.0, 100.0]);
 });
 
+it('ignores a bucket field outside the histogram\'s slots', function () {
+    $definition = new MetricDefinition('req.duration', MetricType::Histogram, unit: 'ms', buckets: [10.0, 100.0]);
+
+    $this->store->recordHistogram($definition, ['route' => '/'], 5);
+
+    // A stray field — written by hand or by a build with other buckets —
+    // must not add a key to the counts, which stay one slot per bucket.
+    $key = "{$this->prefix}:histogram:req.duration";
+    $connection = app(Factory::class)->connection();
+    $field = (string) collect($connection->hkeys($key))->first(fn (string $f): bool => str_ends_with($f, ':count'));
+    $series = substr($field, 0, -strlen(':count'));
+    $connection->hset($key, $series.':b-1', 7);
+    $connection->hset($key, $series.':b9', 7);
+
+    expect($this->store->collect()[0]->samples[0]->bucketCounts)->toBe([1, 0, 0]);
+});
+
 it('keeps the latest exemplar for a histogram series', function () {
     $definition = new MetricDefinition('req.duration', MetricType::Histogram, buckets: [10.0, 100.0]);
 
