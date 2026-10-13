@@ -131,7 +131,7 @@ final class TraceRequest
                     // the span it named rather than parenting a span that will
                     // never arrive. See Tracer::adoptTraceId().
                     $this->telemetry->tracer()->adoptTraceId($incoming, $trustSampling);
-                    $links[] = new SpanLink($incoming->traceId, $incoming->spanId);
+                    $links[] = new SpanLink($incoming->traceId, $incoming->spanId, sampled: $incoming->sampled);
                 }
             }
 

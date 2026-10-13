@@ -53,6 +53,23 @@ it('serializes span links with hex ids and attributes', function () {
         ->and($data['links'][0]['attributes'][0])->toBe(['key' => 'queue.retry', 'value' => ['boolValue' => true]]);
 });
 
+it('exports a link\'s sampled flag as its W3C trace flags, and nothing when unknown', function () {
+    $tracer = new Tracer;
+
+    $span = $tracer->startSpan('linked', links: [
+        new SpanLink(str_repeat('a', 32), str_repeat('b', 16), sampled: true),
+        new SpanLink(str_repeat('c', 32), str_repeat('d', 16), sampled: false),
+        new SpanLink(str_repeat('e', 32), str_repeat('f', 16)),
+    ]);
+    $span->end();
+
+    $links = serializer()->traces($tracer->drain())['resourceSpans'][0]['scopeSpans'][0]['spans'][0]['links'];
+
+    expect($links[0]['flags'])->toBe(1)
+        ->and($links[1]['flags'])->toBe(0)
+        ->and($links[2])->not->toHaveKey('flags');
+});
+
 it('omits the links key entirely for a span with no links', function () {
     $tracer = new Tracer;
 

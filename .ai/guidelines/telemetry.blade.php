@@ -42,6 +42,7 @@ This application uses cboxdk/laravel-telemetry for metrics, traces, events and l
 - Behind a load balancer or proxy that injects `traceparent` but exports no span of its own, set `TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT=false`: the request keeps the incoming trace id (the edge's log still joins) but starts as the root span with a link to the edge's span id, instead of hanging under a span that never arrives.
 - Queue retries (`instrument.queue_retry_links`, default on): a retried job's span LINKS (not parents) back to the previous attempt — they're siblings, both children of the original dispatch. Bridged via the app's own cache keyed by job UUID (`queue.retry_link_store`/`_ttl`); a null/array cache driver just means retries go unlinked.
 - Queue jobs automatically continue the dispatcher's trace — never propagate trace ids through job properties manually.
+- For long-delayed or fan-out jobs that would bloat the dispatcher's trace, implement `Cbox\Telemetry\Contracts\StartsLinkedTrace` on the job, queued listener, mailable or notification (or list the class in `queue.linked_traces`): it starts a NEW trace, sampled on its own, whose root span links the dispatching span (`queue.dispatch = true`). Sync jobs ignore it. Don't hand-roll this with `resetContext()`.
 
 ### Testing
 

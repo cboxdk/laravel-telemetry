@@ -346,6 +346,7 @@ Only valid v3 source maps within the size limit are stored. See
 | `queue.propagate` | `TELEMETRY_QUEUE_PROPAGATE` | `true` |
 | `queue.retry_link_store` | `TELEMETRY_QUEUE_RETRY_LINK_STORE` | `null` — the app's default cache store |
 | `queue.retry_link_ttl` | `TELEMETRY_QUEUE_RETRY_LINK_TTL` | `86400` seconds |
+| `queue.linked_traces` | — | `[]` — job, listener, mailable or notification classes (or parents/interfaces of them) that start a new trace linked to the dispatching span, like implementing `Contracts\StartsLinkedTrace`. Sync jobs ignore it |
 
 ## Host & process monitor
 

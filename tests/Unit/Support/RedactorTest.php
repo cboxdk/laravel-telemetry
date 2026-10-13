@@ -456,7 +456,7 @@ it('walks a span link\'s attributes too', function () {
     // carries whatever the app put on it.
     $redactor = Redactor::fromConfig(['enabled' => true]);
 
-    $link = new SpanLink(str_repeat('c', 32), str_repeat('d', 16), ['password' => 'LINK_SECRET', 'attempt' => 2]);
+    $link = new SpanLink(str_repeat('c', 32), str_repeat('d', 16), ['password' => 'LINK_SECRET', 'attempt' => 2], sampled: false);
 
     $span = new Span(
         traceId: str_repeat('a', 32),
@@ -473,5 +473,7 @@ it('walks a span link\'s attributes too', function () {
 
     $redactor->spans([$span]);
 
-    expect($span->links()[0]->attributes)->toBe(['password' => '[REDACTED]', 'attempt' => 2]);
+    expect($span->links()[0]->attributes)->toBe(['password' => '[REDACTED]', 'attempt' => 2])
+        // Rebuilding the link must not lose the flags it carries.
+        ->and($span->links()[0]->sampled)->toBeFalse();
 });

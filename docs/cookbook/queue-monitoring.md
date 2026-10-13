@@ -66,6 +66,12 @@ consumer span in Tempo hangs under the HTTP request that queued it:
 { name =~ ".*ProcessOrder.*" && duration > 5s }
 ```
 
+A job delayed by hours, or one of thousands a request fans out, makes that
+request's trace unwieldy. Implement `Cbox\Telemetry\Contracts\StartsLinkedTrace`
+on it (or list it in `queue.linked_traces`) and it starts its own trace
+with a span link back to the dispatch instead; see
+[jobs that start their own trace](../core-concepts/traces.md#jobs-that-start-their-own-trace).
+
 ## Memory-leak tracking — no daemon required
 
 Workers self-report their memory after every job:

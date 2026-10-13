@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Contracts\ManagesRequestState;
+use Cbox\Telemetry\Contracts\StartsLinkedTrace;
 use Cbox\Telemetry\Native\NativeProfiler;
 use Cbox\Telemetry\Native\NativeReporter;
 use Cbox\Telemetry\Native\NativeUnit;
@@ -12,6 +13,7 @@ use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\ResourceUsage;
+use Cbox\Telemetry\Support\TraceParent;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
@@ -49,7 +51,9 @@ use Throwable;
  *
  * Dispatch side: every queued payload carries the full W3C traceparent
  * (trace id AND parent span id), so job spans are children of the dispatch
- * site — never detached roots.
+ * site — never detached roots. The one opt-in exception is a job marked
+ * StartsLinkedTrace (or listed in queue.linked_traces): it starts a trace
+ * of its own whose root span LINKS the dispatching span.
  *
  * Worker side: each job runs in its own consumer span. All three outcomes
  * are covered — processed, released-for-retry (JobReleasedAfterException)
@@ -155,6 +159,48 @@ final class QueueInstrumentation implements ManagesRequestState
         }
 
         return [new SpanLink($previous['traceId'], $previous['spanId'], ['queue.retry' => true])];
+    }
+
+    /**
+     * Whether this job starts its own trace, linked to the dispatch,
+     * instead of continuing the dispatcher's as a child.
+     *
+     * Read from the payload, not the job object, which is still serialized
+     * here. `data.commandName` is the queued class; for the work Laravel
+     * wraps — a queued listener (CallQueuedListener), mailable
+     * (SendQueuedMailable), notification (SendQueuedNotifications) — the
+     * class the app wrote is in `displayName`. Both are checked against
+     * the StartsLinkedTrace marker and `queue.linked_traces`.
+     *
+     * Guarded on its own: a class whose autoload throws costs its link
+     * opt-in, never the job's span.
+     *
+     * @param  array<array-key, mixed>  $payload
+     */
+    private function startsLinkedTrace(array $payload): bool
+    {
+        return FailSafe::guard(function () use ($payload): bool {
+            $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
+            $configured = Cast::stringList(config('telemetry.queue.linked_traces'));
+
+            foreach ([$data['commandName'] ?? null, $payload['displayName'] ?? null] as $name) {
+                if (! is_string($name) || $name === '' || ! class_exists($name)) {
+                    continue;
+                }
+
+                if (is_a($name, StartsLinkedTrace::class, true)) {
+                    return true;
+                }
+
+                foreach ($configured as $class) {
+                    if (is_a($name, $class, true)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }) === true;
     }
 
     public function register(QueueManager $queue, Dispatcher $events, bool $propagate, bool $instrument): void
@@ -361,14 +407,24 @@ final class QueueInstrumentation implements ManagesRequestState
             $payload = $event->job->payload();
             $carried = is_array($payload['telemetry'] ?? null) ? $payload['telemetry'] : [];
 
+            $links = [];
+
             // Sync jobs run inline inside the dispatcher's context — the
             // consumer span nests naturally and the caller's trace must
             // survive the job. Only real workers reset + continue.
             if ($event->connectionName !== 'sync') {
                 $this->telemetry()->resetContext();
 
-                if (is_string($carried['traceparent'] ?? null)) {
-                    $this->telemetry()->continueTrace($carried['traceparent']);
+                $dispatch = TraceParent::parse(is_string($carried['traceparent'] ?? null) ? $carried['traceparent'] : null);
+
+                if ($dispatch !== null && $this->startsLinkedTrace($payload)) {
+                    // Opted in (StartsLinkedTrace / queue.linked_traces): a
+                    // new trace, sampled by this worker's own root decision,
+                    // whose root links the dispatching span. Never dropped —
+                    // the link is the way back to the request that queued it.
+                    $links[] = new SpanLink($dispatch->traceId, $dispatch->spanId, ['queue.dispatch' => true], $dispatch->sampled);
+                } elseif ($dispatch !== null) {
+                    $this->telemetry()->tracer()->continueFrom($dispatch);
                 }
 
                 // Restore the dispatcher's custom dimensions (team, plan…)
@@ -420,7 +476,7 @@ final class QueueInstrumentation implements ManagesRequestState
                 $event->job->resolveName().' process',
                 SpanKind::Consumer,
                 $attributes,
-                $this->retryLink($event),
+                [...$links, ...$this->retryLink($event)],
             );
 
             $this->telemetry()->applyDirectives(['job' => $event->job->resolveName()]);

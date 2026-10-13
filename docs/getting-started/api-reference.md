@@ -68,6 +68,10 @@ Telemetry::ignoresPath('health');  // bool
 
 // Outbound propagation
 Http::withTraceparent()->post($url, $payload);
+
+// A queued job (listener, mailable, notification) that starts its own
+// trace, linked to the dispatching span — or list it in queue.linked_traces
+final class RebuildSearchIndex implements ShouldQueue, StartsLinkedTrace {} // Cbox\Telemetry\Contracts
 ```
 
 ## Events & logs
