@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:9bb4cea8-d130-8c04-8218-d77a08b3362c",
+    "serialNumber": "urn:uuid:7ddaea1b-a071-4be0-f3e4-b05d93105172",
     "version": 1,
     "metadata": {
         "component": {
@@ -1151,10 +1151,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:npm/%40cboxdk/telemetry-browser@0.3.0",
+            "bom-ref": "pkg:npm/%40cboxdk/telemetry-browser@0.4.0",
             "name": "@cboxdk/telemetry-browser",
-            "version": "0.3.0",
-            "purl": "pkg:npm/%40cboxdk/telemetry-browser@0.3.0",
+            "version": "0.4.0",
+            "purl": "pkg:npm/%40cboxdk/telemetry-browser@0.4.0",
             "licenses": [
                 {
                     "license": {
