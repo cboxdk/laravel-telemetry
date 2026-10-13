@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\Overhead;
 use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
@@ -34,7 +35,7 @@ final class ModelInstrumentation
     public function register(Dispatcher $events): void
     {
         $events->listen('eloquent.retrieved: *', function () {
-            FailSafe::guard(fn () => $this->telemetry()->tracer()->bumpStat('model.hydrations', 1));
+            Overhead::measure(fn () => FailSafe::guard(fn () => $this->telemetry()->tracer()->bumpStat('model.hydrations', 1)));
         });
 
         foreach (self::WRITE_EVENTS as $write) {

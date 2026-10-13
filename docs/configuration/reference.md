@@ -178,6 +178,10 @@ pass `-H 'Accept: application/openmetrics-text'`.
 | `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
 | `traces.share_context` | `TELEMETRY_TRACES_SHARE_CONTEXT` | `true` — publishes `trace_id` into Laravel `Context` (Sentry/Flare/logs pick it up) + a Sentry scope tag |
 | `traces.response_header` | `TELEMETRY_TRACES_RESPONSE_HEADER` | `X-Trace-Id` — the support reference id on every response; `null` disables. Skipped on publicly cacheable responses (`Cache-Control: public`/`s-maxage`) so caches never replay a stale id |
+| `traces.traceresponse` | `TELEMETRY_TRACES_TRACERESPONSE` | `true` — W3C `traceresponse` header (trace id + server span id) on the same responses |
+| `traces.label_header` | `TELEMETRY_TRACES_LABEL_HEADER` | `X-Telemetry-Label` — request header copied to the root span as `laravel.trace.label` (64 safe chars) for before/after comparison; `null` disables |
+| `traces.propagate_to_processes` | `TELEMETRY_TRACES_PROPAGATE_TO_PROCESSES` | `true` — `TRACEPARENT` in the environment of children started via the `Process` facade |
+| `traces.continue_from_environment` | `TELEMETRY_TRACES_CONTINUE_FROM_ENVIRONMENT` | `true` — an artisan command started with `TRACEPARENT` set continues that trace (needs `instrument.commands`) |
 | `traces.details.mode` | `TELEMETRY_TRACES_DETAILS` | `always` — `tail` keeps cache/query detail spans only for failing or slow traces |
 | `traces.details.slow_request_ms` | `TELEMETRY_TRACES_SLOW_REQUEST_MS` | `1000` |
 | `traces.details.slow_span_ms` | `TELEMETRY_TRACES_SLOW_SPAN_MS` | `100` |
@@ -287,8 +291,11 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.queue_retry_links` | `TELEMETRY_INSTRUMENT_QUEUE_RETRY_LINKS` | `true` — OTel span links between a retried job's attempts (a link, never a parent — attempt N+1 is a sibling of attempt N, both children of the original dispatch). Bridged via the app's own cache, since a retry can land on a different worker (`queue.retry_link_store`/`queue.retry_link_ttl`, default TTL 86400s); a null/array cache driver just means retries go unlinked |
 | `instrument.queries` | `TELEMETRY_INSTRUMENT_QUERIES` | `true` |
 | `instrument.queries_min_duration` | `TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION` | `0` ms (record everything; raise as a noise floor) |
-| `instrument.query_duplicates` | `TELEMETRY_INSTRUMENT_QUERY_DUPLICATES` | `true` — flags a query that runs identically more than once in the same trace (the actual N+1 smell): `db.query.duplicate.count` root-span tally, `db.queries.duplicated{connection}` counter, and a `db.query.duplicate_detected` OTLP log event carrying the query text. Fires once per distinct query, at the threshold crossing |
+| `instrument.query_duplicates` | `TELEMETRY_INSTRUMENT_QUERY_DUPLICATES` | `true` — flags repeated queries within one trace as **N+1** (same shape, different values; reads only) or **duplicate** (same SQL, same values): `db.query.n_plus_one.count` / `db.query.duplicate.count` root-span tallies, `db.queries.n_plus_one{connection}` / `db.queries.duplicated{connection}` counters, and `db.query.n_plus_one_detected` / `db.query.duplicate_detected` OTLP log events carrying the query text, shape and origin. Fires once per distinct query, at the threshold crossing; spans from then on carry `laravel.db.query.repeat`. See [Query diagnostics](../core-concepts/traces.md#query-diagnostics) |
 | `instrument.query_duplicates_threshold` | `TELEMETRY_INSTRUMENT_QUERY_DUPLICATES_THRESHOLD` | `3` repeats before flagging |
+| `instrument.query_origin` | `TELEMETRY_INSTRUMENT_QUERY_ORIGIN` | `flagged` — `code.file.path`/`code.line.number`/`code.function.name` of the app line that ran the query on slow and repeated queries; `all` = every query span; `off` |
+| `instrument.laravel_context` | `TELEMETRY_INSTRUMENT_LARAVEL_CONTEXT` | `false` — read Laravel `Context` (not hidden context) onto root spans, log records and exception records as `laravel.context.*` |
+| `instrument.laravel_context_keys` | — | `[]` — only these Laravel Context keys (empty = all, max 32 per record) |
 | `instrument.commands` | `TELEMETRY_INSTRUMENT_COMMANDS` | `false` |
 | `instrument.gates` | `TELEMETRY_INSTRUMENT_GATES` | `true` — `authorization.checks{ability,result}` counter (gates AND policies) + `gate.check.count`/`gate.denied.count` root-span tallies |
 | `instrument.auth` | `TELEMETRY_INSTRUMENT_AUTH` | `true` — `auth.events{event,guard}` (login/logout/failed/lockout/password_reset/registered/verified) |

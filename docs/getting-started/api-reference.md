@@ -57,6 +57,7 @@ Telemetry::traceId();              // ?string
 Telemetry::traceparent();          // ?string — W3C header value
 Telemetry::continueTrace($header); // continue a remote trace
 Telemetry::resetContext();         // forget the active trace
+Telemetry::captureLaravelContext(['tenant']); // read Laravel Context onto root spans/logs/exceptions (= instrument.laravel_context)
 
 // Requests left uninstrumented (merged with instrument.http_ignore_paths)
 Telemetry::ignorePaths(['telemetry-ui', 'telemetry-ui/*']); // Str::is globs, no leading slash

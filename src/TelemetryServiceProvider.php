@@ -51,6 +51,7 @@ use Cbox\Telemetry\Instrumentation\ModelInstrumentation;
 use Cbox\Telemetry\Instrumentation\NativeScreenInstrumentation;
 use Cbox\Telemetry\Instrumentation\NotificationInstrumentation;
 use Cbox\Telemetry\Instrumentation\PennantInstrumentation;
+use Cbox\Telemetry\Instrumentation\Process\TracedProcessFactory;
 use Cbox\Telemetry\Instrumentation\QueryInstrumentation;
 use Cbox\Telemetry\Instrumentation\QueueInstrumentation;
 use Cbox\Telemetry\Instrumentation\RedisInstrumentation;
@@ -99,6 +100,7 @@ use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Log\LogManager;
+use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\QueueManager;
 use Illuminate\Routing\Contracts\ControllerDispatcher as ControllerDispatcherContract;
@@ -454,6 +456,8 @@ class TelemetryServiceProvider extends ServiceProvider
         $this->registerQueueInstrumentation();
         $this->registerQueryInstrumentation();
         $this->registerCommandInstrumentation();
+        $this->registerProcessPropagation();
+        $this->registerLaravelContextCapture();
         $this->registerScheduleInstrumentation();
         $this->registerEventInstrumentations();
         $this->registerSystemMetricsProvider();
@@ -1048,6 +1052,9 @@ class TelemetryServiceProvider extends ServiceProvider
             Cast::float($config->get('telemetry.instrument.queries_min_duration'), 0.0),
             (bool) $config->get('telemetry.instrument.query_duplicates', true),
             Cast::int($config->get('telemetry.instrument.query_duplicates_threshold'), 3),
+            Cast::string($config->get('telemetry.instrument.query_origin'), QueryInstrumentation::ORIGIN_FLAGGED),
+            Cast::float($config->get('telemetry.traces.details.slow_span_ms'), 100),
+            $this->app->basePath(),
         );
     }
 
@@ -1061,6 +1068,42 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->app->make(CommandInstrumentation::class)->register(
             $this->app->make(Dispatcher::class),
+        );
+    }
+
+    /**
+     * `TRACEPARENT` into the environment of every child started through
+     * the `Process` facade, so an artisan command it runs continues this
+     * trace (see CommandInstrumentation). Skipped when illuminate/process
+     * is absent or something else already owns the factory binding.
+     */
+    private function registerProcessPropagation(): void
+    {
+        if (! $this->app->make('config')->get('telemetry.traces.propagate_to_processes', true)
+            || ! class_exists(ProcessFactory::class)
+            || $this->app->bound(ProcessFactory::class)) {
+            return;
+        }
+
+        $this->app->bind(ProcessFactory::class, fn (Application $app) => new TracedProcessFactory(
+            static fn (): array => FailSafe::guard(static function () use ($app): array {
+                $traceparent = $app->make(TelemetryManager::class)->traceparent();
+
+                return $traceparent === null ? [] : ['TRACEPARENT' => $traceparent];
+            }) ?? [],
+        ));
+    }
+
+    private function registerLaravelContextCapture(): void
+    {
+        $config = $this->app->make('config');
+
+        if (! $config->get('telemetry.instrument.laravel_context', false)) {
+            return;
+        }
+
+        $this->app->make(TelemetryManager::class)->captureLaravelContext(
+            Cast::stringList($config->get('telemetry.instrument.laravel_context_keys', [])),
         );
     }
 
@@ -1303,7 +1346,7 @@ class TelemetryServiceProvider extends ServiceProvider
                         $telemetry->recordEvent(new TelemetryEvent(
                             name: 'exception',
                             timeUnixNano: (int) (microtime(true) * 1e9),
-                            attributes: $telemetry->contextAttributes() + $telemetry->failureContextFor($e) + $attributes,
+                            attributes: $telemetry->contextAttributes() + $telemetry->failureContextFor($e) + $telemetry->laravelContextAttributes() + $attributes,
                             traceId: $span->traceId ?? $telemetry->traceId(),
                             spanId: $span?->spanId,
                             severityNumber: 17, // ERROR

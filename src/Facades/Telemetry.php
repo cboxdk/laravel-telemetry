@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static void continueTrace(string|null $traceparent)
  * @method static void resetContext()
  * @method static void context(array<string, scalar|null> $attributes)
+ * @method static void captureLaravelContext(list<string> $only = [])
  * @method static array<string, scalar|null> contextAttributes()
  * @method static void labelRequestsUsing(\Closure|null $resolver)
  * @method static void nameRequestsUsing(\Closure|null $resolver)

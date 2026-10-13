@@ -30,7 +30,7 @@ it('does not grow its fingerprint map without bound inside one trace', function 
     $connection->shouldReceive('getName')->andReturn('mysql');
     $connection->shouldReceive('getDriverName')->andReturn('mysql');
 
-    (new ReflectionMethod(QueryInstrumentation::class, 'detectDuplicate'))->invoke(
+    (new ReflectionMethod(QueryInstrumentation::class, 'detectRepeat'))->invoke(
         $instrumentation,
         app(TelemetryManager::class),
         new QueryExecuted('select 1', [], 0.1, $connection),

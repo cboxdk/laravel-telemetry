@@ -278,6 +278,11 @@ return [
         // Set to null/empty to disable.
         'response_header' => env('TELEMETRY_TRACES_RESPONSE_HEADER', 'X-Trace-Id'),
 
+        // W3C `traceresponse` header (trace id + server span id) on the
+        // same responses — lets telemetry-browser parent requests after an
+        // Inertia visit to the span that served it.
+        'traceresponse' => env('TELEMETRY_TRACES_TRACERESPONSE', true),
+
         // Trust incoming `traceparent` headers and continue remote traces.
         'continue_incoming' => env('TELEMETRY_TRACES_CONTINUE_INCOMING', true),
 
@@ -289,6 +294,20 @@ return [
         // trace id is still adopted (the edge's log still joins), the
         // request span is the root, and the edge's span id becomes a link.
         'continue_incoming_parent' => env('TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT', true),
+
+        // Request header naming a request for before/after comparison
+        // (`X-Telemetry-Label: before-eager-load`). Lands on the request's
+        // root span as `laravel.trace.label`, cut to 64 safe characters.
+        // Null disables it.
+        'label_header' => env('TELEMETRY_TRACES_LABEL_HEADER', 'X-Telemetry-Label'),
+
+        // Children started through the Process facade get `TRACEPARENT` in
+        // their environment (OpenTelemetry's carrier for process → process),
+        // and an artisan command started with it set continues that trace
+        // as a child instead of opening a root of its own. The receiving
+        // side needs `instrument.commands` on to record anything.
+        'propagate_to_processes' => env('TELEMETRY_TRACES_PROPAGATE_TO_PROCESSES', true),
+        'continue_from_environment' => env('TELEMETRY_TRACES_CONTINUE_FROM_ENVIRONMENT', true),
 
         // Tail detail retention: keep detail spans (cache ops, queries)
         // only for traces with errors or slowness — MANY details when it
@@ -698,13 +717,30 @@ return [
         // N+1-heavy codepaths. 0 records everything.
         'queries_min_duration' => env('TELEMETRY_INSTRUMENT_QUERIES_MIN_DURATION', 0),
 
-        // Flag queries that run more than once, identically, in the same
-        // trace — the actual N+1 smell (model.hydrations is a proxy count;
-        // this names the repeated query). Root-span tally + counter +
-        // an OTLP log event carrying the query text, fired once per
-        // distinct query when it crosses the threshold.
+        // Flag queries that repeat within one trace, as one of two smells:
+        //  - duplicate: same SQL, same values (memoize or cache it)
+        //  - N+1: same SQL shape, different values (eager load / whereIn)
+        // Each gives a root-span tally, a counter and an OTLP log event
+        // carrying the query text and its origin, fired once per distinct
+        // query when it crosses the threshold. Repeated query spans are
+        // marked `laravel.db.query.repeat`.
         'query_duplicates' => env('TELEMETRY_INSTRUMENT_QUERY_DUPLICATES', true),
         'query_duplicates_threshold' => env('TELEMETRY_INSTRUMENT_QUERY_DUPLICATES_THRESHOLD', 3),
+
+        // Where in the app a query came from (code.file.path,
+        // code.line.number, code.function.name — first non-vendor frame).
+        // 'flagged' = slow (traces.details.slow_span_ms) and repeated
+        // queries only; 'all' = every query span (a backtrace per query);
+        // 'off' = never.
+        'query_origin' => env('TELEMETRY_INSTRUMENT_QUERY_ORIGIN', 'flagged'),
+
+        // Read Laravel's own Context (`Context::add('tenant', …)`) onto root
+        // spans, log records and exception records as `laravel.context.*`.
+        // Opt-in: Context is whatever the app keeps there. Hidden context
+        // is never read; never a metric label. `laravel_context_keys`
+        // limits it to the listed keys (empty = all, max 32 per record).
+        'laravel_context' => env('TELEMETRY_INSTRUMENT_LARAVEL_CONTEXT', false),
+        'laravel_context_keys' => [],
 
         // Artisan command spans.
         'commands' => env('TELEMETRY_INSTRUMENT_COMMANDS', false),

@@ -17,6 +17,7 @@ use Cbox\Telemetry\Support\CpuProfiler;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\Support\FrameworkBoot;
 use Cbox\Telemetry\Support\HttpMethod;
+use Cbox\Telemetry\Support\Overhead;
 use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceUsage;
 use Cbox\Telemetry\Support\TraceParent;
@@ -116,7 +117,7 @@ final class TraceRequest
             return $next($request);
         }
 
-        FailSafe::guard(function () use ($request, $bootstrapMs) {
+        Overhead::measure(fn () => FailSafe::guard(function () use ($request, $bootstrapMs) {
             $links = [];
 
             if (config('telemetry.traces.continue_incoming')) {
@@ -171,6 +172,13 @@ final class TraceRequest
 
             $request->attributes->set(self::SPAN_KEY, $span);
 
+            // As context, not a span attribute: every span of the request
+            // carries it, and so do the jobs it dispatches — a before/after
+            // comparison covers the queued half of the work too.
+            if (($label = $this->label($request)) !== null) {
+                $this->telemetry->context(['laravel.trace.label' => $label]);
+            }
+
             $this->telemetry->publishTraceContext();
 
             // The framework-boot phase, visible in the waterfall — from
@@ -217,7 +225,7 @@ final class TraceRequest
             // resource sample shells out to lsof and put ~30 ms of this
             // middleware's own time on the application's routing.
             $this->phases->start($span, $this->telemetry->tracer());
-        });
+        }));
 
         $response = $next($request);
 
@@ -226,22 +234,50 @@ final class TraceRequest
         // Publicly cacheable responses are skipped: a cached copy would
         // replay one stale trace id to every subsequent visitor (CDNs,
         // static page caches), which defeats the header's purpose.
-        FailSafe::guard(function () use ($response) {
-            $header = config('telemetry.traces.response_header', 'X-Trace-Id');
-
-            if (! is_string($header) || $header === '' || ($traceId = $this->telemetry->traceId()) === null) {
-                return;
-            }
-
-            if ($response->headers->hasCacheControlDirective('public')
+        FailSafe::guard(function () use ($request, $response) {
+            if (($traceId = $this->telemetry->traceId()) === null
+                || $response->headers->hasCacheControlDirective('public')
                 || $response->headers->hasCacheControlDirective('s-maxage')) {
                 return;
             }
 
-            $response->headers->set($header, $traceId);
+            $header = config('telemetry.traces.response_header', 'X-Trace-Id');
+
+            if (is_string($header) && $header !== '') {
+                $response->headers->set($header, $traceId);
+            }
+
+            // W3C Trace Context Level 2 `traceresponse`: the trace id AND
+            // the server span, so a browser SDK can parent what follows an
+            // Inertia visit (JSON, no meta tag to read) to the span that
+            // served it rather than leaving it a sibling.
+            $span = $request->attributes->get(self::SPAN_KEY);
+
+            if ($span instanceof Span && config('telemetry.traces.traceresponse', true)) {
+                $response->headers->set('traceresponse', sprintf('00-%s-%s-%s', $span->traceId, $span->spanId, $span->sampled ? '01' : '00'));
+            }
         });
 
         return $response;
+    }
+
+    /**
+     * The caller's name for this request — `X-Telemetry-Label: before-eager-load`
+     * — so two runs of the same endpoint can be found and compared without
+     * copying trace ids around. Caller-supplied, so it is cut to 64 safe
+     * characters; it lands on the span only, never on a metric label.
+     */
+    private function label(Request $request): ?string
+    {
+        $header = config('telemetry.traces.label_header', 'X-Telemetry-Label');
+
+        if (! is_string($header) || $header === '') {
+            return null;
+        }
+
+        $label = preg_replace('/[^A-Za-z0-9._:\/-]/', '', substr(Cast::string($request->headers->get($header)), 0, 64));
+
+        return is_string($label) && $label !== '' ? $label : null;
     }
 
     public function terminate(Request $request, Response $response): void

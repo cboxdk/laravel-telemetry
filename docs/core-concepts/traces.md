@@ -95,6 +95,61 @@ Login/Logout events are remembered within the request). Disable with
 `instrument.user`; enrich (explicit PII opt-in) with
 `Telemetry::resolveUserUsing(fn ($user, ?string $guard) => [...])`.
 
+## Query diagnostics
+
+Every `db.query` span carries `laravel.db.query.shape`: a 16-hex hash of
+the statement with its values taken out (string and numeric literals
+become `?`, any `in (…)` list becomes `in (?)`, multi-row `values`
+collapse to one row), scoped to the connection. Group by it to see one
+row per query *kind*, however many ids or list lengths it ran with.
+
+Repeated queries within one trace are flagged as one of two smells
+(`instrument.query_duplicates`, default on; threshold
+`instrument.query_duplicates_threshold`, default 3):
+
+| Smell | What repeated | The fix | Signals |
+|---|---|---|---|
+| **N+1** | the same *shape* with different values (reads only) | eager load, `whereIn` | `db.query.n_plus_one_detected` event, `db.queries.n_plus_one{connection}` counter, `db.query.n_plus_one.count` root tally |
+| **Duplicate** | the same SQL with the same values | memoize, cache, pass it down | `db.query.duplicate_detected` event, `db.queries.duplicated{connection}` counter, `db.query.duplicate.count` root tally |
+
+Each event fires once per distinct query, at the threshold crossing, and
+carries the SQL text, `laravel.db.query.shape` and `db.query.repeat_count`.
+Query spans from the crossing onward are marked
+`laravel.db.query.repeat = "n_plus_one" | "duplicate"`; treat every span
+sharing a flagged shape as part of the group. A loop of writes is not
+called N+1 — it is a missing bulk insert, a different fix.
+
+**Where it came from.** The first stack frame outside `vendor/` and this
+package is attached as `code.file.path` (relative to the app),
+`code.line.number` and `code.function.name` — the `$order->items` in the
+Blade loop, not Eloquent's internals. `instrument.query_origin` decides
+which spans pay for the backtrace:
+
+- `flagged` (default) — slow queries (≥ `traces.details.slow_span_ms`) and
+  the crossing occurrence of a repeated one, plus the N+1/duplicate events.
+- `all` — every query span (a backtrace per query; local debugging).
+- `off` — never.
+
+With `traces.details = tail`, a trace with a repeated query keeps its
+detail spans — the trace that shows the loop is the one worth keeping,
+even when every query in it was fast.
+
+```traceql
+{ span.laravel.db.query.repeat = "n_plus_one" }
+{ span.db.query.n_plus_one.count > 0 && kind = server }
+```
+
+Root spans also count slow queries (≥ `traces.details.slow_span_ms`) as
+`db.query.slow.count`, so "which traces have a slow query" is one search.
+
+## What telemetry itself cost
+
+The root span carries `telemetry.overhead_ms`: time spent in the package's
+per-operation hooks (queries, cache, model hydration) and the request
+middleware's own work, during that trace. Export happens after the
+response and is not included, nor is the framework's event dispatch
+around a listener — read it as a floor, not a full accounting.
+
 ## Resource attribution
 
 Request, worker-job and scheduled-task spans carry
@@ -165,6 +220,23 @@ Context clears automatically between requests and jobs. It also crosses
 a real HTTP service boundary via the W3C `baggage` header — see
 [Context propagation](#context-propagation) below.
 
+### Laravel Context (opt-in)
+
+`Telemetry::context()` is the package's own, deliberately small dimension
+set. Apps often already keep request facts in Laravel's `Context`
+(`Context::add('tenant', …)`). Turn on `instrument.laravel_context` to
+read it onto root spans, telemetry-channel log records and exception
+records as `laravel.context.*` (keys snake-cased: `tenantId` →
+`laravel.context.tenant_id`; arrays redacted, then JSON-encoded).
+
+- Hidden context (`Context::addHidden()`) is never read.
+- `instrument.laravel_context_keys` limits it to the listed keys; at most
+  32 keys per record either way.
+- It never becomes a metric label.
+
+Laravel already carries `Context` into queued jobs, so a job's root span
+gets the same values.
+
 ## Metric dimensions (bounded!)
 
 Context is traces/events/logs only — metric labels multiply cardinality.
@@ -205,6 +277,16 @@ Http::withTraceparent()->post($url, $payload);
 ```
 
 The macro is a no-op when no trace is active.
+
+- **Child processes**: anything started through the `Process` facade gets
+  `TRACEPARENT` in its environment — OpenTelemetry's carrier for process
+  → process (`traces.propagate_to_processes`, default on; a value you set
+  with `Process::env()` wins). An artisan command started with it set
+  continues the trace as a child (`traces.continue_from_environment`,
+  default on; needs `instrument.commands` to record anything), and so does
+  any OTel-instrumented program. `exec()`/`shell_exec()` and Symfony's
+  `Process` used directly are not covered. The facade's factory is only
+  replaced when nothing else has bound it.
 
 `Telemetry::context()` dimensions travel the same way — the macro also
 attaches a W3C `baggage` header (`team.id=42,plan=pro`, percent-encoded)
@@ -261,6 +343,11 @@ cases and logs back to the trace:
 
 - **`X-Trace-Id` response header** on every traced request
   (`traces.response_header`, set null to disable).
+- **`traceresponse` response header** (W3C Trace Context Level 2):
+  `00-<trace id>-<server span id>-<flags>`, so a client — telemetry-browser
+  after an Inertia visit — can parent what follows to the span that served
+  it (`traces.traceresponse`, default on). Both headers are skipped on
+  publicly cacheable responses.
 - **Laravel `Context`**: `trace_id` is added at trace start — Sentry
   (≥ 4.x), Flare and every log channel pick it up automatically. An
   explicit Sentry scope tag is set too (`traces.share_context`).
@@ -269,6 +356,21 @@ cases and logs back to the trace:
 
 The full flows (Sentry → trace, support case → trace, error page
 recipe) live in [Error tracking & support flow](../production/error-tracking.md).
+
+### Labelling a request for before/after
+
+Send `X-Telemetry-Label: before-eager-load` and the request's root span
+carries `laravel.trace.label = "before-eager-load"` — as a context
+dimension, so every span of the request and the jobs it dispatches carry
+it too. Two runs of the same
+endpoint can be found and compared (the telemetry-ui MCP `compare` tool
+takes labels) without copying trace ids around. The value is cut to 64
+characters of `[A-Za-z0-9._:/-]` and stays off metric labels. Rename or
+disable the header with `traces.label_header`.
+
+```traceql
+{ span.laravel.trace.label = "before-eager-load" }
+```
 
 ## Sampling
 
