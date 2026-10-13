@@ -655,9 +655,15 @@ final class Tracer
             array_splice($this->stack, (int) $index, 1);
         }
 
+        // The root is the bottom of the stack — whether or not something it
+        // started never ended (a stream nobody read to the end leaves its
+        // span open above the request's). Keying "root" on an empty stack
+        // alone lost the tallies and enrichment of exactly those traces.
+        $isRoot = $index === 0 || $this->stack === [];
+
         // Taken whether or not the root is exported, so an unsampled trace's
         // hook time does not leak into the next trace's figure.
-        $overheadMs = $this->stack === [] ? Overhead::takeMs() : 0.0;
+        $overheadMs = $isRoot ? Overhead::takeMs() : 0.0;
 
         // A suppressed unit exports nothing — no error escape either.
         if ($this->suppressed) {
@@ -682,7 +688,7 @@ final class Tracer
             $span->mergeMissingAttributes($this->contextAttributes);
         }
 
-        if ($this->stack === [] && $this->rootEnricher !== null) {
+        if ($isRoot && $this->rootEnricher !== null) {
             $span->mergeMissingAttributes(FailSafe::guard($this->rootEnricher) ?? []);
         }
 
@@ -691,7 +697,7 @@ final class Tracer
         }
 
         // The root just ended: attach the per-trace tallies.
-        if ($this->stack === [] && $this->traceStats !== []) {
+        if ($isRoot && $this->traceStats !== []) {
             $stats = [];
 
             foreach ($this->traceStats as $key => $value) {

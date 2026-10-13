@@ -111,6 +111,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones. If you published the old script with
   `vendor:publish --tag=telemetry-assets`, publish again with `--force`.
 
+### Fixed
+
+- **A root that ends with a child still open keeps its tallies.** The
+  request's span lost `db.query.count`, `telemetry.overhead_ms` and its
+  enrichment when something it started never ended (a `laravel/ai` stream
+  nobody read to the end, for one), because "root" meant "the stack is
+  empty". It now means the bottom of the stack.
+
 ## [3.5.0] - 2026-10-13
 
 Two things to know on upgrade. `db.query.duplicate_detected` and

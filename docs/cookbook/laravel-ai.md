@@ -171,7 +171,9 @@ package — telemetry never throws, and never swallows.
 - **A stream nobody finishes reading** reports no end, so its spans are
   never exported: a missing span is preferred to one with a made-up
   duration. Read the stream to the end (returning it from a controller
-  does) and the run is recorded.
+  does) and the run is recorded. Until the request ends, spans started
+  after an abandoned stream nest under its run; the request's own span and
+  its tallies are unaffected.
 - **An embeddings call that throws something other than a failover
   exception** reports no end either; its span is dropped for the same
   reason. Embeddings spans are not the ambient span for that reason, so the
