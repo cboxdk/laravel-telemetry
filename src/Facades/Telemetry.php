@@ -54,6 +54,15 @@ use Illuminate\Support\Facades\Facade;
  * @method static \Cbox\Telemetry\Metrics\Registry registry()
  * @method static void handleExceptionsUsing(\Closure|null $handler)
  *
+ * Performance assertions — available once Telemetry::fake() is active:
+ * @method static list<\Cbox\Telemetry\Testing\PerformanceProfile> profiles()
+ * @method static void assertQueryCount(int|string $operator, int|null $expected = null)
+ * @method static void assertNoNPlusOne()
+ * @method static void assertNoDuplicateQueries()
+ * @method static void assertNoSlowQueries(float|null $thresholdMs = null)
+ * @method static void assertMaxDuration(float $ms)
+ * @method static mixed budget(\Closure $callback, int|null $queries = null, float|null $ms = null, bool $allowNPlusOne = false, bool $allowDuplicates = false)
+ *
  * @see TelemetryManager
  */
 final class Telemetry extends Facade

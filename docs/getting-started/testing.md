@@ -50,6 +50,7 @@ flush it.
 | `assertEventEmitted($name, ?$callback)` | callback receives each `TelemetryEvent` |
 | `assertEventNotEmitted($name)` | |
 | `assertMetricLabelValues($name, $label, $values)` | the label's observed values, exactly |
+| `assertQueryCount($op, $n)`, `assertNoNPlusOne()`, `assertNoDuplicateQueries()`, `assertNoSlowQueries(?$ms)`, `assertMaxDuration($ms)` | per recorded trace — see [Performance assertions](#performance-assertions) |
 
 Reading values: `counterValue`, `gaugeValue`, `histogramCount`, `histogramSum`.
 
@@ -139,6 +140,124 @@ A budget on a metric that recorded **nothing** would pass for the worst
 possible reason — the instrumentation never ran — so it fails instead.
 Assert an absence deliberately with `assertSeriesCount(0)` or
 `assertCounterNotIncremented()`.
+
+## Performance assertions
+
+The query instrumentation already counts every query, groups them by SQL
+shape, tells an N+1 from a duplicate and records the line of code that
+ran it. The fake reads that back, so a test can hold a code path to a
+budget:
+
+```php
+use Cbox\Telemetry\Facades\Telemetry;
+
+it('lists orders without an N+1', function () {
+    Telemetry::fake();
+
+    $this->get('/orders')->assertOk();
+
+    Telemetry::assertQueryCount('<=', 10);
+    Telemetry::assertNoNPlusOne();
+    Telemetry::assertNoDuplicateQueries();
+    Telemetry::assertNoSlowQueries();     // traces.details.slow_span_ms, or pass a threshold
+    Telemetry::assertMaxDuration(200);    // ms, the request's root span
+});
+```
+
+Each assertion checks **every trace recorded since `fake()`, one at a
+time**. Two requests in one test are two budgets, and the failure names
+the one that blew it. A failure lists each SQL shape with how often it
+ran and where:
+
+```
+[GET /orders] has 1 N+1 query pattern — one statement run again and again
+with different values, typically once per row of something loaded earlier.
+Eager-load the relation (with()/load()) or fetch the set with one whereIn().
+   20× select * from "order_items" where "order_items"."order_id" = ?  (3.1 ms)
+        at app/Http/Controllers/OrderController.php:42 (App\Http\Controllers\OrderController::index)
+```
+
+`assertQueryCount(3)` means exactly three; with an operator, use one of
+`=`, `!=`, `<`, `<=`, `>` or `>=`.
+
+### A budget around a closure
+
+`budget()` runs a closure and checks everything it did as one profile,
+however many requests or traces that covers. It returns what the closure
+returns:
+
+```php
+$orders = Telemetry::budget(
+    fn () => Order::with('items')->latest()->take(50)->get(),
+    queries: 2,
+    ms: 100,                    // wall time of the closure
+);
+```
+
+A budget fails on any N+1 or duplicate query even when the count fits. If
+the loop is intended, pass `allowNPlusOne: true` or `allowDuplicates: true`.
+Code that runs outside a request is wrapped in a `telemetry.budget` span,
+because the query instrumentation only records queries inside a trace.
+
+### Scoping to one request
+
+`profiles()` returns one `PerformanceProfile` per trace, in the order the
+traces started. Each profile has the same assertions, and they chain:
+
+```php
+$this->get('/orders');
+$this->get('/orders/1');
+
+[$index, $show] = Telemetry::profiles();
+
+$index->assertQueryCount('<=', 10)->assertNoNPlusOne();
+$show->assertQueryCount('<=', 3);
+
+$index->queryCount();   // int
+$index->queryGroups();  // list<QueryGroup>: sql, count, durationMs, origin, nPlusOne, duplicate
+$index->nPlusOnes();    // the flagged groups
+$index->durationMs();
+```
+
+### Pest expectations
+
+Pest is not a dependency of this package, so its expectations are opt-in.
+Register them once in `tests/Pest.php`:
+
+```php
+\Cbox\Telemetry\Testing\PestExpectations::register();
+```
+
+```php
+Telemetry::fake();
+
+expect(fn () => $this->get('/orders'))->toStayWithinBudget(queries: 10, ms: 200);
+expect(fn () => $this->get('/orders'))->toQueryAtMost(10);
+expect(fn () => $this->get('/orders'))->toHaveNoNPlusOne();
+expect(fn () => $this->get('/orders'))->toHaveNoDuplicateQueries();
+```
+
+Each expectation runs the closure once, through `budget()`.
+
+### What these read, and when they refuse
+
+- **Query count**: the root span's `db.query.count` tally, or the number
+  of `db.query` spans, whichever is higher. The tally still counts queries
+  that fall under `instrument.queries_min_duration`.
+- **N+1 and duplicates**: whatever the detector flagged. A shape counts
+  once it repeats `instrument.query_duplicates_threshold` times (default
+  3) in one trace. To catch a two-row loop in tests, set
+  `TELEMETRY_INSTRUMENT_QUERY_DUPLICATES_THRESHOLD=2` in `phpunit.xml`.
+- **Origins**: by default only flagged queries (slow or repeated) carry
+  `code.*`. To get a line for every shape in a query-count failure, set
+  `TELEMETRY_INSTRUMENT_QUERY_ORIGIN=all` in `phpunit.xml`.
+
+An assertion that cannot see anything fails rather than passing. That
+happens in two cases: no trace was recorded (the request was made before
+`fake()`, or request instrumentation is off), or the switch it reads is
+off (`telemetry.enabled`, `instrument.queries`, or, for N+1 and
+duplicates, `instrument.query_duplicates`). The failure message names the
+switch to turn on.
 
 ## Span resource attributes
 

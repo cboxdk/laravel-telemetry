@@ -338,6 +338,153 @@ final class TelemetryFake extends TelemetryManager
 
     /*
     |--------------------------------------------------------------------------
+    | Performance assertions
+    |--------------------------------------------------------------------------
+    |
+    | Read from what the instrumentation already records — query spans, the
+    | root span's tallies, the N+1/duplicate detector — so a test asserts
+    | what production would report. The assertions below apply to EVERY
+    | trace recorded so far, one at a time: two requests in one test are
+    | two budgets, and a failure names the one that blew it.
+    */
+
+    /**
+     * One profile per recorded trace, in the order they started.
+     *
+     * @return list<PerformanceProfile>
+     */
+    public function profiles(): array
+    {
+        return PerformanceProfile::perTrace($this->recordedSpans(), $this->recordedEvents());
+    }
+
+    /**
+     * `assertQueryCount(3)` for exactly three per trace, or with an
+     * operator: `assertQueryCount('<=', 10)`.
+     */
+    public function assertQueryCount(int|string $operator, ?int $expected = null): void
+    {
+        foreach ($this->profilesOrFail(__FUNCTION__) as $profile) {
+            $profile->assertQueryCount($operator, $expected);
+        }
+    }
+
+    public function assertNoNPlusOne(): void
+    {
+        foreach ($this->profilesOrFail(__FUNCTION__) as $profile) {
+            $profile->assertNoNPlusOne();
+        }
+    }
+
+    public function assertNoDuplicateQueries(): void
+    {
+        foreach ($this->profilesOrFail(__FUNCTION__) as $profile) {
+            $profile->assertNoDuplicateQueries();
+        }
+    }
+
+    public function assertNoSlowQueries(?float $thresholdMs = null): void
+    {
+        foreach ($this->profilesOrFail(__FUNCTION__) as $profile) {
+            $profile->assertNoSlowQueries($thresholdMs);
+        }
+    }
+
+    /**
+     * Every trace's root span finished within `$ms` milliseconds.
+     */
+    public function assertMaxDuration(float $ms): void
+    {
+        foreach ($this->profilesOrFail(__FUNCTION__) as $profile) {
+            $profile->assertMaxDuration($ms);
+        }
+    }
+
+    /**
+     * Run `$callback` and hold everything it did to a budget, as one
+     * profile — however many requests or traces it spans.
+     *
+     * N+1 patterns and duplicate queries fail the budget unless allowed:
+     * they are never the intended shape of a code path, and a budget that
+     * only counted would wave through the loop that fits under it today.
+     *
+     * Code outside a request is wrapped in a `telemetry.budget` span, so its
+     * queries are recorded too (the query instrumentation ignores queries
+     * outside a trace). Returns whatever the callback returns.
+     *
+     * @template TReturn
+     *
+     * @param  Closure(): TReturn  $callback
+     * @return TReturn
+     */
+    public function budget(
+        Closure $callback,
+        ?int $queries = null,
+        ?float $ms = null,
+        bool $allowNPlusOne = false,
+        bool $allowDuplicates = false,
+    ): mixed {
+        $spansBefore = count($this->recordedSpans());
+        $eventsBefore = count($this->recordedEvents());
+
+        $started = hrtime(true);
+
+        $result = $this->currentSpan() === null
+            ? $this->span('telemetry.budget', $callback)
+            : $callback();
+
+        $wallMs = (hrtime(true) - $started) / 1_000_000;
+
+        $profile = new PerformanceProfile(
+            'budget',
+            array_slice($this->recordedSpans(), $spansBefore),
+            array_slice($this->recordedEvents(), $eventsBefore),
+            $wallMs,
+        );
+
+        if ($queries !== null) {
+            $profile->assertQueryCount('<=', $queries);
+        }
+
+        if (! $allowNPlusOne) {
+            $profile->assertNoNPlusOne();
+        }
+
+        if (! $allowDuplicates) {
+            $profile->assertNoDuplicateQueries();
+        }
+
+        if ($ms !== null) {
+            $profile->assertMaxDuration($ms);
+        }
+
+        /** @var TReturn $result */
+        return $result;
+    }
+
+    /**
+     * A budget over nothing would pass for the worst possible reason — no
+     * trace was recorded, so the instrumentation never ran — so it fails.
+     *
+     * @return list<PerformanceProfile>
+     */
+    private function profilesOrFail(string $assertion): array
+    {
+        $profiles = $this->profiles();
+
+        if ($profiles === []) {
+            Assert::fail(
+                "{$assertion}() found no recorded trace to check. Make the request after Telemetry::fake() "
+                .'(with telemetry.enabled and telemetry.instrument.requests on), or wrap the code in '
+                .'Telemetry::budget(fn () => ...).',
+            );
+        }
+
+        return $profiles;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Internals
     |--------------------------------------------------------------------------
     */
