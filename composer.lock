@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "61cb47579cc8bf5bb80974d24502d196",
+    "content-hash": "3cc653884876fe498b95a32e106e226f",
     "packages": [
         {
             "name": "brick/math",
@@ -5761,12 +5761,12 @@
             "version": "v5.7.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/vlucas/phpdotenv.git",
+                "url": "https://github.com/phpdotenv/phpdotenv.git",
                 "reference": "301c07936b16d88628b126b01d082ba153cf4c40"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/vlucas/phpdotenv/zipball/301c07936b16d88628b126b01d082ba153cf4c40",
+                "url": "https://api.github.com/repos/phpdotenv/phpdotenv/zipball/301c07936b16d88628b126b01d082ba153cf4c40",
                 "reference": "301c07936b16d88628b126b01d082ba153cf4c40",
                 "shasum": ""
             },
@@ -6958,6 +6958,88 @@
                 }
             ],
             "time": "2026-09-19T10:46:58+00:00"
+        },
+        {
+            "name": "laravel/ai",
+            "version": "v1.2.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/laravel/ai.git",
+                "reference": "acd4d82d342eceb04d50229b3635b484474fbec5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/laravel/ai/zipball/acd4d82d342eceb04d50229b3635b484474fbec5",
+                "reference": "acd4d82d342eceb04d50229b3635b484474fbec5",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/console": "^12.0|^13.0",
+                "illuminate/container": "^12.0|^13.0",
+                "illuminate/contracts": "^12.0|^13.0",
+                "illuminate/database": "^12.0|^13.0",
+                "illuminate/filesystem": "^12.0|^13.0",
+                "illuminate/json-schema": "^12.62|^13.15",
+                "illuminate/support": "^12.0|^13.0",
+                "laravel/prompts": "^0.3.6",
+                "laravel/serializable-closure": "^2.0",
+                "php": "^8.3",
+                "symfony/yaml": "^7.2|^8.0"
+            },
+            "conflict": {
+                "aws/aws-sdk-php": "<3.369.1",
+                "laravel/mcp": "<1.0"
+            },
+            "require-dev": {
+                "aws/aws-sdk-php": "^3.369.1",
+                "driftingly/rector-laravel": "^2.5",
+                "jasonmccreary/double": "^1.0",
+                "laravel/mcp": "^1.0",
+                "laravel/pint": "^1.26",
+                "orchestra/testbench": "^10.6|^11.0",
+                "pestphp/pest": "^3.0|^4.0",
+                "pestphp/pest-plugin-laravel": "^3.0|^4.0",
+                "phpstan/phpstan": "^2.1",
+                "rector/rector": "^2.5"
+            },
+            "suggest": {
+                "aws/aws-sdk-php": "Required to use the Bedrock provider.",
+                "laravel/mcp": "Required to use MCP client tools or MCP server tools with Laravel AI agents."
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Laravel\\Ai\\AiServiceProvider"
+                    ]
+                },
+                "branch-alias": {
+                    "dev-master": "1.x-dev"
+                }
+            },
+            "autoload": {
+                "files": [
+                    "functions.php"
+                ],
+                "psr-4": {
+                    "Laravel\\Ai\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "The official AI SDK for Laravel.",
+            "homepage": "https://github.com/laravel/ai",
+            "keywords": [
+                "ai",
+                "laravel"
+            ],
+            "support": {
+                "issues": "https://github.com/laravel/ai/issues",
+                "source": "https://github.com/laravel/ai"
+            },
+            "time": "2026-10-12T17:40:55+00:00"
         },
         {
             "name": "laravel/horizon",

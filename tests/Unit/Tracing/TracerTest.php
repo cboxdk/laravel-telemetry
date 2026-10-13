@@ -158,3 +158,21 @@ it('ending a span twice is a no-op', function () {
 
     expect($tracer->drain())->toHaveCount(1);
 });
+
+it('still tallies and enriches a root that ends with a child left open', function () {
+    $tracer = new Tracer;
+    $tracer->enrichRootWith(fn (): array => ['enriched' => true]);
+
+    $root = $tracer->startSpan('request');
+    $tracer->bumpStat('db.query.count', 2);
+    // A run that never reports its end — a stream nobody read to the end.
+    $tracer->startSpan('invoke_agent abandoned');
+
+    $root->end();
+
+    $exported = $tracer->drain();
+
+    expect($exported)->toHaveCount(1)
+        ->and($exported[0]->attributes()['enriched'] ?? null)->toBeTrue()
+        ->and($exported[0]->attributes()['db.query.count'] ?? null)->toBe(2);
+});

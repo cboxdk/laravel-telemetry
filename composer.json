@@ -33,6 +33,7 @@
     "require-dev": {
         "cboxdk/system-metrics": "^3.0",
         "larastan/larastan": "^3.0",
+        "laravel/ai": "^1.2",
         "laravel/horizon": "^5.47",
         "laravel/pennant": "^1.24",
         "laravel/pint": "^1.14",
@@ -56,6 +57,7 @@
         "ext-pdo_sqlite": "Required when using the sqlite metric store or spool (NativePHP mobile/desktop).",
         "ext-redis": "Recommended when using the redis metric store (phpredis).",
         "geoip2/geoip2": "Resolve geo.* from the IP for analytics (telemetry.analytics.geo) with a MaxMind GeoLite2 database, so the raw IP can be dropped.",
+        "laravel/ai": "OpenTelemetry GenAI spans and token/duration metrics for agent runs, model calls, tool calls and embeddings (^1.0).",
         "laravel/horizon": "Supervisor/master state, long-wait detection, process restarts and OOM metrics when Horizon runs your queues.",
         "laravel/pennant": "Feature flag check counters (feature.checks, feature.unknown).",
         "laravel/reverb": "WebSocket message/channel/connection metrics when Reverb is your broadcasting server.",

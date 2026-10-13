@@ -62,6 +62,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertion fails, instead of passing, when no trace was recorded or the
   query instrumentation it reads is switched off.
 
+- **Laravel AI SDK traces and token metrics.** When `laravel/ai` is
+  installed, every agent run becomes an `invoke_agent {agent}` span with a
+  `chat {model}` span per model call and an `execute_tool {tool}` span per
+  tool call, in the trace it ran in; an agent used as a tool nests under
+  the `execute_tool` that ran it, and embeddings calls get
+  `embeddings {model}`. Spans carry the OpenTelemetry GenAI attributes
+  (provider, requested and responding model, token usage including cache
+  and reasoning tokens, finish reasons, conversation id), and each model
+  call records `gen_ai.client.operation.duration` and
+  `gen_ai.client.token.usage{gen_ai.token.type}`. Failures fail the right
+  span with `error.type`; a provider failover is its own failed
+  `invoke_agent` span. Names follow GenAI semconv as last released
+  (v1.41.1). On by default when the package is present
+  (`instrument.ai`); nothing is registered when it is not.
+- **Prompt and completion capture, opt-in.** `instrument.ai_content`
+  (off by default) also records system instructions, input and output
+  messages and tool arguments/results in the conventions' message shape,
+  within a byte budget (`instrument.ai_content_max_bytes`, 2048) cut on
+  UTF-8 boundaries so the JSON stays valid, and through the usual
+  redaction at flush. See [Cookbook: Laravel AI SDK](docs/cookbook/laravel-ai.md).
+
 ### Changed
 
 - **`@telemetryBrowser` now ships the real browser SDK.** The directive
@@ -89,6 +110,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dashboards or alerts on the old span or attribute names need the new
   ones. If you published the old script with
   `vendor:publish --tag=telemetry-assets`, publish again with `--force`.
+
+### Fixed
+
+- **A root that ends with a child still open keeps its tallies.** The
+  request's span lost `db.query.count`, `telemetry.overhead_ms` and its
+  enrichment when something it started never ended (a `laravel/ai` stream
+  nobody read to the end, for one), because "root" meant "the stack is
+  empty". It now means the bottom of the stack.
 
 ## [3.5.0] - 2026-10-13
 

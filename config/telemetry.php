@@ -1022,6 +1022,29 @@ return [
         // Channel names and connection ids are never used as labels.
         'reverb' => env('TELEMETRY_INSTRUMENT_REVERB', true),
 
+        // OpenTelemetry GenAI spans and metrics for laravel/ai (the
+        // official Laravel AI SDK) via its own events: invoke_agent
+        // {agent} → chat {model} / execute_tool {tool} per run,
+        // embeddings {model}, plus gen_ai.client.operation.duration and
+        // gen_ai.client.token.usage{gen_ai.token.type}. Labels are the
+        // operation, provider and requested model — never prompts.
+        'ai' => env('TELEMETRY_INSTRUMENT_AI', true),
+
+        // Record prompts, completions, system instructions and tool
+        // arguments/results on those spans (gen_ai.input.messages,
+        // gen_ai.output.messages, gen_ai.system_instructions,
+        // gen_ai.tool.call.arguments/result). OFF by default, as the
+        // conventions ask: this is user data. When on, every value still
+        // goes through the redaction engine at flush (patterns,
+        // Telemetry::redactUsing(), redaction.max_value_length).
+        'ai_content' => env('TELEMETRY_INSTRUMENT_AI_CONTENT', false),
+
+        // Byte budget for one captured content attribute, shared across
+        // the messages it carries and cut on UTF-8 boundaries so the JSON
+        // stays valid. Keep it under redaction.max_value_length (4096 by
+        // default), which caps the whole attribute after redaction.
+        'ai_content_max_bytes' => env('TELEMETRY_INSTRUMENT_AI_CONTENT_MAX_BYTES', 2048),
+
         // inertia.request span attribute (from the X-Inertia header) +
         // inertia.version_mismatches counter — a version mismatch means
         // Inertia is forcing a full page reload (X-Inertia-Location),

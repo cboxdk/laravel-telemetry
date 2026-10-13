@@ -10,6 +10,8 @@ use Cbox\Telemetry\Tests\DisabledTestCase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Http;
+use Laravel\Ai\Events\PromptingAgent;
+use Laravel\Ai\Events\StepCompleted;
 use PHPUnit\Framework\Attributes\Test;
 
 final class DisabledModeTest extends DisabledTestCase
@@ -42,5 +44,12 @@ final class DisabledModeTest extends DisabledTestCase
         // observation.
         $this->assertNotInstanceOf(InstrumentedConnectionFactory::class, $this->app->make('db.factory'));
         $this->assertNotInstanceOf(InstrumentedRedisManager::class, $this->app->make('redis'));
+    }
+
+    #[Test]
+    public function no_laravel_ai_listeners_are_registered_when_telemetry_is_disabled(): void
+    {
+        $this->assertFalse($this->app->make('events')->hasListeners(PromptingAgent::class));
+        $this->assertFalse($this->app->make('events')->hasListeners(StepCompleted::class));
     }
 }
