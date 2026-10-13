@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:92c89674-09e1-c34b-878a-731bf4c141ed",
+    "serialNumber": "urn:uuid:9bb4cea8-d130-8c04-8218-d77a08b3362c",
     "version": 1,
     "metadata": {
         "component": {
@@ -1148,6 +1148,34 @@
                 }
             ],
             "description": "Portable ASCII library - performance optimized (ascii) string functions for php."
+        },
+        {
+            "type": "library",
+            "bom-ref": "pkg:npm/%40cboxdk/telemetry-browser@0.3.0",
+            "name": "@cboxdk/telemetry-browser",
+            "version": "0.3.0",
+            "purl": "pkg:npm/%40cboxdk/telemetry-browser@0.3.0",
+            "licenses": [
+                {
+                    "license": {
+                        "id": "MIT"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "library",
+            "bom-ref": "pkg:npm/web-vitals@4.2.4",
+            "name": "web-vitals",
+            "version": "4.2.4",
+            "purl": "pkg:npm/web-vitals@4.2.4",
+            "licenses": [
+                {
+                    "license": {
+                        "id": "Apache-2.0"
+                    }
+                }
+            ]
         }
     ]
 }

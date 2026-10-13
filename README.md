@@ -55,8 +55,10 @@ spec-stable HTTP JSON.
   service-scoped, LGTM-ready
 - ✅ Opt-in web analytics: a shared cookieless `session.id`, unsampled
   `page_view` events, and built-in geo + User-Agent enrichment (default off)
-- ✅ Browser/RUM tracing: a zero-build `@telemetryBrowser` snippet ingests
-  frontend spans and `track()` events into the same trace as the backend,
+- ✅ Browser/RUM tracing: `@telemetryBrowser` loads the bundled
+  `@cboxdk/telemetry-browser` SDK (no build step) and puts page loads, Web
+  Vitals, fetch/XHR, errors and Livewire/Inertia navigations in the same
+  trace as the backend,
   plus token-gated source-map upload for symbolicated JS stack traces
 - ✅ Error tracking flow: the trace id ties Sentry/Flare issues, support
   cases and the trace waterfall together automatically

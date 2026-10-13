@@ -549,13 +549,19 @@ return [
             'max_attributes' => 32,      // per span
             'sample_rate' => 1.0,        // head sampling; drop a fraction of batches
 
-            // The bundled zero-build RUM script (@telemetryBrowser).
+            // Where the vendored @cboxdk/telemetry-browser bundle
+            // (@telemetryBrowser) is served from.
             'asset_path' => env('TELEMETRY_INGEST_SPANS_ASSET', 'telemetry/browser.js'),
             'browser' => [
-                'fetch' => true,   // instrument fetch + propagate traceparent (same-origin)
-                'errors' => true,  // capture uncaught JS errors as error spans
-                'vitals' => true,  // capture Core Web Vitals (LCP, CLS, INP) via PerformanceObserver
-                'sample' => 1.0,   // client-side head sampling (0-1)
+                'fetch' => true,          // fetch spans + traceparent to same-origin calls
+                'xhr' => true,            // the same for XMLHttpRequest (axios)
+                'errors' => true,         // uncaught errors + unhandled rejections as exception spans
+                'vitals' => true,         // Core Web Vitals (LCP, CLS, INP, FCP, TTFB) as browser.web_vital spans
+                'navigation' => true,     // history route changes as browser.route_change spans
+                'frameworks' => true,     // Livewire wire:navigate / Inertia visits as browser.navigation spans
+                'server_timing' => true,  // read the Server-Timing header onto page-load + fetch/XHR spans
+                'sample' => 1.0,          // client-side head sampling (0-1)
+                'debug' => false,         // console.debug the SDK's activity
             ],
         ],
     ],

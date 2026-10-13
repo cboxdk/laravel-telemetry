@@ -78,6 +78,32 @@ foreach ($lock['packages'] ?? [] as $package) {
     $components[$purl] = $component;
 }
 
+// The vendored browser bundle (resources/js/browser.js, written by
+// bin/update-browser-sdk.php) ships in the package too: the SDK itself and
+// what it inlines.
+$browserSdkFile = $root.'/resources/js/browser-sdk.json';
+if (is_file($browserSdkFile)) {
+    /** @var array{package: string, version: string, license?: string, bundles?: list<array{name: string, version: string, license: string}>} $browserSdk */
+    $browserSdk = json_decode((string) file_get_contents($browserSdkFile), true, 512, JSON_THROW_ON_ERROR);
+
+    $vendored = [['name' => $browserSdk['package'], 'version' => $browserSdk['version'], 'license' => $browserSdk['license'] ?? 'MIT']];
+    foreach ($browserSdk['bundles'] ?? [] as $bundled) {
+        $vendored[] = $bundled;
+    }
+
+    foreach ($vendored as $npm) {
+        $purl = 'pkg:npm/'.str_replace('@', '%40', $npm['name']).'@'.$npm['version'];
+        $components[$purl] = [
+            'type' => 'library',
+            'bom-ref' => $purl,
+            'name' => $npm['name'],
+            'version' => $npm['version'],
+            'purl' => $purl,
+            'licenses' => licenseEntries([$npm['license']]),
+        ];
+    }
+}
+
 ksort($components, SORT_STRING);
 $components = array_values($components);
 

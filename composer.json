@@ -96,6 +96,7 @@
         "test-coverage": "vendor/bin/pest --coverage",
         "license-check": "php bin/check-licenses.php",
         "sbom": "php bin/generate-sbom.php",
+        "browser-sdk": "php bin/update-browser-sdk.php",
         "check": [
             "@format:check",
             "@analyse",

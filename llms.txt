@@ -51,7 +51,7 @@ profiles, connection timing and crash records without owning any semantic.
 - [Providers](docs/extension-points/providers.md): publish telemetry from your package
 - [Custom exporters](docs/extension-points/exporters.md): the Exporter contract
 - [Analytics](docs/production/analytics.md): opt-in web analytics on the telemetry we collect — shared session.id, unsampled page_view events, built-in Cloudflare CF-IPCountry geo (or MaxMind/hook), server-side geo+UA enrichment at browser ingest
-- [Browser tracing](docs/production/browser-tracing.md): optional frontend span ingest — end-to-end distributed tracing, plus token-gated source-map upload + `Symbolicator` for symbolicating browser stacks
+- [Browser tracing](docs/production/browser-tracing.md): optional frontend span ingest — end-to-end distributed tracing, `@telemetryBrowser` with the vendored `@cboxdk/telemetry-browser` SDK (Livewire/Inertia soft navigations, Web Vitals, Server-Timing), plus token-gated source-map upload + `Symbolicator` for symbolicating browser stacks
 - [Error tracking & support flow](docs/production/error-tracking.md): the trace id ties errors (Sentry/Flare), support cases and the Tempo waterfall together
 - [Runtime hooks](docs/extension-points/hooks.md): request naming/enrichment, cache classification, user resolution, redaction
 - [Prometheus](docs/production/prometheus.md): scrape setup, security, cardinality

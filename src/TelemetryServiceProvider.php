@@ -808,7 +808,8 @@ class TelemetryServiceProvider extends ServiceProvider
      * browser can parent its RUM spans to the current server trace. A no-op
      * when no trace is active.
      *
-     * @telemetryBrowser — the traceparent meta plus the RUM <script> tag;
+     * @telemetryBrowser — the traceparent meta plus the <script> tag for
+     * the vendored @cboxdk/telemetry-browser bundle;
      * empty when the span ingest (or telemetry itself) is disabled.
      */
     private function registerBladeDirectives(): void
@@ -918,7 +919,7 @@ class TelemetryServiceProvider extends ServiceProvider
             ->defaults('telemetryIngest', $config)
             ->name('telemetry.ingest.spans');
 
-        // The zero-build RUM script served for @telemetryBrowser.
+        // The vendored @cboxdk/telemetry-browser bundle @telemetryBrowser loads.
         $assetPath = Cast::string($config['asset_path'] ?? null, 'telemetry/browser.js');
 
         $router->get($assetPath, BrowserAssetController::class)
