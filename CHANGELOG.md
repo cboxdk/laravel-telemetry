@@ -47,6 +47,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with provenance) and records it in `resources/js/browser-sdk.json`,
   `Http\BrowserSdk::VERSION` and the SBOM.
 
+- **Performance assertions for app test suites.** After `Telemetry::fake()`
+  and a request: `assertQueryCount('<=', 10)`, `assertNoNPlusOne()`,
+  `assertNoDuplicateQueries()`, `assertNoSlowQueries()` and
+  `assertMaxDuration($ms)`, each checked per recorded trace. They read
+  what the instrumentation already records (root tallies, query spans,
+  the N+1/duplicate detector), and a failure lists each SQL shape with its
+  count and the `code.*` line that ran it. `Telemetry::budget(fn () => …,
+  queries: 10, ms: 200)` holds a closure to a budget and fails on N+1 or
+  duplicates unless they are allowed. `profiles()` scopes assertions to
+  one trace. Pest expectations (`toStayWithinBudget`, `toQueryAtMost`,
+  `toHaveNoNPlusOne`, `toHaveNoDuplicateQueries`) are opt-in through
+  `Testing\PestExpectations::register()`. Pest is not a dependency. An
+  assertion fails, instead of passing, when no trace was recorded or the
+  query instrumentation it reads is switched off.
+
 ### Changed
 
 - **`@telemetryBrowser` now ships the real browser SDK.** The directive

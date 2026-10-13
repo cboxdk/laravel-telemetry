@@ -154,6 +154,18 @@ $fake->recordedMetrics()->forMetric('orders.created')->labelValues('tenant');
 $fake->recordedMetrics()->labelCardinality();           // ['tenant' => 2]
 $fake->metricLabelValues('orders.created', 'tenant');
 $fake->assertMetricLabelValues('orders.created', 'tenant', ['acme', 'globex']);
+
+// Performance budgets — read from query spans, root tallies and the
+// N+1/duplicate detector; checked per recorded trace, failures list each
+// SQL shape with its count and code.* origin.
+$this->get('/orders');
+Telemetry::assertQueryCount('<=', 10);       // or assertQueryCount(3) for exactly
+Telemetry::assertNoNPlusOne();
+Telemetry::assertNoDuplicateQueries();
+Telemetry::assertNoSlowQueries(?$thresholdMs);
+Telemetry::assertMaxDuration(200);           // ms, root span
+Telemetry::budget(fn () => ..., queries: 10, ms: 200, allowNPlusOne: false, allowDuplicates: false);
+Telemetry::profiles();                       // list<PerformanceProfile>, one per trace
 ```
 
 ## Artisan
