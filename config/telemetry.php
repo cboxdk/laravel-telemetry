@@ -1080,6 +1080,16 @@ return [
         // metric store. null uses the app's default cache store.
         'retry_link_store' => env('TELEMETRY_QUEUE_RETRY_LINK_STORE'),
         'retry_link_ttl' => env('TELEMETRY_QUEUE_RETRY_LINK_TTL', 86400),
+
+        // Queued work that starts a NEW trace, linked to the dispatching
+        // span, instead of continuing it as a child — for long-delayed or
+        // fan-out jobs that would otherwise make one giant trace. The same
+        // as implementing Contracts\StartsLinkedTrace, for classes you
+        // cannot edit: jobs, queued listeners, mailables, notifications.
+        // A parent class or interface matches everything under it.
+        'linked_traces' => [
+            // \App\Jobs\RebuildSearchIndex::class,
+        ],
     ],
 
     /*

@@ -200,7 +200,8 @@ it('adopts an incoming trace id without its parent, linking the edge span instea
         ->and($span->parentSpanId)->toBeNull()
         ->and($span->links())->toHaveCount(1)
         ->and($span->links()[0]->traceId)->toBe('0af7651916cd43dd8448eb211c80319c')
-        ->and($span->links()[0]->spanId)->toBe('b7ad6b7169203331');
+        ->and($span->links()[0]->spanId)->toBe('b7ad6b7169203331')
+        ->and($span->links()[0]->sampled)->toBeTrue();
 });
 
 it('keeps the incoming sampling decision when adopting only the trace id', function () {

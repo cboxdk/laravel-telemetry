@@ -133,6 +133,9 @@ final readonly class OtlpSerializer
                 'traceId' => $link->traceId,
                 'spanId' => $link->spanId,
                 'attributes' => $this->attributes($link->attributes) ?: null,
+                // W3C trace flags (fixed32, a JSON number): the sampled bit
+                // of the linked context, when the link knows it.
+                'flags' => $link->sampled === null ? null : ($link->sampled ? 1 : 0),
             ], static fn ($value) => $value !== null), $span->links());
         }
 

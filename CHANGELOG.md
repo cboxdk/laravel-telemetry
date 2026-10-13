@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Jobs that start their own trace.** A queued job, listener, mailable
+  or notification implementing `Cbox\Telemetry\Contracts\StartsLinkedTrace`,
+  or listed in the new `queue.linked_traces` config, starts a new trace
+  instead of continuing the dispatcher's as a child. Its root span links
+  the dispatching span (trace id, span id, sampled flag;
+  `queue.dispatch = true`), and the new trace is sampled on its own. For
+  long-delayed and fan-out jobs that made one giant trace. The default is
+  unchanged, and sync jobs ignore the marker.
+- **Span links export their sampled flag.** OTLP links now carry `flags`
+  when the linked context's sampled flag is known, including the link an
+  edge request makes under `traces.continue_incoming_parent=false`.
+
 ## [3.5.0] - 2026-10-13
 
 Two things to know on upgrade. `db.query.duplicate_detected` and

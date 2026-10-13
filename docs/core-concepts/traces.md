@@ -266,7 +266,8 @@ span id — so downstream spans are children, not detached roots:
 
 - **Queued jobs**: payloads automatically carry the dispatcher's
   traceparent; workers continue it. (Sync jobs run inline in the
-  dispatcher's context.)
+  dispatcher's context.) A job can opt out of the parent, never the link:
+  see [jobs that start their own trace](#jobs-that-start-their-own-trace).
 - **Incoming HTTP**: the middleware continues `traceparent` headers when
   `traces.continue_incoming` is on.
 - **Outbound HTTP**: opt in per request with the client macro (deliberate,
@@ -335,6 +336,63 @@ The link is bridged via the app's own cache (`queue.retry_link_store`/
 UUID — a retry can land on a different worker process, so this can't be
 in-memory state. A `null`/`array` cache driver just means retries go
 unlinked, same graceful degradation as everything else here.
+
+## Jobs that start their own trace
+
+A job's span is a child of the span that dispatched it, and for most jobs
+that is the right shape. For two kinds it is not: a job delayed by hours
+stretches the request's trace across those hours, and a request that fans
+out thousands of jobs becomes one trace of thousands of spans. Mark those
+jobs and each starts a **new trace** instead, as its root, with a span
+link back to the dispatching span:
+
+```php
+use Cbox\Telemetry\Contracts\StartsLinkedTrace;
+
+final class RebuildSearchIndex implements ShouldQueue, StartsLinkedTrace
+{
+    // ...
+}
+```
+
+Put the marker on the class you wrote: a queued listener, mailable or
+notification works the same way, though Laravel wraps it in its own job
+(`CallQueuedListener`, `SendQueuedMailable`, `SendQueuedNotifications`).
+For classes you cannot edit, list them instead; a parent class or
+interface matches everything under it:
+
+```php
+// config/telemetry.php
+'queue' => [
+    'linked_traces' => [
+        \Vendor\Package\Jobs\SyncCatalog::class,
+    ],
+],
+```
+
+What changes, and what does not:
+
+- The link carries the dispatching span's trace id, span id and sampled
+  flag (exported as the link's W3C trace flags), plus
+  `queue.dispatch = true`. It is there for every attempt whose payload
+  carried a trace, so the job is always one click from the request that
+  queued it. `messaging.origin.name` still names that request.
+- The new trace is sampled by the worker's own root decision
+  (`traces.sample_rate`), not the dispatcher's. That is the point for a
+  fan-out: each job is kept or dropped on its own.
+- Each marked job in a batch gets its own trace, linked to the span that
+  pushed the batch. In a chain, the next job is dispatched by the worker
+  that ran the previous one, so a marked job links that job's span.
+- A retried attempt keeps both links: the dispatch and its
+  [previous attempt](#span-links-retries).
+- Dispatcher context dimensions (`Telemetry::context()`) still travel
+  with the job.
+- Sync jobs ignore the marker. They run inline, inside the dispatcher's
+  unit of work, and stay its children.
+
+```traceql
+{ span.queue.dispatch = true }
+```
 
 ## The trace id as a support reference
 

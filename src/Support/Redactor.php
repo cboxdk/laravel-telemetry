@@ -848,7 +848,7 @@ final class Redactor implements RedactsTelemetry
             // the one set redaction never walked. A retried job's link to its
             // previous attempt carries whatever the app put on it.
             $span->replaceLinks(array_map(
-                fn (SpanLink $link): SpanLink => new SpanLink($link->traceId, $link->spanId, $this->attributes($link->attributes)),
+                fn (SpanLink $link): SpanLink => new SpanLink($link->traceId, $link->spanId, $this->attributes($link->attributes), $link->sampled),
                 $span->links(),
             ));
 
