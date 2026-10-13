@@ -364,6 +364,10 @@ final class TraceRequest
                 ?? $this->livewireRoute($request, $span)
                 ?? $template;
 
+            // The logical route is only known now; the request span is still
+            // open, so a directive naming it keeps at least that span.
+            $this->telemetry->applyDirectives(['route.logical' => $route]);
+
             // Naming precedence: an explicit updateName() during the
             // request wins; then the app's nameRequestsUsing() resolver;
             // then "METHOD <logical route>".

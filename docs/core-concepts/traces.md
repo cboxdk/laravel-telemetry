@@ -446,7 +446,7 @@ the match.
 | Match | Known at | Pattern |
 |---|---|---|
 | `path` | request start | `Str::is`, no leading slash |
-| `route` | `RouteMatched` | `Str::is` on the route name or URI template |
+| `route` | `RouteMatched`; the logical route (`resolveRouteUsing`, `livewire:…`) at request end | `Str::is` on the route name, the URI template with or without leading slash (an `http_route` label value works as is, `/` included), or the logical route |
 | `user` | `Authenticated` (session guard), or request end for guards that fire none | exact `user.id` |
 | `context` | when `Telemetry::context()` sets it | exact value of that dimension |
 | `job` | job start | `Str::is` on the job class |

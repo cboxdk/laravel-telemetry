@@ -142,10 +142,15 @@ final readonly class Directive
             return isset($facts['user']) && (string) $facts['user'] === $this->value;
         }
 
-        // A route matches by name OR by its URI template, so an unnamed
-        // route can still be targeted.
+        // A route matches by name, by its URI template with or without the
+        // leading slash (`http.route` carries one, Laravel's uri() does
+        // not — and the root route is `/` either way), or by the logical
+        // route an app or Livewire resolved (`livewire:counter`), so the
+        // value of an `http_route` metric label can be used as it is.
+        $uri = isset($facts['route.uri']) ? (string) $facts['route.uri'] : null;
+
         $candidates = $this->match === self::MATCH_ROUTE
-            ? [$facts['route'] ?? null, $facts['route.uri'] ?? null]
+            ? [$facts['route'] ?? null, $uri, $uri === null ? null : '/'.ltrim($uri, '/'), $facts['route.logical'] ?? null]
             : [$facts[$this->match] ?? null];
 
         foreach ($candidates as $actual) {

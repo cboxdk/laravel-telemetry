@@ -9,7 +9,12 @@ it('matches a route by name or URI template', function () {
 
     expect($directive->matches(['route' => 'checkout.pay']))->toBeTrue()
         ->and($directive->matches(['route' => 'cart.show']))->toBeFalse()
-        ->and(Directive::route('api/orders/*')->matches(['route' => null, 'route.uri' => 'api/orders/{order}']))->toBeTrue();
+        ->and(Directive::route('api/orders/*')->matches(['route' => null, 'route.uri' => 'api/orders/{order}']))->toBeTrue()
+        // the http_route label form, root route included
+        ->and(Directive::route('/api/orders/{order}')->matches(['route.uri' => 'api/orders/{order}']))->toBeTrue()
+        ->and(Directive::route('/')->matches(['route.uri' => '/']))->toBeTrue()
+        ->and(Directive::route('/')->matches(['route.uri' => 'about']))->toBeFalse()
+        ->and(Directive::route('livewire:counter')->matches(['route.logical' => 'livewire:counter']))->toBeTrue();
 });
 
 it('matches paths, jobs, users and context dimensions', function () {
