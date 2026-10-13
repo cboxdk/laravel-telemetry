@@ -7,6 +7,7 @@ namespace Cbox\Telemetry;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\RedactsTelemetry;
 use Cbox\Telemetry\Contracts\TelemetryProvider;
+use Cbox\Telemetry\Directives\DirectiveStore;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Metrics\Instruments\Counter;
 use Cbox\Telemetry\Metrics\Instruments\Gauge;
@@ -259,6 +260,88 @@ class TelemetryManager
     {
         $this->tracer->resetContext();
         $this->rememberedUser = null;
+        $this->directiveFacts = [];
+        $this->appliedDirectives = [];
+        $this->profileRequested = false;
+        $this->directiveStore?->forgetLoaded();
+    }
+
+    /**
+     * Time-limited "record more of this" rules — see Directive.
+     */
+    public function directives(): DirectiveStore
+    {
+        return $this->directiveStore ??= new DirectiveStore(static fn () => app('cache')->store());
+    }
+
+    public function useDirectives(?DirectiveStore $store, bool $apply = true): void
+    {
+        $this->directiveStore = $store;
+        $this->applyDirectives = $apply && $store !== null;
+    }
+
+    /**
+     * Facts about the current unit of work, as they become known — the
+     * path at request start, the route once matched, the user once
+     * authenticated, the job class, context dimensions as they are set.
+     * A directive matching them keeps the whole trace (sampling forced
+     * on, detail retained) and may ask for a CPU profile.
+     *
+     * Spans that already ENDED in an unsampled trace before the match are
+     * gone; path and job matches apply before any, route and user matches
+     * after routing and authentication.
+     *
+     * @param  array<string, scalar|null>  $facts
+     */
+    public function applyDirectives(array $facts): void
+    {
+        if (! $this->enabled || ! $this->applyDirectives || $this->directiveStore === null) {
+            return;
+        }
+
+        FailSafe::guard(function () use ($facts): void {
+            $active = $this->directiveStore?->active() ?? [];
+
+            if ($active === []) {
+                return;
+            }
+
+            $this->directiveFacts = array_merge($this->directiveFacts, array_filter($facts, static fn ($value): bool => $value !== null && $value !== ''));
+
+            foreach ($active as $directive) {
+                if (isset($this->appliedDirectives[$directive->id]) || ! $directive->matches($this->directiveFacts)) {
+                    continue;
+                }
+
+                $this->appliedDirectives[$directive->id] = true;
+
+                $this->tracer->resample(true);
+                // On every span from here, so the tail policy keeps the
+                // trace's detail and a reader can see why it was recorded.
+                $this->tracer->addContext(['telemetry.directive' => $directive->id]);
+
+                if ($directive->profile && ! $this->profileRequested) {
+                    $this->profileRequested = true;
+
+                    if ($this->onProfileRequested !== null) {
+                        ($this->onProfileRequested)();
+                    }
+                }
+            }
+        });
+    }
+
+    public function profilingRequested(): bool
+    {
+        return $this->profileRequested;
+    }
+
+    /**
+     * @param  (Closure(): void)|null  $callback  starts a profiler for the current unit of work, if it can
+     */
+    public function onProfileRequested(?Closure $callback): void
+    {
+        $this->onProfileRequested = $callback;
     }
 
     /**
@@ -346,6 +429,18 @@ class TelemetryManager
         }
 
         $this->tracer->addContext($attributes);
+
+        if ($this->applyDirectives) {
+            $facts = [];
+
+            foreach ($attributes as $key => $value) {
+                if ($value !== null) {
+                    $facts['context:'.$key] = $value;
+                }
+            }
+
+            $this->applyDirectives($facts);
+        }
     }
 
     /**
@@ -453,6 +548,21 @@ class TelemetryManager
 
     /** Laravel Context keys read per record — a ceiling, not a target. */
     private const MAX_LARAVEL_CONTEXT_KEYS = 32;
+
+    private ?DirectiveStore $directiveStore = null;
+
+    private bool $applyDirectives = false;
+
+    /** @var array<string, scalar> */
+    private array $directiveFacts = [];
+
+    /** @var array<string, true> directive ids already applied to this unit of work */
+    private array $appliedDirectives = [];
+
+    private bool $profileRequested = false;
+
+    /** @var (Closure(): void)|null */
+    private ?Closure $onProfileRequested = null;
 
     /** @var list<string>|null null = Laravel Context is not read */
     private ?array $laravelContextKeys = null;
@@ -1380,6 +1490,8 @@ class TelemetryManager
                 || $span->durationMs() >= $this->slowRequestMs
                 || ($span->isDetail() && $span->durationMs() >= $this->slowSpanMs)
                 || ($span->isDetail() && isset($span->attributes()['laravel.db.query.repeat']))
+                // Recorded on purpose — a directive asked for this slice.
+                || isset($span->attributes()['telemetry.directive'])
             ) {
                 $interesting[$span->traceId] = true;
             }

@@ -175,6 +175,8 @@ final class TraceRequest
             // As context, not a span attribute: every span of the request
             // carries it, and so do the jobs it dispatches — a before/after
             // comparison covers the queued half of the work too.
+            $this->telemetry->applyDirectives(['path' => $request->path()]);
+
             if (($label = $this->label($request)) !== null) {
                 $this->telemetry->context(['laravel.trace.label' => $label]);
             }
@@ -209,10 +211,8 @@ final class TraceRequest
             // unit — a unit opens even where profiling is unavailable, and
             // reading a handle as "profiling is covered" silenced excimer on
             // every host with the extension but no usable timer.
-            if (! $this->native->profiles() && config('telemetry.instrument.profiling', true) && $span->sampled) {
-                $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
-                    Cast::float(config('telemetry.profiling.period'), 0.001),
-                ));
+            if ($span->sampled || $this->telemetry->profilingRequested()) {
+                $this->ensureProfiler($request);
             }
 
             // LAST, so the first phase measures the application rather than
@@ -263,6 +263,26 @@ final class TraceRequest
         });
 
         return $response;
+    }
+
+    /**
+     * Start the excimer fallback for this request, unless it runs already,
+     * the native sampler covers it, or profiling is off. Public for the
+     * directives that ask for a profile after routing or authentication
+     * — later than the start of the request, so that profile is partial.
+     */
+    public function ensureProfiler(Request $request): void
+    {
+        if (! $request->attributes->get(self::SPAN_KEY) instanceof Span
+            || $request->attributes->has(self::PROFILE_KEY)
+            || $this->native->profiles()
+            || ! config('telemetry.instrument.profiling', true)) {
+            return;
+        }
+
+        $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
+            Cast::float(config('telemetry.profiling.period'), 0.001),
+        ));
     }
 
     /**
@@ -382,6 +402,11 @@ final class TraceRequest
                         'user.guard' => $guard,
                     ]));
                     $span->setAttributes($this->telemetry->resolveUserAttributes($user, $guard));
+
+                    // Guards that fire no Authenticated event (token, request
+                    // guards) are only known here: the request span is still
+                    // open, so a user directive keeps at least that.
+                    $this->telemetry->applyDirectives(['user' => Cast::string($user->getAuthIdentifier())]);
                 } elseif (($remembered = $this->telemetry->rememberedAuthenticatedUser()) !== null) {
                     // The login POST (user resolves after span start) and
                     // logout requests (guard empty by terminate) — the

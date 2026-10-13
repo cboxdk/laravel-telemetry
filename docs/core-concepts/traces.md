@@ -412,6 +412,72 @@ if ($request->user()?->isAdmin()) {
 It re-decides the whole active trace from that point, the open root span
 included, exactly like the `Sample` middleware.
 
+
+## Directives: record more of one slice, for a while
+
+A sample rate is right for the fleet and useless for the one customer on
+the phone. A **directive** turns recording up for exactly one slice of
+traffic — a route, a path, a user, a tenant, a job — and turns itself off
+again:
+
+```bash
+php artisan telemetry:watch --user=42 --minutes=120 --profile --reason="ticket 881"
+php artisan telemetry:watch --route="checkout.*" --minutes=15
+php artisan telemetry:watch --context=tenant.id=7
+php artisan telemetry:watch --job="App\\Jobs\\Billing\\*"
+php artisan telemetry:watch --list          # --remove=<id>, --clear
+```
+
+```php
+use Cbox\Telemetry\Directives\Directive;
+
+Telemetry::directives()->add(
+    Directive::user(42)->profile()->for(minutes: 120)->because('ticket 881'),
+);
+```
+
+A matching unit of work is **kept whatever the sample rate said**, keeps
+its **detail spans** under `traces.details = tail`, and every span from
+the match on carries `telemetry.directive = <id>`. With `->profile()` it
+also gets a CPU profile: the native extension's when installed (its
+profile is kept because the trace now is), otherwise excimer, started at
+the match.
+
+| Match | Known at | Pattern |
+|---|---|---|
+| `path` | request start | `Str::is`, no leading slash |
+| `route` | `RouteMatched` | `Str::is` on the route name or URI template |
+| `user` | `Authenticated` (session guard), or request end for guards that fire none | exact `user.id` |
+| `context` | when `Telemetry::context()` sets it | exact value of that dimension |
+| `job` | job start | `Str::is` on the job class |
+
+Spans that already **ended** in an unsampled trace before the match are
+gone: path and job matches lose nothing, route and user matches lose what
+ran before routing or authentication, and a profile started late is
+partial.
+
+Every directive expires (an hour by default, at most
+`directives.max_minutes`), and at most `directives.max` are active. They
+live in the application's cache (`directives.store`), so every host sees
+them; with none active, the per-request cost is one APCu read (an empty
+list is remembered for `directives.recheck_seconds`). Without APCu under
+PHP-FPM it is one cache read per request — `TELEMETRY_DIRECTIVES=false`
+if you do not use them.
+
+**From another app** — a telemetry UI or insights install that is not
+this application — set `TELEMETRY_DIRECTIVES_SECRET`, and
+`GET|POST /telemetry/directives` and `DELETE /telemetry/directives/{id}`
+appear. Every call is signed:
+
+```
+X-Telemetry-Timestamp: <unix seconds>
+X-Telemetry-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>">
+```
+
+Five minutes of clock skew is allowed. A POST body is the directive:
+`{"match":"route","value":"checkout.*","minutes":15,"profile":true,"reason":"…","created_by":"insights"}`
+(`key` for `context`); the id is always assigned by this app.
+
 ## Ignoring request paths
 
 Sampling still *measures* a request — `Sample::never()` drops its spans,

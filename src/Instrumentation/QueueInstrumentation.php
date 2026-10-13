@@ -423,6 +423,8 @@ final class QueueInstrumentation implements ManagesRequestState
                 $this->retryLink($event),
             );
 
+            $this->telemetry()->applyDirectives(['job' => $event->job->resolveName()]);
+
             $this->jobSpans[] = $span;
             // A uuid identifies one attempt. If one is somehow already
             // open under this key — a job that dispatched itself

@@ -247,6 +247,33 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Directives
+    |--------------------------------------------------------------------------
+    |
+    | Time-limited "keep every trace (and a profile) for this route / path /
+    | user / tenant / job" rules: `php artisan telemetry:watch`,
+    | Telemetry::directives(), or the signed endpoint below for a telemetry
+    | UI or insights install elsewhere. Stored in the app's cache so every
+    | host sees them. With no directives the per-request cost is one APCu
+    | read (an empty list is remembered for `recheck_seconds`); without APCu
+    | under PHP-FPM it is one cache read per request — set enabled=false if
+    | that matters and you do not use directives.
+    |
+    */
+    'directives' => [
+        'enabled' => env('TELEMETRY_DIRECTIVES', true),
+        'store' => env('TELEMETRY_DIRECTIVES_STORE'),
+        'recheck_seconds' => 15,
+        'max' => 50,
+        'max_minutes' => 1440,
+
+        // The signed HTTP endpoint exists only when a secret is set.
+        'path' => 'telemetry/directives',
+        'secret' => env('TELEMETRY_DIRECTIVES_SECRET'),
+    ],
+
     'traces' => [
         'sample_rate' => env('TELEMETRY_TRACES_SAMPLE_RATE', 1.0),
 

@@ -60,6 +60,16 @@ the duplicate signals as "N+1" should add the new ones.
 - **`Telemetry::sample(true|false|rate)`:** re-decide sampling for the
   active trace from application code (force-keep admin traces), like the
   `Sample` middleware.
+- **Directives: record more of one slice of traffic, for a while.**
+  `php artisan telemetry:watch --user=42 --minutes=120 --profile`, or
+  `Telemetry::directives()->add(Directive::route('checkout.*'))`. A
+  matching request or job is kept whatever the sample rate, keeps its
+  detail spans, carries `telemetry.directive`, and can get a CPU profile.
+  Matches on path, route, user, a context dimension or job class; every
+  directive expires. Stored in the app's cache; an HMAC-signed
+  `telemetry/directives` endpoint (when `directives.secret` is set) lets a
+  telemetry UI or insights install elsewhere manage them. With none
+  active the per-request cost is one APCu read.
 - Queries dashboard: N+1 and duplicate panels with the app line that ran
   them.
 

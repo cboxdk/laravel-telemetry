@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static void context(array<string, scalar|null> $attributes)
  * @method static void captureLaravelContext(list<string> $only = [])
  * @method static void sample(bool|float $decision)
+ * @method static \Cbox\Telemetry\Directives\DirectiveStore directives()
  * @method static array<string, scalar|null> contextAttributes()
  * @method static void labelRequestsUsing(\Closure|null $resolver)
  * @method static void nameRequestsUsing(\Closure|null $resolver)
