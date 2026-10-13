@@ -67,6 +67,14 @@ final class Overhead
         return $ms;
     }
 
+    /**
+     * The accumulated time in milliseconds, without starting over.
+     */
+    public static function peekMs(): float
+    {
+        return self::$nanoseconds / 1_000_000;
+    }
+
     public static function reset(): void
     {
         self::$nanoseconds = 0;

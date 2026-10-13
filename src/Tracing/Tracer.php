@@ -582,6 +582,14 @@ final class Tracer
     }
 
     /**
+     * A per-trace tally so far, or null when nothing bumped it.
+     */
+    public function stat(string $attribute): ?float
+    {
+        return $this->traceStats[$attribute] ?? null;
+    }
+
+    /**
      * Accumulate a per-trace tally (query count, query time, …). The
      * totals land as attributes on the ROOT span when it ends, so every
      * request shows its "4 queries / 24.5 ms" summary without needing

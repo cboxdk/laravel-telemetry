@@ -54,6 +54,12 @@ the duplicate signals as "N+1" should add the new ones.
   `ScheduledTaskOverrunning` and `ScheduledTasksStartingLate`, and three
   new panels on the Scheduled Tasks dashboard
   (`instrument.schedule_monitoring`, default on).
+- **`Server-Timing` header (opt-in, `traces.server_timing`):** db, cache
+  and redis time and counts, the package's own overhead, and app time —
+  for browser DevTools and telemetry-browser.
+- **`Telemetry::sample(true|false|rate)`:** re-decide sampling for the
+  active trace from application code (force-keep admin traces), like the
+  `Sample` middleware.
 - Queries dashboard: N+1 and duplicate panels with the app line that ran
   them.
 

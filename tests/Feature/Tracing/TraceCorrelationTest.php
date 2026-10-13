@@ -159,3 +159,45 @@ it('tells the browser SDK about a renamed trace header', function () {
 
     expect(BrowserSnippet::render())->not->toContain('data-trace-header');
 });
+
+it('lets application code force-sample the active trace', function () {
+    Telemetry::span('request', function () {
+        // A head decision that dropped it, overruled by the app.
+        Telemetry::tracer()->resample(false);
+        Telemetry::sample(true);
+    });
+    Telemetry::flush();
+
+    expect(correlationSpans($this->collector)->firstWhere('name', 'request'))->not->toBeNull();
+});
+
+it('drops the active trace on sample(false)', function () {
+    Telemetry::span('request', function () {
+        Telemetry::sample(false);
+    });
+    Telemetry::flush();
+
+    expect(correlationSpans($this->collector)->firstWhere('name', 'request'))->toBeNull();
+});
+
+it('sends Server-Timing when enabled', function () {
+    config()->set('telemetry.traces.server_timing', true);
+    Route::get('/timed', function () {
+        Telemetry::tracer()->bumpStat('db.query.time_ms', 12.34);
+        Telemetry::tracer()->bumpStat('db.query.count', 3);
+
+        return 'ok';
+    });
+
+    $header = $this->get('/timed')->headers->get('Server-Timing');
+
+    expect($header)->toContain('db;dur=12.3;desc="3 queries"')
+        ->and($header)->toContain('telemetry;dur=')
+        ->and($header)->toMatch('/app;dur=\d+\.\d/');
+});
+
+it('sends no Server-Timing by default', function () {
+    Route::get('/timed', fn () => 'ok');
+
+    expect($this->get('/timed')->headers->has('Server-Timing'))->toBeFalse();
+});

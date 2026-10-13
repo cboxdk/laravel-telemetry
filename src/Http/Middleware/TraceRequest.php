@@ -256,9 +256,40 @@ final class TraceRequest
             if ($span instanceof Span && config('telemetry.traces.traceresponse', true)) {
                 $response->headers->set('traceresponse', sprintf('00-%s-%s-%s', $span->traceId, $span->spanId, $span->sampled ? '01' : '00'));
             }
+
+            if ($span instanceof Span && config('telemetry.traces.server_timing', false)) {
+                $response->headers->set('Server-Timing', $this->serverTiming($span), false);
+            }
         });
 
         return $response;
+    }
+
+    /**
+     * `Server-Timing` from the tallies the request already keeps — browser
+     * DevTools show it next to the network timing, and telemetry-browser
+     * can read it without another request. Opt-in: it tells the client how
+     * long the database took, which is not every app's business to share.
+     */
+    private function serverTiming(Span $span): string
+    {
+        $tracer = $this->telemetry->tracer();
+        $entries = [];
+
+        foreach ([
+            'db' => ['db.query.time_ms', 'db.query.count', 'queries'],
+            'cache' => ['cache.event.time_ms', 'cache.event.count', 'cache ops'],
+            'redis' => ['redis.command.time_ms', 'redis.command.count', 'commands'],
+        ] as $name => [$time, $count, $noun]) {
+            if (($ms = $tracer->stat($time)) !== null) {
+                $entries[] = sprintf('%s;dur=%.1f;desc="%d %s"', $name, $ms, (int) ($tracer->stat($count) ?? 0), $noun);
+            }
+        }
+
+        $entries[] = sprintf('telemetry;dur=%.1f', Overhead::peekMs());
+        $entries[] = sprintf('app;dur=%.1f', $span->elapsedMs());
+
+        return implode(', ', $entries);
     }
 
     /**

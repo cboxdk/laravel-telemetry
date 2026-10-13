@@ -57,6 +57,7 @@ Telemetry::traceId();              // ?string
 Telemetry::traceparent();          // ?string — W3C header value
 Telemetry::continueTrace($header); // continue a remote trace
 Telemetry::resetContext();         // forget the active trace
+Telemetry::sample(true);           // force-keep this trace (or a rate: sample(0.01)) — e.g. for admins
 Telemetry::captureLaravelContext(['tenant']); // read Laravel Context onto root spans/logs/exceptions (= instrument.laravel_context)
 
 // Requests left uninstrumented (merged with instrument.http_ignore_paths)
