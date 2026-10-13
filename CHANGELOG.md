@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`@telemetryBrowser` now ships the real browser SDK.** The directive
   loads a vendored copy of
   [`@cboxdk/telemetry-browser`](https://github.com/cboxdk/telemetry-browser)
-  **0.3.0** (its standalone build, ~9.5 KB gzipped) in place of the small
+  **0.4.0** (its standalone build, ~9.7 KB gzipped) in place of the small
   hand-written script, so a layout with just the directive gets XHR
   spans, Livewire `wire:navigate` and Inertia soft navigations, history
   route changes, Server-Timing on page-load and fetch/XHR spans, SPA page
@@ -112,6 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - every span carries `session.id` and `url.path`, plus `service.name`,
     `deployment.environment.name` and `service.version` from
     `telemetry.service`.
+
+  Page code reaches the SDK as `window.Telemetry.client`, or queues calls
+  such as `setUser()` on `window.TelemetryQueue` before the script loads.
+  Browser spans carry the user as `user.id`, like the request spans.
 
   `cboxdk/laravel-telemetry-ui` reads both shapes. Your own queries,
   dashboards or alerts on the old span or attribute names need the new

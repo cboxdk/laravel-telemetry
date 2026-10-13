@@ -20,7 +20,7 @@ final class BrowserSdk
     public const PACKAGE = '@cboxdk/telemetry-browser';
 
     /** The bundled SDK version — also the asset URL's cache-busting `?v=`. */
-    public const VERSION = '0.3.0';
+    public const VERSION = '0.4.0';
 
     /** The bundle on disk. */
     public static function path(): string

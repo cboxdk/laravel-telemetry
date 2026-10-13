@@ -118,7 +118,7 @@ the SDK's standalone build reads: `data-fetch`, `data-xhr`,
 script is same-origin, so `script-src 'self'` covers it too.
 
 **Caching.** The script is served with a one-day `Cache-Control`. Its URL
-carries the SDK version (`telemetry/browser.js?v=0.3.0`), so an upgrade
+carries the SDK version (`telemetry/browser.js?v=0.4.0`), so an upgrade
 reaches browsers on the next page view.
 
 Publish it to your own build/CDN instead of serving it live:
@@ -126,10 +126,26 @@ Publish it to your own build/CDN instead of serving it live:
 after upgrading the package), then point `ingest.spans.asset_path` at the
 published copy.
 
-Want the SDK in your own bundle instead, for manual spans, `setUser()` or
-`track()`? Run `npm i @cboxdk/telemetry-browser`, call `init()` yourself,
-and use `@telemetryTraceparent` for the meta. Don't load both: a second
-copy wraps `fetch` twice.
+**Calling the SDK from your page.** The snippet's SDK is
+`window.Telemetry.client` once it has started. Code that may run before
+the script loads pushes callbacks onto `window.TelemetryQueue`; they run
+in order once the SDK has started, and a later `push()` runs at once:
+
+```html
+<script>
+  (window.TelemetryQueue = window.TelemetryQueue || []).push((t) => {
+    t.setUser('{{ auth()->id() }}');
+  });
+</script>
+```
+
+Browser spans carry the user as `user.id`, the same key the request spans
+use.
+
+Want the SDK in your own bundle instead, for manual spans? Run
+`npm i @cboxdk/telemetry-browser`, call `init()` yourself, and use
+`@telemetryTraceparent` for the meta. Loading both is harmless (the SDK
+starts once per page), but the snippet's copy is then dead weight.
 
 Prefer to roll your own? Use `@telemetryTraceparent` (just the meta) and
 POST to the endpoint yourself. The contract and a minimal snippet are
@@ -137,7 +153,7 @@ below.
 
 ### The bundled SDK version
 
-This release ships `@cboxdk/telemetry-browser` **0.3.0**. Three places
+This release ships `@cboxdk/telemetry-browser` **0.4.0**. Three places
 record it: `Cbox\Telemetry\Http\BrowserSdk::VERSION`, the banner at the
 top of `resources/js/browser.js`, and `resources/js/browser-sdk.json`
 (source commit, npm integrity, the file's sha256 and the bundled
@@ -149,7 +165,7 @@ release workflow builds it from the version's tag and publishes it with a
 provenance attestation. To move to another release (maintainers):
 
 ```bash
-composer browser-sdk -- 0.4.0   # download, check the sha512, rewrite the three files
+composer browser-sdk -- 0.5.0   # download, check the sha512, rewrite the three files
 composer sbom                   # picks the new version up from browser-sdk.json
 ```
 

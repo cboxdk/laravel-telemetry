@@ -1,16 +1,16 @@
 {
     "package": "@cboxdk/telemetry-browser",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "license": "MIT",
     "source": {
-        "tarball": "https://registry.npmjs.org/@cboxdk/telemetry-browser/-/telemetry-browser-0.3.0.tgz",
-        "integrity": "sha512-br70AZsF4RygJC5svw5wyK+1g2v/WZOAQTK0Y/OBEp9eXyODl2M0CvJD+BW7w0eqdiy7c9dD9jpr2+MUFYzUgQ==",
+        "tarball": "https://registry.npmjs.org/@cboxdk/telemetry-browser/-/telemetry-browser-0.4.0.tgz",
+        "integrity": "sha512-GtBETOrXJTTLJEKbql6IdmqlSKSt4Y1bAccl4bKdNu6er5B/0aL87ILAiDSBnzy7LPGLixvxAZp/arhRZIWKTg==",
         "file": "package/dist/telemetry.global.js",
         "git": "https://github.com/cboxdk/telemetry-browser",
-        "tag": "v0.3.0",
-        "commit": "140a437f710e67fa3296572525dffd1ecd35a8a7"
+        "tag": "v0.4.0",
+        "commit": "f899ad8b22f5882a290a6c966fda363831237f07"
     },
-    "sha256": "891bfd10e530e536520fc54b4023eb944c4458b1b179d7674023e4718e42e0da",
+    "sha256": "113ed1e5d9362d82fd356af3f7cbf43dce6ecb2208a6fcb01697c8563c54617c",
     "bundles": [
         {
             "name": "web-vitals",
