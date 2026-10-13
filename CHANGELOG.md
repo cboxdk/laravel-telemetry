@@ -35,6 +35,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traces' detail spans (`instrument.http_client_n_plus_one`,
   `instrument.http_client_n_plus_one_threshold`,
   `instrument.http_client_origin`).
+- **More `ingest.spans.browser` switches** for the SDK: `xhr`,
+  `navigation`, `frameworks` (Livewire / Inertia), `server_timing` (all on
+  by default) and `debug` (off). The snippet also passes the service
+  identity, `traces.response_header` (so the SDK can tell whether an
+  Inertia response continued its trace) and the CSP nonce set with
+  `Vite::useCspNonce()`. The script URL carries `?v=<sdk version>`, so an
+  upgrade isn't stuck behind the day-long cache.
+- **`composer browser-sdk -- <version>`** refreshes the vendored bundle
+  from the npm release (integrity-checked, built from the SDK's git tag
+  with provenance) and records it in `resources/js/browser-sdk.json`,
+  `Http\BrowserSdk::VERSION` and the SBOM.
+
+### Changed
+
+- **`@telemetryBrowser` now ships the real browser SDK.** The directive
+  loads a vendored copy of
+  [`@cboxdk/telemetry-browser`](https://github.com/cboxdk/telemetry-browser)
+  **0.3.0** (its standalone build, ~9.5 KB gzipped) in place of the small
+  hand-written script, so a layout with just the directive gets XHR
+  spans, Livewire `wire:navigate` and Inertia soft navigations, history
+  route changes, Server-Timing on page-load and fetch/XHR spans, SPA page
+  views and engagement events (with analytics on), and stack traces with
+  error fingerprints. Same URL (`ingest.spans.asset_path`), same `data-*`
+  contract, same config keys. The browser spans are named differently:
+  - `document.load` is now `browser.page_load` (same `browser.ttfb_ms` /
+    `browser.dom_interactive_ms`, plus FCP, DOM complete, transfer size
+    and device dimensions);
+  - the single `web-vitals` span with `web_vitals.lcp_ms` / `.cls` /
+    `.inp_ms` is now one `browser.web_vital` span per metric
+    (`web_vital.name` / `.value` / `.rating`, LCP, CLS, INP, FCP and TTFB,
+    INP measured to the spec);
+  - every span carries `session.id` and `url.path`, plus `service.name`,
+    `deployment.environment.name` and `service.version` from
+    `telemetry.service`.
+
+  `cboxdk/laravel-telemetry-ui` reads both shapes. Your own queries,
+  dashboards or alerts on the old span or attribute names need the new
+  ones. If you published the old script with
+  `vendor:publish --tag=telemetry-assets`, publish again with `--force`.
 
 ## [3.5.0] - 2026-10-13
 

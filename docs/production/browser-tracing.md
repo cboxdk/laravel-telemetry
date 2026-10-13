@@ -40,8 +40,11 @@ strict payload bounding and optional head sampling — never a bearer token
 
 ## Turnkey: one directive
 
-Add `@telemetryBrowser` to your layout `<head>` and you're done — it emits
-the traceparent meta **and** a bundled, zero-dependency RUM script:
+Add `@telemetryBrowser` to your layout `<head>` and you're done. It emits
+the traceparent meta **and** a `<script>` tag for the
+[`@cboxdk/telemetry-browser`](https://github.com/cboxdk/telemetry-browser)
+SDK. The SDK is vendored in this package (about 9.5 KB gzipped) and served
+from your app: no CDN, nothing to build.
 
 ```blade
 <head>
@@ -50,38 +53,107 @@ the traceparent meta **and** a bundled, zero-dependency RUM script:
 </head>
 ```
 
-That script (served from your app, cached) roots the browser trace on the
-server trace, records a `document.load` span, instruments `fetch`
-(propagating `traceparent` to **same-origin** calls so backend spans join
-the trace — cross-origin is skipped to avoid CORS preflight), captures
-uncaught JS errors as error spans, and reports Core Web Vitals. Tune it in
-config:
+Keep it in `<head>`. Livewire re-runs `<body>` scripts on `wire:navigate`,
+and the SDK initialises once per document.
+
+What the SDK records:
+
+- **Page load**: a `browser.page_load` span rooted on the server trace,
+  with TTFB, FCP, DOM interactive/complete, transfer size and device
+  dimensions (user agent, viewport, connection type).
+- **Web Vitals**: LCP, CLS, INP, FCP and TTFB, one `browser.web_vital`
+  span each (`web_vital.name`, `web_vital.value`, and `web_vital.rating`:
+  good / needs-improvement / poor), measured by Google's `web-vitals`
+  library.
+- **fetch and XHR**: a client span per call. `traceparent` goes to
+  **same-origin** calls only, so backend spans join the trace and
+  cross-origin calls never trip a CORS preflight.
+- **Errors**: uncaught errors and unhandled rejections as `exception`
+  spans, with the stack trace and a fingerprint (`exception.group`).
+- **Route changes**: `history` navigations as `browser.route_change`.
+- **Livewire `wire:navigate` and Inertia visits**: one
+  `browser.navigation` span per soft navigation. Later requests join the
+  new page's server trace (Livewire through the new page's traceparent
+  meta, Inertia through the `traceresponse` header).
+- **Server-Timing**: when `traces.server_timing` is on, the header's
+  metrics land on the page-load and fetch/XHR spans as
+  `server_timing.<name>.duration_ms`.
+- **Analytics**: with `telemetry.analytics` on, SPA page views and
+  engagement as unsampled events (see
+  [Analytics](analytics.md#browser-analytics)).
+
+Every span carries `session.id`, `url.path`, and the service identity
+from `telemetry.service`: `service.name`, `deployment.environment.name`,
+and `service.version` when set. Set `service.version` to the release you
+upload source maps for, and browser stacks resolve against them.
+
+Tune it in config:
 
 ```php
 'ingest' => ['spans' => [
     'browser' => [
-        'fetch' => true,    // instrument fetch + propagate traceparent
-        'errors' => true,   // capture uncaught errors
-        'vitals' => true,   // report LCP/CLS/INP as a web-vitals span
-        'sample' => 1.0,    // client-side head sampling (0–1)
+        'fetch' => true,          // fetch spans + traceparent to same-origin calls
+        'xhr' => true,            // the same for XMLHttpRequest (axios)
+        'errors' => true,         // uncaught errors + unhandled rejections
+        'vitals' => true,         // Web Vitals as browser.web_vital spans
+        'navigation' => true,     // history route changes
+        'frameworks' => true,     // Livewire / Inertia soft navigations (needs navigation)
+        'server_timing' => true,  // read Server-Timing onto spans
+        'sample' => 1.0,          // client-side head sampling (0–1), per page
+        'debug' => false,         // console.debug the SDK's activity
     ],
 ]],
 ```
 
-**Web Vitals** (`vitals`): via `PerformanceObserver`, where supported —
-`web_vitals.lcp_ms` (Largest Contentful Paint), `web_vitals.cls`
-(Cumulative Layout Shift), `web_vitals.inp_ms` (a simplified
-Interaction to Next Paint — the worst single interaction observed, not
-the spec's high-percentile-across-all-interactions). LCP and CLS are not
-final until the page starts to close, so they ship as one `web-vitals`
-span at page hide/unload, alongside the final flush — not on `load`.
+Each switch becomes a `data-*` attribute on the script tag, which is what
+the SDK's standalone build reads: `data-fetch`, `data-xhr`,
+`data-errors`, `data-vitals`, `data-navigation`, `data-frameworks`,
+`data-server-timing`, `data-sample`, `data-debug`. The tag also carries
+`data-endpoint`, `data-service`, `data-environment`, `data-release`,
+`data-trace-header` (`traces.response_header`), and `data-analytics` plus
+`data-session` when analytics is on.
+
+**Content Security Policy.** If your app sets a nonce with
+`Vite::useCspNonce()`, the script tag carries the same `nonce`. The
+script is same-origin, so `script-src 'self'` covers it too.
+
+**Caching.** The script is served with a one-day `Cache-Control`. Its URL
+carries the SDK version (`telemetry/browser.js?v=0.3.0`), so an upgrade
+reaches browsers on the next page view.
 
 Publish it to your own build/CDN instead of serving it live:
-`php artisan vendor:publish --tag=telemetry-assets`.
+`php artisan vendor:publish --tag=telemetry-assets` (again with `--force`
+after upgrading the package), then point `ingest.spans.asset_path` at the
+published copy.
+
+Want the SDK in your own bundle instead, for manual spans, `setUser()` or
+`track()`? Run `npm i @cboxdk/telemetry-browser`, call `init()` yourself,
+and use `@telemetryTraceparent` for the meta. Don't load both: a second
+copy wraps `fetch` twice.
 
 Prefer to roll your own? Use `@telemetryTraceparent` (just the meta) and
-POST to the endpoint yourself — the contract and a minimal snippet are
+POST to the endpoint yourself. The contract and a minimal snippet are
 below.
+
+### The bundled SDK version
+
+This release ships `@cboxdk/telemetry-browser` **0.3.0**. Three places
+record it: `Cbox\Telemetry\Http\BrowserSdk::VERSION`, the banner at the
+top of `resources/js/browser.js`, and `resources/js/browser-sdk.json`
+(source commit, npm integrity, the file's sha256 and the bundled
+`web-vitals` version). The SBOM lists the SDK and `web-vitals` as npm
+components.
+
+The bundle is the npm release's own `dist/telemetry.global.js`. The SDK's
+release workflow builds it from the version's tag and publishes it with a
+provenance attestation. To move to another release (maintainers):
+
+```bash
+composer browser-sdk -- 0.4.0   # download, check the sha512, rewrite the three files
+composer sbom                   # picks the new version up from browser-sdk.json
+```
+
+Then add a CHANGELOG entry that names any span or attribute renames.
 
 ## The endpoint contract
 
@@ -94,7 +166,7 @@ below.
       "traceId": "0af7651916cd43dd8448eb211c80319c",
       "spanId": "b7ad6b7169203331",
       "parentSpanId": "0020000000000001",
-      "name": "document.load",
+      "name": "browser.page_load",
       "kind": "client",
       "start": 1720000000000,
       "end": 1720000000420,
@@ -130,7 +202,7 @@ addEventListener('load', () => {
   const t0 = performance.timeOrigin;
   navigator.sendBeacon('/telemetry/spans', JSON.stringify({ spans: [{
     traceId, spanId: hex(8), parentSpanId: rootId,
-    name: 'document.load', kind: 'client',
+    name: 'browser.page_load', kind: 'client',
     start: t0 + nav.startTime, end: t0 + nav.loadEventEnd,
     attributes: { 'http.url': location.href },
   }] }));
@@ -165,7 +237,7 @@ TELEMETRY_SOURCEMAPS_TOKEN=a-long-random-secret   # CI holds this, not the brows
 ```
 
 Upload from your build pipeline. With
-[`@cboxdk/telemetry-browser`](https://github.com/cboxdk/laravel-telemetry)
+[`@cboxdk/telemetry-browser`](https://github.com/cboxdk/telemetry-browser)
 it's one CLI call (or the bundled Vite plugin):
 
 ```bash

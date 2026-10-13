@@ -256,8 +256,10 @@ can be analysed. Off by default; changes nothing when disabled. See
 | `ingest.spans.max_spans` | — | `128` per batch (excess dropped) |
 | `ingest.spans.max_attributes` | — | `32` per span |
 | `ingest.spans.sample_rate` | — | `1.0` — server-side head sampling (0–1) to cap volume |
-| `ingest.spans.asset_path` | `TELEMETRY_INGEST_SPANS_ASSET` | `telemetry/browser.js` — the bundled RUM script `@telemetryBrowser` loads |
-| `ingest.spans.browser.{fetch,errors,vitals,sample}` | — | `true`/`true`/`true`/`1.0` — what the bundled script captures. `vitals` reports a `web-vitals` span (LCP/CLS/simplified INP via `PerformanceObserver`) at page hide/unload, when supported |
+| `ingest.spans.asset_path` | `TELEMETRY_INGEST_SPANS_ASSET` | `telemetry/browser.js` — where the vendored `@cboxdk/telemetry-browser` bundle that `@telemetryBrowser` loads is served (the tag adds `?v=<sdk version>`) |
+| `ingest.spans.browser.{fetch,xhr,errors,vitals,navigation,frameworks,server_timing}` | — | all `true` — which SDK instrumentations run: fetch / XHR spans with same-origin `traceparent`, exception spans, `browser.web_vital` spans (LCP/CLS/INP/FCP/TTFB), `history` route changes, Livewire / Inertia soft navigations (needs `navigation`), `Server-Timing` on spans |
+| `ingest.spans.browser.sample` | — | `1.0` — client-side head sampling (0–1), decided once per page |
+| `ingest.spans.browser.debug` | — | `false` — `console.debug` the SDK's activity |
 
 Add `@telemetryBrowser` to your layout for turnkey RUM (or `@telemetryTraceparent` + your own script). See
 [Browser tracing](../production/browser-tracing.md).

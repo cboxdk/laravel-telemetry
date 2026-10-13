@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
+use Cbox\Telemetry\Http\BrowserSdk;
 use Cbox\Telemetry\Http\BrowserSnippet;
 use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
@@ -175,7 +176,7 @@ it('propagates the shared session.id via data-session when analytics is on', fun
     expect(BrowserSnippet::render())->toContain('data-session="');
 });
 
-it('serves the zero-build RUM script with cache headers', function () {
+it('serves the vendored browser SDK bundle with cache headers', function () {
     config()->set('telemetry.ingest.spans.enabled', true);
 
     $res = (new BrowserAssetController)(app(TelemetryManager::class));
@@ -183,10 +184,10 @@ it('serves the zero-build RUM script with cache headers', function () {
     expect($res->getStatusCode())->toBe(200)
         ->and($res->headers->get('Content-Type'))->toContain('javascript')
         ->and($res->headers->get('Cache-Control'))->toContain('max-age')
-        ->and($res->getContent())->toContain('traceparent')
-        ->and($res->getContent())->toContain('sendBeacon')
-        ->and($res->getContent())->toContain('largest-contentful-paint')
-        ->and($res->getContent())->toContain('layout-shift');
+        ->and($res->getContent())->toBe(file_get_contents(BrowserSdk::path()))
+        ->and($res->getContent())->toContain('@cboxdk/telemetry-browser '.BrowserSdk::VERSION)
+        ->and($res->getContent())->toContain('var Telemetry=')
+        ->and($res->getContent())->toContain('sendBeacon');
 });
 
 it('404s the RUM script when ingest is disabled', function () {
