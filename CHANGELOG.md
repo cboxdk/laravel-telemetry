@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A circuit breaker on the spool push.** With the spool enabled, every
+  traced request hands its spans to the spool rather than the collector, so
+  the OTLP exporter's breaker never saw that path. A spool that was down or
+  blackholed cost every traced request the spool connection's full connect or
+  read timeout, after the response but on the PHP-FPM worker's clock, which
+  under load is how telemetry exhausts a pool's workers. After a failed push,
+  requests now skip the spool for 30 seconds: spans and events from that
+  window are dropped and the export reports `retryable`, while metrics keep
+  going to the collector. The push failure itself is still reported. The
+  state lives in SharedState, so it is shared by a PHP-FPM pool when APCu is
+  installed and per process otherwise. New self-metric:
+  `telemetry.spool.circuit_open`.
+
 ### Fixed
 
 - **Redis instrumentation no longer ignores the app's `default` connection

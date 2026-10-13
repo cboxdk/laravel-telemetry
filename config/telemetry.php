@@ -71,7 +71,8 @@ return [
     'resource_detection' => env('TELEMETRY_RESOURCE_DETECTION', true),
 
     // Emit the package's own health as metrics (telemetry.export.*,
-    // telemetry.spool.depth, telemetry.export.circuit_open) — who watches
+    // telemetry.spool.depth, telemetry.export.circuit_open,
+    // telemetry.spool.circuit_open) — who watches
     // the watcher. Cheap; disable only if you truly don't want them.
     'self_metrics' => env('TELEMETRY_SELF_METRICS', true),
 

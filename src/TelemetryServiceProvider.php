@@ -510,6 +510,15 @@ class TelemetryServiceProvider extends ServiceProvider
                     description: 'Pending payloads in the OTLP spool',
                     unit: '',
                 );
+
+                // 1 while requests skip the spool after a failed push, 0
+                // otherwise — alert on sustained 1.
+                $registry->gauge(
+                    'telemetry.spool.circuit_open',
+                    fn (): float => SpoolingOtlpExporter::circuitOpen() ? 1.0 : 0.0,
+                    description: 'Spool push circuit breaker state (1 = open)',
+                    unit: '1',
+                );
             }
         });
     }

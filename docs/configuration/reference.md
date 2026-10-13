@@ -36,7 +36,7 @@ Attached to every exported signal (OTel resource conventions).
 | `service.deployment` | `TELEMETRY_SERVICE_DEPLOYMENT` | auto — explicit value wins; otherwise the current git sha is detected from `.git/HEAD` (no exec). Becomes `deployment.id` on every signal |
 | `service.instance_id` | `TELEMETRY_SERVICE_INSTANCE_ID` | auto, always set — explicit value wins, then `service.instance.id` from `OTEL_RESOURCE_ATTRIBUTES`; otherwise `host.name` when the metric store lives on this host (APCu, SQLite, array, Redis on loopback or a socket), or `redis-<fingerprint>` of a shared Redis (host, port, database and prefixes — never credentials), identical on every host. Prometheus's and Mimir's OTLP receivers derive `instance` from it |
 | `resource_detection` | `TELEMETRY_RESOURCE_DETECTION` | `true` — auto-detect container/k8s/cloud attributes (`container.id`, `k8s.pod.name`, `k8s.namespace.name`, `cloud.region`, …) from cgroup facts, downward-API env vars and `OTEL_RESOURCE_ATTRIBUTES`. Config `service.*` keys always win |
-| `self_metrics` | `TELEMETRY_SELF_METRICS` | `true` — emit the package's own health as metrics (`telemetry.export.*`, `telemetry.spool.depth`) |
+| `self_metrics` | `TELEMETRY_SELF_METRICS` | `true` — emit the package's own health as metrics (`telemetry.export.*`, `telemetry.spool.depth`, `telemetry.spool.circuit_open`) |
 
 ### Container / Kubernetes / cloud detection
 
@@ -80,6 +80,7 @@ With `self_metrics` on, the package reports on itself (bounded labels):
 | `telemetry.export.rejected` | counter | exporter, signal | data points the backend rejected (OTLP partial success) |
 | `telemetry.export.circuit_open` | gauge (0/1) | — | OTLP breaker open (only when OTLP is a configured exporter) |
 | `telemetry.spool.depth` | gauge | — | pending OTLP spool payloads (only when the spool is enabled) |
+| `telemetry.spool.circuit_open` | gauge (0/1) | — | spool push breaker open after a failed push (only when the spool is enabled) |
 
 The bundled **System** dashboard renders these under a "Telemetry
 health" row — alert on a sustained open circuit or a climbing spool.
