@@ -71,8 +71,9 @@ spec-stable HTTP JSON.
   CPU profiles with a confidence figure, exact `pdo.connect`/`curl.exec`
   timing, and a crash record correlated to the trace the process died in
 - ✅ AI-ready: ships [Laravel Boost](https://github.com/laravel/boost)
-  guidelines, `llms.txt` and an agent guide — your AI assistant follows the
-  conventions out of the box
+  guidelines and skills (instrumenting code, debugging a slow request,
+  testing with `Telemetry::fake()`), `llms.txt` and an agent guide — your
+  AI assistant follows the conventions out of the box
 
 ## Installation
 

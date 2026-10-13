@@ -19,7 +19,7 @@ profiles, connection timing and crash records without owning any semantic.
 - [Quickstart](docs/quickstart.md): counters, gauges, histograms, spans, events
 - [API reference](docs/getting-started/api-reference.md): the whole facade on one page — read this first
 - [Testing](docs/getting-started/testing.md): Telemetry::fake() and all assertions, plus recordedMetrics() — every recorded series, its observed label values and a cardinality budget; performance assertions (assertQueryCount, assertNoNPlusOne, assertNoDuplicateQueries, assertNoSlowQueries, assertMaxDuration, Telemetry::budget(fn, queries:, ms:), per-trace profiles(), opt-in Pest expectations) whose failures list SQL shapes with counts and code.* origin
-- [AI assistants](docs/getting-started/ai-assistants.md): ship-ready guidance for Claude Code, Cursor, Copilot and Laravel Boost
+- [AI assistants](docs/getting-started/ai-assistants.md): Laravel Boost guideline (resources/boost/guidelines/core.md) and skills (telemetry-instrumentation, telemetry-debugging-performance, telemetry-testing) picked up by boost:install, plus agent prompts for Claude Code, Cursor and Copilot
 
 ## Core concepts
 

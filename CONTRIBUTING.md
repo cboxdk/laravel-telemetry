@@ -18,8 +18,8 @@ Thanks for considering a contribution!
 
 - New behaviour needs tests; bug fixes need a regression test.
 - Public API changes need docs (`docs/`) in the same PR — and an update to
-  the AI surface (`.ai/guidelines/telemetry.blade.php`, `llms.txt`) when
-  usage guidance changes.
+  the AI surface (`resources/boost/guidelines/core.md`, the skills in
+  `resources/boost/skills/`, `llms.txt`) when usage guidance changes.
 - Telemetry must never throw into the host application: recording and
   export paths are `FailSafe::guard`ed; only instrument *registration* may
   throw.

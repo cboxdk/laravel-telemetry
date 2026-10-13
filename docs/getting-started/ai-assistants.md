@@ -1,6 +1,6 @@
 ---
 title: AI assistants
-description: Ship-ready guidance for Claude Code, Cursor, Copilot & Laravel Boost
+description: Laravel Boost guideline and skills, agent prompts and llms.txt
 weight: 5
 ---
 
@@ -13,16 +13,29 @@ inventing its own.
 ## Laravel Boost (recommended)
 
 If the application uses [Laravel Boost](https://github.com/laravel/boost),
-our guidelines are picked up automatically: the package ships
-`.ai/guidelines/telemetry.blade.php`, which `php artisan boost:install`
-composes into the application's AI context alongside the framework
-guidelines.
+`php artisan boost:install` (and `boost:update`) picks up what the package
+ships in `resources/boost/`, the path Boost reads in third-party packages:
 
-The guideline teaches the assistant: which instrument fits which job,
-naming and cardinality rules, that telemetry never throws (no defensive
-try/catch), auto-instrumentation boundaries (don't hand-roll request/job
-spans), `Telemetry::fake()` in tests, and the provider pattern for
-packages.
+| File | Loaded | Teaches |
+|---|---|---|
+| `resources/boost/guidelines/core.md` | upfront, into the app's guideline file | which instrument fits which job, naming and cardinality rules, that telemetry never throws (no defensive try/catch), what is auto-instrumented, `Telemetry::fake()`, the provider pattern for packages |
+| `resources/boost/skills/telemetry-instrumentation/SKILL.md` | on demand | adding a metric, span or event: instrument choice, OTel names and units, bounded labels, context dimensions, providers |
+| `resources/boost/skills/telemetry-debugging-performance/SKILL.md` | on demand | a slow request or N+1 read from the trace: root-span tallies, N+1 vs duplicate, the app line that ran the query, `X-Telemetry-Label` before/after, `telemetry:watch` |
+| `resources/boost/skills/telemetry-testing/SKILL.md` | on demand | `Telemetry::fake()`, every assertion, label-value and cardinality budgets, testing providers and rejected exports |
+
+Three things to know:
+
+- Boost only reads **direct** dependencies. If the app requires
+  `cboxdk/laravel-telemetry-ui` but not this package, require this one too
+  (`composer require cboxdk/laravel-telemetry`) to get its guideline and
+  skills. The UI and insights packages ship their own skills for their MCP
+  tools.
+- `boost:install` asks which third-party packages' guidelines and skills
+  to install: tick `cboxdk/laravel-telemetry`. Boost remembers the choice
+  in `boost.json`, so `boost:update` refreshes them after an upgrade.
+- Skills need Boost 2.x and an agent that supports them; pick "Agent
+  Skills" among the features. Boost copies each one into the agent's skills
+  directory (for Claude Code, `.claude/skills/`).
 
 ## Copy-paste agent prompts
 
@@ -62,5 +75,9 @@ JSON rules) plus pointers to the ADRs.
 
 ## Keeping it honest
 
-`.ai/guidelines/`, `llms.txt` and `AGENTS.md` are part of the public
+`resources/boost/`, `llms.txt` and `AGENTS.md` are part of the public
 surface: PRs that change the API must update them (see CONTRIBUTING).
+`tests/Feature/BoostResourcesTest.php` checks that every skill parses the
+way Boost parses it, that none of it is left out of the dist archive, and
+that every `Telemetry::` method, fake assertion and `telemetry:` command
+the files name exists.
