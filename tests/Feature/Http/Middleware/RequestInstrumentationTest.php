@@ -152,6 +152,8 @@ it('can disable rate limit instrumentation', function () {
 });
 
 it('inherits the callers baggage as context dimensions', function () {
+    config()->set('telemetry.instrument.baggage_keys', ['team.id', 'plan']);
+
     $this->get('/users/7', ['baggage' => 'team.id=42,plan=pro']);
 
     $span = requestSpans($this->collector)[0];
@@ -160,7 +162,42 @@ it('inherits the callers baggage as context dimensions', function () {
         ->and($span->attributes()['plan'])->toBe('pro');
 });
 
+it('admits no baggage member by default', function () {
+    $this->get('/users/7', [
+        'baggage' => 'team.id=42,sentry-trace_id=0af7651916cd43dd8448eb211c80319c,UserId=1234,email=jane%40example.com,session.id=abc,CorrelationId=xyz',
+    ]);
+
+    expect(requestSpans($this->collector)[0]->attributes())
+        ->not->toHaveKeys(['team.id', 'sentry-trace_id', 'UserId', 'email', 'session.id', 'CorrelationId']);
+});
+
+it('admits only the allowed baggage keys, as globs', function () {
+    config()->set('telemetry.instrument.baggage_keys', ['team.*']);
+
+    $this->get('/users/7', [
+        'baggage' => 'team.id=42,team.plan=pro,sentry-environment=production,UserId=1234',
+    ]);
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['team.id'])->toBe('42')
+        ->and($attributes['team.plan'])->toBe('pro')
+        ->and($attributes)->not->toHaveKeys(['sentry-environment', 'UserId']);
+});
+
+it('drops an allowed baggage member whose value is an email address', function () {
+    config()->set('telemetry.instrument.baggage_keys', ['team.id', 'user.name']);
+
+    $this->get('/users/7', ['baggage' => 'team.id=42,user.name=jane%40example.com']);
+
+    $attributes = requestSpans($this->collector)[0]->attributes();
+
+    expect($attributes['team.id'])->toBe('42')
+        ->and($attributes)->not->toHaveKey('user.name');
+});
+
 it('ignores baggage when incoming trace continuation is off', function () {
+    config()->set('telemetry.instrument.baggage_keys', ['team.id']);
     config()->set('telemetry.traces.continue_incoming', false);
 
     $this->get('/users/7', ['baggage' => 'team.id=42']);
@@ -169,6 +206,7 @@ it('ignores baggage when incoming trace continuation is off', function () {
 });
 
 it('can disable baggage ingestion independently', function () {
+    config()->set('telemetry.instrument.baggage_keys', ['team.id']);
     config()->set('telemetry.instrument.baggage', false);
 
     $this->get('/users/7', ['baggage' => 'team.id=42']);

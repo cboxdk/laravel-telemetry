@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Support;
 
+use Illuminate\Support\Str;
+
 /**
  * The W3C `baggage` header: carries `Telemetry::context()` dimensions
  * (team, tenant, plan, …) across a service boundary, alongside
@@ -85,5 +87,48 @@ final class Baggage
         }
 
         return $attributes;
+    }
+
+    /**
+     * Keep only the incoming members an application asked for.
+     *
+     * Deny by default. Anything that sends this app a request can send a
+     * `baggage` header, and every member admitted becomes a context
+     * dimension on every span of the request and of the jobs it
+     * dispatches. Browser SDKs, API gateways and customers' own HTTP
+     * clients put their own state there (`sentry-*`, `UserId`, `email`,
+     * `session.id`, correlation ids), which is personal data the app
+     * never chose to record. So a member is admitted only when its key
+     * matches one of `$allowedKeys` (`Str::is()` globs, `team.*` works).
+     *
+     * An admitted member whose value holds an email address is still
+     * dropped: an allowed key is a promise about the key, not about what
+     * an unvalidated caller put in its value.
+     *
+     * @param  array<string, string>  $members
+     * @param  list<string>  $allowedKeys
+     * @return array<string, string>
+     */
+    public static function admit(array $members, array $allowedKeys): array
+    {
+        if ($allowedKeys === []) {
+            return [];
+        }
+
+        $admitted = [];
+
+        foreach ($members as $key => $value) {
+            if (! Str::is($allowedKeys, (string) $key)) {
+                continue;
+            }
+
+            if (PersonalData::scrub($value, ['email'], '') !== $value) {
+                continue;
+            }
+
+            $admitted[$key] = $value;
+        }
+
+        return $admitted;
     }
 }

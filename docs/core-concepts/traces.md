@@ -348,6 +348,22 @@ incoming `baggage` header back into its own context
 too, since baggage is caller-supplied, unvalidated data and should
 follow the same trust boundary as continuing the trace itself.
 
+Only the keys you list are admitted. Anything that calls your app can
+send a `baggage` header, and browser SDKs, API gateways and customers'
+HTTP clients fill it with their own state — `sentry-*`, `UserId`,
+`email`, `session.id`, correlation ids. Admitted, each of those would
+become an attribute on every span of the request. So name the
+dimensions your own services propagate:
+
+```dotenv
+TELEMETRY_INSTRUMENT_BAGGAGE_KEYS=team.id,tenant.*,plan
+```
+
+Keys are `Str::is()` globs. With the list empty (the default) no
+incoming member is admitted. A member whose value holds an email
+address is dropped even when its key is allowed. Outgoing baggage is
+unchanged: it carries whatever `Telemetry::context()` holds.
+
 ### Behind an edge that injects traceparent
 
 Some load balancers and proxies set a `traceparent` on every request so
