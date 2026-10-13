@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Metrics\Stores;
 
+use Cbox\Telemetry\Contracts\BatchesWrites;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Contracts\ReportsOverflow;
 use Cbox\Telemetry\Metrics\Exemplar;
@@ -243,6 +244,25 @@ final class BufferedMetricStore implements MetricStore, ReportsOverflow
      */
     public function flushBuffer(): void
     {
+        // A store that sends a flush in one round trip gets the whole buffer
+        // in one batch. It throws only when nothing was applied, so the
+        // buffer is cleared after the batch and kept if it throws; a batch
+        // that failed after sending is dropped by the store, not retried
+        // here (see BatchesWrites).
+        if ($this->inner instanceof BatchesWrites) {
+            if ($this->counters === [] && $this->gauges === [] && $this->histograms === []) {
+                return;
+            }
+
+            $this->inner->batch(fn () => $this->writeBuffer());
+            $this->counters = [];
+            $this->gauges = [];
+            $this->histograms = [];
+            $this->pending = 0;
+
+            return;
+        }
+
         foreach ($this->counters as $name => $family) {
             foreach ($family['series'] as $series => $delta) {
                 $this->inner->incrementCounter($family['definition'], Labels::decode($series), $delta);
@@ -284,6 +304,42 @@ final class BufferedMetricStore implements MetricStore, ReportsOverflow
         }
 
         $this->pending = 0;
+    }
+
+    /**
+     * Every buffered series as one write each, for a store's batch. Nothing
+     * is dropped here: the caller clears the buffer once the batch returns.
+     */
+    private function writeBuffer(): void
+    {
+        foreach ($this->counters as $family) {
+            foreach ($family['series'] as $series => $delta) {
+                $this->inner->incrementCounter($family['definition'], Labels::decode($series), $delta);
+            }
+        }
+
+        foreach ($this->gauges as $family) {
+            foreach ($family['series'] as $series => $entry) {
+                if ($entry['set'] !== null) {
+                    $this->inner->setGauge($family['definition'], Labels::decode($series), $entry['set']);
+                } elseif ($entry['add'] !== 0.0) {
+                    $this->inner->addGauge($family['definition'], Labels::decode($series), $entry['add']);
+                }
+            }
+        }
+
+        foreach ($this->histograms as $family) {
+            foreach ($family['series'] as $series => $entry) {
+                $this->inner->mergeHistogram(
+                    $family['definition'],
+                    Labels::decode($series),
+                    $entry['bucketCounts'],
+                    $entry['sum'],
+                    $entry['count'],
+                    $entry['exemplar'],
+                );
+            }
+        }
     }
 
     /**
