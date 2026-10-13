@@ -2,6 +2,8 @@
 
 This application uses cboxdk/laravel-telemetry for metrics, traces, events and logs. Use the `Cbox\Telemetry\Facades\Telemetry` facade.
 
+For step-by-step work, activate the package's skills: `telemetry-instrumentation` (adding metrics, spans, events), `telemetry-debugging-performance` (slow requests, N+1, before/after comparison) and `telemetry-testing` (`Telemetry::fake()`).
+
 ### Choosing the right instrument
 
 - Something happened → counter: `Telemetry::counter('orders.created')->inc(1, ['tenant' => $slug])`. Counters are monotonic; negative increments are ignored.

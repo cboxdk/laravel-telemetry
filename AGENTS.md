@@ -69,7 +69,8 @@ vendor/bin/pest --group=benchmark   # overhead benchmark — see docs/production
   `Support\Cast` rather than a raw `(string)`/`(int)`/`(float)` cast.
 - New behaviour ships with tests; public API changes ship with docs
   (`docs/`) and, when user-visible, a `CHANGELOG.md` entry and an update to
-  `.ai/guidelines/telemetry.blade.php` + `llms.txt`.
+  `resources/boost/guidelines/core.md` (and the matching skill in
+  `resources/boost/skills/`) + `llms.txt`.
 - Sibling packages (`cboxdk/system-metrics`, `cboxdk/laravel-queue-metrics`)
   define the org conventions — follow their structure before inventing new
   patterns.

@@ -83,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8 boundaries so the JSON stays valid, and through the usual
   redaction at flush. See [Cookbook: Laravel AI SDK](docs/cookbook/laravel-ai.md).
 
+- **Laravel Boost skills.** `php artisan boost:install` (Boost 2.x) now
+  offers three task skills from `resources/boost/skills/`:
+  `telemetry-instrumentation` (metrics, spans, events, naming and labels),
+  `telemetry-debugging-performance` (a slow request or N+1 read from the
+  trace, before/after labels, directives) and `telemetry-testing`
+  (`Telemetry::fake()` and the label and cardinality assertions).
+
 ### Changed
 
 - **`@telemetryBrowser` now ships the real browser SDK.** The directive
@@ -118,6 +125,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enrichment when something it started never ended (a `laravel/ai` stream
   nobody read to the end, for one), because "root" meant "the stack is
   empty". It now means the bottom of the stack.
+- **Boost never loaded the package guideline.** It shipped at
+  `.ai/guidelines/telemetry.blade.php`, a path Boost reads only in the
+  application itself. It now ships at `resources/boost/guidelines/core.md`,
+  where Boost looks in packages, as plain Markdown (it uses no Blade).
+  Boost loads it only when `cboxdk/laravel-telemetry` is a direct
+  dependency in the app's `composer.json`.
 
 ## [3.5.0] - 2026-10-13
 
@@ -1169,7 +1182,6 @@ package cannot do it for you and will not warn you at runtime.
   indefinitely. The v1 series linger until the store is reset; nothing writes
   them any more.
 
-
 ### Fixed
 
 - **Three ways the Prometheus renderer emitted invalid exposition.** What it
@@ -1285,7 +1297,6 @@ package cannot do it for you and will not warn you at runtime.
   `telemetry.export.duration`, the `screen.*` pair — are unchanged and stay in
   milliseconds. The unit travels in the Prometheus name either way, and there is
   no shared vocabulary to conform to.
-
 
 ### Fixed
 
