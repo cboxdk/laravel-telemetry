@@ -43,6 +43,10 @@ spec-stable HTTP JSON.
 - ✅ Auto-detects Horizon, Reverb and Pennant when installed — supervisor
   state/long-wait detection, WebSocket message/channel metrics, and
   feature-flag check counters, no extra config
+- ✅ OpenTelemetry GenAI traces and token metrics for the
+  [Laravel AI SDK](https://github.com/laravel/ai) when installed — agent
+  runs, model calls, tool calls and embeddings; prompts recorded only if
+  you opt in
 - ✅ `Telemetry::fake()` with assertions for counters, gauges, histograms,
   spans and events
 - ✅ Provider contract so packages publish telemetry without coupling

@@ -42,12 +42,14 @@ use Cbox\Telemetry\Instrumentation\BusInstrumentation;
 use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
+use Cbox\Telemetry\Instrumentation\GenAiContent;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientRepeatDetector;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
 use Cbox\Telemetry\Instrumentation\InstrumentedConnectionFactory;
 use Cbox\Telemetry\Instrumentation\InstrumentedControllerDispatcher;
 use Cbox\Telemetry\Instrumentation\InstrumentedRedisManager;
+use Cbox\Telemetry\Instrumentation\LaravelAiInstrumentation;
 use Cbox\Telemetry\Instrumentation\LifecycleInstrumentation;
 use Cbox\Telemetry\Instrumentation\LivewireInstrumentation;
 use Cbox\Telemetry\Instrumentation\MailInstrumentation;
@@ -114,6 +116,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Laravel\Ai\Events\PromptingAgent;
 use Laravel\Horizon\Events\SupervisorLooped;
 use Laravel\Octane\Events\RequestReceived;
 use Laravel\Octane\Events\TickReceived;
@@ -1350,6 +1353,15 @@ class TelemetryServiceProvider extends ServiceProvider
         if ($config->get('telemetry.instrument.reverb', true) && class_exists(MessageSent::class)) {
             $this->app->singleton(ReverbInstrumentation::class);
             $this->app->make(ReverbInstrumentation::class)->register($events);
+        }
+
+        if ($config->get('telemetry.instrument.ai', true) && class_exists(PromptingAgent::class)) {
+            $content = Cast::flag($config->get('telemetry.instrument.ai_content', false))
+                ? new GenAiContent(max(256, Cast::int($config->get('telemetry.instrument.ai_content_max_bytes', 2048), 2048)))
+                : null;
+
+            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation($app, $content));
+            $this->app->make(LaravelAiInstrumentation::class)->register($events);
         }
 
         if ($config->get('telemetry.instrument.livewire', true) && class_exists(Livewire::class)) {
