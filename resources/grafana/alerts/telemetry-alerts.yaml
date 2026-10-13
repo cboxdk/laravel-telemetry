@@ -158,30 +158,45 @@ groups:
           summary: "Scheduler not running on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
           description: "schedule:run last started {{ printf \"%.0f\" $value }}s ago — check the cron entry or the schedule:work process."
 
-      # Due, but neither started nor skipped. 5 minutes of slack because
-      # schedule:run starts tasks one after another, so a task queued behind
-      # a long one starts late without having been missed (start delay is
-      # schedule_task_start_delay_seconds). Hosts are aggregated with max,
-      # so onOneServer tasks are not "missed" by the servers that lost the
-      # lock. Tasks removed from the schedule stop matching via `listed`.
-      # A task that has never run since monitoring began has no last_seen
-      # yet and is not evaluated until it has.
+      # Due, but neither started nor skipped. Two shapes:
+      #  - due more than 5 minutes ago and not seen since it was due — the
+      #    slack covers schedule:run starting tasks one after another, so a
+      #    task queued behind a long one is late, not missed (late shows in
+      #    schedule_task_start_delay_seconds);
+      #  - for tasks due every few minutes or more often, whose last due time
+      #    is always recent: not seen for an interval plus 5 minutes.
+      # Hosts are aggregated with max, so onOneServer tasks are not "missed"
+      # by the servers that lost the lock. Tasks removed from the schedule
+      # stop matching via `listed`. A task that has never run since
+      # monitoring began has no last_seen yet and is not evaluated until it
+      # has. $value: seconds since the task was last seen.
       - alert: ScheduledTaskMissed
         expr: |
           (
-            max by (service_name, deployment_environment_name, task) (schedule_task_previous_due_seconds)
-            - max by (service_name, deployment_environment_name, task) (schedule_task_last_seen_seconds)
-          ) > 300
+            (
+              time() - max by (service_name, deployment_environment_name, task) (schedule_task_last_seen_seconds)
+              and on (service_name, deployment_environment_name, task)
+              (max by (service_name, deployment_environment_name, task) (schedule_task_previous_due_seconds) > max by (service_name, deployment_environment_name, task) (schedule_task_last_seen_seconds))
+              and on (service_name, deployment_environment_name, task)
+              (time() - max by (service_name, deployment_environment_name, task) (schedule_task_previous_due_seconds) > 300)
+            )
+            or
+            (
+              time() - max by (service_name, deployment_environment_name, task) (schedule_task_last_seen_seconds)
+              > on (service_name, deployment_environment_name, task)
+              (min by (service_name, deployment_environment_name, task) (schedule_task_interval_seconds) + 300)
+              and on (service_name, deployment_environment_name, task)
+              (min by (service_name, deployment_environment_name, task) (schedule_task_interval_seconds) <= 300)
+            )
+          )
           and on (service_name, deployment_environment_name, task)
-          (
-            time() - max by (service_name, deployment_environment_name, task) (schedule_task_listed_seconds)
-          ) < 600
+          (time() - max by (service_name, deployment_environment_name, task) (schedule_task_listed_seconds) < 600)
         for: 1m
         labels:
           severity: warning
         annotations:
           summary: "Scheduled task {{ $labels.task }} missed on {{ $labels.service_name }} ({{ $labels.deployment_environment_name }})"
-          description: "{{ $labels.task }} was due {{ printf \"%.0f\" $value }}s before it last ran or was skipped."
+          description: "{{ $labels.task }} was due and has not started or been skipped; last seen {{ printf \"%.0f\" $value }}s ago."
 
       # Started and not finished for an hour. A process that died mid-task
       # (OOM, deploy, kill) never clears running_since, so this also catches

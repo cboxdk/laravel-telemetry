@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\ScheduleInstrumentation;
+use Cbox\Telemetry\Metrics\Registry;
+use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
+use Cbox\Telemetry\Metrics\Stores\BufferedMetricStore;
+use Cbox\Telemetry\TelemetryManager;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Events\ScheduledTaskFailed;
 use Illuminate\Console\Events\ScheduledTaskFinished;
@@ -127,4 +131,45 @@ it('publishes nothing when monitoring is off', function () {
     expect(scheduleGauge('schedule.task.previous_due'))->toBe([])
         ->and(scheduleGauge('schedule.task.running_since'))->toBe([])
         ->and(scheduleGauge('schedule.task.last_seen'))->toBe([]);
+});
+
+it('gets running_since to the store while the task is still running, write buffer or not', function () {
+    $backing = new ArrayMetricStore;
+    app()->forgetInstance(TelemetryManager::class);
+    app()->instance(Registry::class, new Registry(new BufferedMetricStore($backing), []));
+
+    $events = new Dispatcher;
+    (new ScheduleInstrumentation(app()))->register($events);
+
+    $task = app(Schedule::class)->command('inspire')->daily();
+    $events->dispatch(new ScheduledTaskStarting($task));
+
+    // A hung or killed task never reaches ScheduledTaskFinished.
+    $running = collect($backing->collect())->first(fn ($f) => $f->name() === 'schedule.task.running_since');
+
+    expect($running)->not->toBeNull()
+        ->and($running->samples[0]->value)->toBeGreaterThan(0);
+});
+
+it('publishes the interval and creates the outcome counters at zero', function () {
+    app(Schedule::class)->command('inspire')->hourly();
+    app(Schedule::class)->command('cache:prune-stale-tags')->weekdays()->at('03:00');
+
+    startScheduleRun($this->events);
+
+    $interval = scheduleGauge('schedule.task.interval');
+
+    expect($interval['inspire'])->toBe(3600.0)
+        ->and($interval['cache:prune-stale-tags'])->toBeGreaterThanOrEqual(86400.0)
+        ->and(scheduleGauge('schedule.tasks.failed')['inspire'])->toBe(0.0)
+        ->and(scheduleGauge('schedule.tasks.processed')['inspire'])->toBe(0.0);
+});
+
+it('does not call a sub-minute task late', function () {
+    $task = app(Schedule::class)->command('inspire')->everyTenSeconds();
+
+    $this->events->dispatch(new ScheduledTaskStarting($task));
+    $this->events->dispatch(new ScheduledTaskFinished($task, 0.01));
+
+    expect(collect(Telemetry::collect())->first(fn ($f) => $f->name() === 'schedule.task.start_delay'))->toBeNull();
 });

@@ -76,8 +76,25 @@ final class SqlShape
      */
     public static function isRead(string $sql): bool
     {
-        $head = strtolower(substr(ltrim($sql, " \t\n\r(/"), 0, 6));
+        // Leading comments first: apps and tools prefix statements with
+        // `/* controller=… */` or `-- trace=…`, and a prefixed select is a
+        // select.
+        $body = preg_replace('~^(?:\s|\(|/\*.*?\*/|--[^\n]*\n)+~s', '', $sql) ?? $sql;
+        $head = strtolower(substr($body, 0, 6));
 
         return str_starts_with($head, 'select') || str_starts_with($head, 'with');
+    }
+
+    /**
+     * Whether a read walks through a result set a page at a time —
+     * `chunk()` (limit/offset) or `chunkById()`/`lazyById()` (a keyset
+     * `> ?` with an order and a limit). The same shape with different
+     * values, many times in one trace, is what pagination IS; calling it
+     * N+1 sends someone looking for an eager load that cannot exist.
+     */
+    public static function isPagination(string $sql): bool
+    {
+        return preg_match('/\blimit\s+(?:\?|\d+|:\w+)\s+offset\s+(?:\?|\d+|:\w+)/i', $sql) === 1
+            || preg_match('/[<>]=?\s*(?:\?|\d+|:\w+)\s+order\s+by\s+[^;]*\blimit\s+(?:\?|\d+|:\w+)/is', $sql) === 1;
     }
 }

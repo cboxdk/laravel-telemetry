@@ -175,6 +175,8 @@ final class TraceRequest
             // As context, not a span attribute: every span of the request
             // carries it, and so do the jobs it dispatches — a before/after
             // comparison covers the queued half of the work too.
+            $this->telemetry->applyDirectives(['path' => $request->path()]);
+
             if (($label = $this->label($request)) !== null) {
                 $this->telemetry->context(['laravel.trace.label' => $label]);
             }
@@ -209,10 +211,8 @@ final class TraceRequest
             // unit — a unit opens even where profiling is unavailable, and
             // reading a handle as "profiling is covered" silenced excimer on
             // every host with the extension but no usable timer.
-            if (! $this->native->profiles() && config('telemetry.instrument.profiling', true) && $span->sampled) {
-                $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
-                    Cast::float(config('telemetry.profiling.period'), 0.001),
-                ));
+            if ($span->sampled || $this->telemetry->profilingRequested()) {
+                $this->ensureProfiler($request);
             }
 
             // LAST, so the first phase measures the application rather than
@@ -242,27 +242,59 @@ final class TraceRequest
             }
 
             $header = config('telemetry.traces.response_header', 'X-Trace-Id');
+            $span = $request->attributes->get(self::SPAN_KEY);
 
-            if (is_string($header) && $header !== '') {
-                $response->headers->set($header, $traceId);
+            // Timings, not ids — independent of the trace-id header.
+            if ($span instanceof Span && config('telemetry.traces.server_timing', false)) {
+                $response->headers->set('Server-Timing', $this->serverTiming($span), false);
             }
+
+            // Turning the trace-id header off is the app deciding not to
+            // expose trace ids at all; `traceresponse` follows it.
+            if (! is_string($header) || $header === '') {
+                return;
+            }
+
+            $response->headers->set($header, $traceId);
 
             // W3C Trace Context Level 2 `traceresponse`: the trace id AND
             // the server span, so a browser SDK can parent what follows an
             // Inertia visit (JSON, no meta tag to read) to the span that
-            // served it rather than leaving it a sibling.
-            $span = $request->attributes->get(self::SPAN_KEY);
-
+            // served it rather than leaving it a sibling. The flag is the
+            // decision in force NOW — a `Sample` middleware or a directive
+            // may have changed the head decision — so a client never
+            // parents to a span that will not be exported.
             if ($span instanceof Span && config('telemetry.traces.traceresponse', true)) {
-                $response->headers->set('traceresponse', sprintf('00-%s-%s-%s', $span->traceId, $span->spanId, $span->sampled ? '01' : '00'));
-            }
-
-            if ($span instanceof Span && config('telemetry.traces.server_timing', false)) {
-                $response->headers->set('Server-Timing', $this->serverTiming($span), false);
+                $response->headers->set('traceresponse', sprintf(
+                    '00-%s-%s-%s',
+                    $span->traceId,
+                    $span->spanId,
+                    $this->telemetry->tracer()->currentlySampled($span) ? '01' : '00',
+                ));
             }
         });
 
         return $response;
+    }
+
+    /**
+     * Start the excimer fallback for this request, unless it runs already,
+     * the native sampler covers it, or profiling is off. Public for the
+     * directives that ask for a profile after routing or authentication
+     * — later than the start of the request, so that profile is partial.
+     */
+    public function ensureProfiler(Request $request): void
+    {
+        if (! $request->attributes->get(self::SPAN_KEY) instanceof Span
+            || $request->attributes->has(self::PROFILE_KEY)
+            || $this->native->profiles()
+            || ! config('telemetry.instrument.profiling', true)) {
+            return;
+        }
+
+        $request->attributes->set(self::PROFILE_KEY, CpuProfiler::start(
+            Cast::float(config('telemetry.profiling.period'), 0.001),
+        ));
     }
 
     /**
@@ -344,6 +376,10 @@ final class TraceRequest
                 ?? $this->livewireRoute($request, $span)
                 ?? $template;
 
+            // The logical route is only known now; the request span is still
+            // open, so a directive naming it keeps at least that span.
+            $this->telemetry->applyDirectives(['route.logical' => $route]);
+
             // Naming precedence: an explicit updateName() during the
             // request wins; then the app's nameRequestsUsing() resolver;
             // then "METHOD <logical route>".
@@ -382,6 +418,11 @@ final class TraceRequest
                         'user.guard' => $guard,
                     ]));
                     $span->setAttributes($this->telemetry->resolveUserAttributes($user, $guard));
+
+                    // Guards that fire no Authenticated event (token, request
+                    // guards) are only known here: the request span is still
+                    // open, so a user directive keeps at least that.
+                    $this->telemetry->applyDirectives(['user' => Cast::string($user->getAuthIdentifier())]);
                 } elseif (($remembered = $this->telemetry->rememberedAuthenticatedUser()) !== null) {
                     // The login POST (user resolves after span start) and
                     // logout requests (guard empty by terminate) — the

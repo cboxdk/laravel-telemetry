@@ -247,6 +247,33 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Directives
+    |--------------------------------------------------------------------------
+    |
+    | Time-limited "keep every trace (and a profile) for this route / path /
+    | user / tenant / job" rules: `php artisan telemetry:watch`,
+    | Telemetry::directives(), or the signed endpoint below for a telemetry
+    | UI or insights install elsewhere. Stored in the app's cache so every
+    | host sees them. With no directives the per-request cost is one APCu
+    | read (an empty list is remembered for `recheck_seconds`); without APCu
+    | under PHP-FPM it is one cache read per request — set enabled=false if
+    | that matters and you do not use directives.
+    |
+    */
+    'directives' => [
+        'enabled' => env('TELEMETRY_DIRECTIVES', true),
+        'store' => env('TELEMETRY_DIRECTIVES_STORE'),
+        'recheck_seconds' => 15,
+        'max' => 50,
+        'max_minutes' => 1440,
+
+        // The signed HTTP endpoint exists only when a secret is set.
+        'path' => 'telemetry/directives',
+        'secret' => env('TELEMETRY_DIRECTIVES_SECRET'),
+    ],
+
     'traces' => [
         'sample_rate' => env('TELEMETRY_TRACES_SAMPLE_RATE', 1.0),
 
@@ -280,7 +307,8 @@ return [
 
         // W3C `traceresponse` header (trace id + server span id) on the
         // same responses — lets telemetry-browser parent requests after an
-        // Inertia visit to the span that served it.
+        // Inertia visit to the span that served it. Sent only when
+        // `response_header` is on: switching that off means no trace ids.
         'traceresponse' => env('TELEMETRY_TRACES_TRACERESPONSE', true),
 
         // `Server-Timing` header: db / cache / redis time and counts, the
@@ -302,9 +330,11 @@ return [
         'continue_incoming_parent' => env('TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT', true),
 
         // Request header naming a request for before/after comparison
-        // (`X-Telemetry-Label: before-eager-load`). Lands on the request's
-        // root span as `laravel.trace.label`, cut to 64 safe characters.
-        // Null disables it.
+        // (`X-Telemetry-Label: before-eager-load`). Becomes a context
+        // dimension, `laravel.trace.label`, so every span of the request
+        // and the jobs it dispatches carry it (and `withTraceparent()`
+        // sends it on as baggage). Cut to 64 safe characters; never a
+        // metric label. Null disables it.
         'label_header' => env('TELEMETRY_TRACES_LABEL_HEADER', 'X-Telemetry-Label'),
 
         // Children started through the Process facade get `TRACEPARENT` in

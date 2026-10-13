@@ -216,6 +216,15 @@ def textvar(name, default, label=None):
 
 
 def dashboard(uid, title, panels, variables=None):
+    # Panel ids and query refIds are numbered per dashboard, by position.
+    # One global counter meant adding a panel to one dashboard renumbered
+    # every dashboard generated after it, breaking `viewPanel=` links that
+    # had nothing to do with the change.
+    for index, panel in enumerate(panels, start=1):
+        panel["id"] = index
+        for ref, query in enumerate(panel.get("targets", []), start=1):
+            if query.get("refId", "").startswith("Q"):
+                query["refId"] = "Q" + str(ref)
     return {
         "uid": uid, "title": title, "tags": ["telemetry", "cboxdk"],
         "timezone": "browser", "schemaVersion": 39, "refresh": "30s",
@@ -394,8 +403,8 @@ D["schedule"] = dashboard("cbox-tel-schedule", "Telemetry / Scheduled Tasks", [
     stat("Scheduler last ran", f'time() - max(schedule_run_last_seen_seconds{{{SVC}}})', 0, 30, w=6, unit="s", decimals=0,
          thresholds=ok_at([{"color": "orange", "value": 90}, {"color": "red", "value": 180}]),
          description="Seconds since schedule:run last started. Over 180 s fires SchedulerNotRunning."),
-    table("Behind schedule (due − last seen)", f'(max by (task) (schedule_task_previous_due_seconds{{{SF}}}) - max by (task) (schedule_task_last_seen_seconds{{{SF}}})) > 0', 6, 30, w=9, unit="s", decimals=0,
-          description="How long each task has been due without starting or being skipped. Over 300 s fires ScheduledTaskMissed."),
+    table("Due, not started (seconds since due)", f'(time() - max by (task) (schedule_task_previous_due_seconds{{{SF}}})) and on (task) (max by (task) (schedule_task_previous_due_seconds{{{SF}}}) > max by (task) (schedule_task_last_seen_seconds{{{SF}}}))', 6, 30, w=9, unit="s", decimals=0,
+          description="Tasks whose cron came due and that have neither started nor been skipped since. A few seconds is schedule:run working down its list; over 300 s fires ScheduledTaskMissed."),
     table("Running now (for)", f'time() - max by (task) (schedule_task_running_since_seconds{{{SF}}} > 0)', 15, 30, w=9, unit="s", decimals=0,
           description="Runs that started and have not finished. A process that died mid-task stays here — over an hour fires ScheduledTaskOverrunning."),
 ], variables=[qvar("task", "schedule_tasks_processed_total", "task")])

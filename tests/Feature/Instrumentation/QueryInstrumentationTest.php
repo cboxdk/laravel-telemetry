@@ -333,3 +333,22 @@ it('reports what its own hooks cost on the root span', function () {
 
     expect($root->attributes()['telemetry.overhead_ms'])->toBeGreaterThan(0);
 });
+
+it('does not call pagination an N+1', function () {
+    registerQueryDuplicates($this->events);
+
+    Telemetry::span('job', function () {
+        foreach ([0, 100, 200] as $offset) {
+            runQuery($this->events, 'select * from "users" order by "id" asc limit 100 offset '.$offset, []);
+        }
+        foreach ([0, 100, 200] as $after) {
+            runQuery($this->events, 'select * from "users" where "id" > ? order by "id" asc limit 100', [$after]);
+        }
+    });
+
+    Telemetry::flush();
+
+    $events = collect($this->collector->batches())->flatMap(fn ($b) => $b->events);
+
+    expect($events->where('name', 'db.query.n_plus_one_detected'))->toHaveCount(0);
+});

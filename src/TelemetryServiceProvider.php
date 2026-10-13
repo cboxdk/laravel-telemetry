@@ -11,11 +11,13 @@ use Cbox\Telemetry\Console\DeployCommand;
 use Cbox\Telemetry\Console\DoctorCommand;
 use Cbox\Telemetry\Console\FlushCommand;
 use Cbox\Telemetry\Console\MonitorCommand;
+use Cbox\Telemetry\Console\WatchCommand;
 use Cbox\Telemetry\Contracts\Exporter;
 use Cbox\Telemetry\Contracts\ManagesRequestState;
 use Cbox\Telemetry\Contracts\MetricStore;
 use Cbox\Telemetry\Contracts\NativeRuntime;
 use Cbox\Telemetry\Contracts\RedactsTelemetry;
+use Cbox\Telemetry\Directives\DirectiveStore;
 use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Exporters\NullExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
@@ -27,6 +29,7 @@ use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
 use Cbox\Telemetry\Exporters\Spool\SqliteSpool;
 use Cbox\Telemetry\Http\Controllers\BrowserAssetController;
+use Cbox\Telemetry\Http\Controllers\DirectivesController;
 use Cbox\Telemetry\Http\Controllers\PrometheusController;
 use Cbox\Telemetry\Http\Controllers\SourcemapController;
 use Cbox\Telemetry\Http\Controllers\SpanIngestController;
@@ -84,6 +87,7 @@ use Cbox\Telemetry\Support\Symbolicator;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Auth\Access\Response;
+use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Contracts\Auth\Access\Gate;
@@ -431,7 +435,7 @@ class TelemetryServiceProvider extends ServiceProvider
             ], 'telemetry-assets');
 
             $this->commands([FlushCommand::class, CrashesCommand::class,
-                DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class]);
+                DeployCommand::class, DoctorCommand::class, DashboardsCommand::class, MonitorCommand::class, WatchCommand::class]);
         }
 
         // The macro and Blade directives are part of the app's code surface —
@@ -451,6 +455,7 @@ class TelemetryServiceProvider extends ServiceProvider
 
         $this->registerPrometheusRoutes();
         $this->registerSpanIngestRoute();
+        $this->registerDirectives();
         $this->registerSourcemapRoute();
         $this->registerRequestInstrumentation();
         $this->registerQueueInstrumentation();
@@ -816,6 +821,80 @@ class TelemetryServiceProvider extends ServiceProvider
     }
 
     /**
+     * Directives: time-limited "record everything for this slice" rules,
+     * matched as facts become known — path (middleware), route
+     * (RouteMatched), user (Authenticated), job (queue), context.
+     */
+    private function registerDirectives(): void
+    {
+        $config = Cast::stringKeyedArray($this->app->make('config')->get('telemetry.directives', []));
+        $app = $this->app;
+
+        $storeName = isset($config['store']) && is_string($config['store']) && $config['store'] !== '' ? $config['store'] : null;
+
+        $enabled = (bool) ($config['enabled'] ?? true);
+
+        // Wired when the manager is first built, never here: booting must
+        // not construct it (BootHygieneTest).
+        $wire = static function (TelemetryManager $telemetry) use ($app, $config, $storeName, $enabled): void {
+            $telemetry->useDirectives(new DirectiveStore(
+                static fn () => $app->make('cache')->store($storeName),
+                Cast::int($config['recheck_seconds'] ?? null, 15),
+                Cast::int($config['max'] ?? null, 50),
+                Cast::int($config['max_minutes'] ?? null, 1440),
+            ), apply: $enabled);
+
+            $telemetry->onProfileRequested(static function () use ($app): void {
+                FailSafe::guard(static function () use ($app): void {
+                    if (! $app->runningInConsole() || $app->runningUnitTests()) {
+                        $app->make(TraceRequest::class)->ensureProfiler($app->make('request'));
+                    }
+                });
+            });
+        };
+
+        $app->resolved(TelemetryManager::class)
+            ? $wire($app->make(TelemetryManager::class))
+            : $app->afterResolving(TelemetryManager::class, $wire);
+
+        if (! $enabled) {
+            return;
+        }
+
+        $events = $app->make(Dispatcher::class);
+
+        $events->listen(RouteMatched::class, static function (RouteMatched $event) use ($app): void {
+            FailSafe::guard(static fn () => $app->make(TelemetryManager::class)->applyDirectives([
+                'route' => $event->route->getName(),
+                'route.uri' => $event->route->uri(),
+            ]));
+        });
+
+        $events->listen(Authenticated::class, static function (Authenticated $event) use ($app): void {
+            FailSafe::guard(static fn () => $app->make(TelemetryManager::class)->applyDirectives([
+                'user' => Cast::string($event->user->getAuthIdentifier()),
+            ]));
+        });
+
+        $secret = $config['secret'] ?? null;
+
+        if (! is_string($secret) || $secret === '') {
+            return;
+        }
+
+        /** @var Router $router */
+        $router = $app->make(Router::class);
+        $path = Cast::string($config['path'] ?? null, 'telemetry/directives');
+
+        $router->get($path, [DirectivesController::class, 'index'])->name('telemetry.directives.index');
+        $router->post($path, [DirectivesController::class, 'store'])->name('telemetry.directives.store');
+        $router->delete($path.'/{id}', [DirectivesController::class, 'destroy'])->name('telemetry.directives.destroy');
+
+        $this->ignoreOwnRoute($path);
+        $this->ignoreOwnRoute($path.'/*');
+    }
+
+    /**
      * The optional browser/RUM span ingest route. Off by default; when on,
      * the frontend POSTs its spans here and they join the same trace as
      * the backend. Protected by throttling + payload bounding, not a token.
@@ -1102,9 +1181,13 @@ class TelemetryServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->make(TelemetryManager::class)->captureLaravelContext(
-            Cast::stringList($config->get('telemetry.instrument.laravel_context_keys', [])),
-        );
+        $keys = Cast::stringList($config->get('telemetry.instrument.laravel_context_keys', []));
+        $capture = static fn (TelemetryManager $telemetry) => $telemetry->captureLaravelContext($keys);
+
+        // Never build the manager while booting (BootHygieneTest).
+        $this->app->resolved(TelemetryManager::class)
+            ? $capture($this->app->make(TelemetryManager::class))
+            : $this->app->afterResolving(TelemetryManager::class, $capture);
     }
 
     private function registerScheduleInstrumentation(): void

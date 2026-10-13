@@ -172,13 +172,18 @@ pass `-H 'Accept: application/openmetrics-text'`.
 |---|---|---|
 | `traces.sample_rate` | `TELEMETRY_TRACES_SAMPLE_RATE` | `1.0` |
 | `traces.max_buffer` | `TELEMETRY_TRACES_MAX_BUFFER` | `5000` |
+| `directives.enabled` | `TELEMETRY_DIRECTIVES` | `true` — apply time-limited "record this slice" rules (`telemetry:watch`). See [Directives](../core-concepts/traces.md#directives-record-more-of-one-slice-for-a-while) |
+| `directives.store` | `TELEMETRY_DIRECTIVES_STORE` | `null` — cache store holding them (default store); must be shared by every host |
+| `directives.recheck_seconds` | — | `15` — how long an empty list is remembered (APCu) before the cache is read again |
+| `directives.max` / `directives.max_minutes` | — | `50` / `1440` |
+| `directives.secret` | `TELEMETRY_DIRECTIVES_SECRET` | `null` — set it to expose the HMAC-signed `telemetry/directives` endpoint (`directives.path`) for a UI or insights install elsewhere |
 | `traces.continue_incoming` | `TELEMETRY_TRACES_CONTINUE_INCOMING` | `true` |
 | `traces.continue_incoming_parent` | `TELEMETRY_TRACES_CONTINUE_INCOMING_PARENT` | `true` — `false` adopts the incoming trace id but starts the request span as the root and links the incoming span id. For an edge that injects `traceparent` without exporting a span of its own |
 | `traces.trust_incoming_sampling` | `TELEMETRY_TRACES_TRUST_INCOMING_SAMPLING` | `true` — disable on public edges so clients can't force sampling |
 | `traces.always_sample_errors` | `TELEMETRY_TRACES_ALWAYS_SAMPLE_ERRORS` | `true` — error spans export even from unsampled traces |
 | `traces.share_context` | `TELEMETRY_TRACES_SHARE_CONTEXT` | `true` — publishes `trace_id` into Laravel `Context` (Sentry/Flare/logs pick it up) + a Sentry scope tag |
 | `traces.response_header` | `TELEMETRY_TRACES_RESPONSE_HEADER` | `X-Trace-Id` — the support reference id on every response; `null` disables. Skipped on publicly cacheable responses (`Cache-Control: public`/`s-maxage`) so caches never replay a stale id |
-| `traces.traceresponse` | `TELEMETRY_TRACES_TRACERESPONSE` | `true` — W3C `traceresponse` header (trace id + server span id) on the same responses |
+| `traces.traceresponse` | `TELEMETRY_TRACES_TRACERESPONSE` | `true` — W3C `traceresponse` header (trace id + server span id) on the same responses; only while `response_header` is on |
 | `traces.server_timing` | `TELEMETRY_TRACES_SERVER_TIMING` | `false` — `Server-Timing` header with db/cache/redis time and counts, telemetry overhead and app time |
 | `traces.label_header` | `TELEMETRY_TRACES_LABEL_HEADER` | `X-Telemetry-Label` — request header copied to the root span as `laravel.trace.label` (64 safe chars) for before/after comparison; `null` disables |
 | `traces.propagate_to_processes` | `TELEMETRY_TRACES_PROPAGATE_TO_PROCESSES` | `true` — `TRACEPARENT` in the environment of children started via the `Process` facade |

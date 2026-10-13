@@ -58,6 +58,8 @@ final class Tracer
      */
     private ?bool $sampledOverride = null;
 
+    private bool $forced = false;
+
     /**
      * The active unit of work is not traced at all (an ignored request
      * path). Stronger than an unsampled trace — see suppress().
@@ -82,8 +84,25 @@ final class Tracer
      */
     public function resample(bool $sampled): void
     {
+        // A forced trace stays kept: a `Sample::never()` route or a
+        // `Telemetry::sample(false)` later in the request must not undo
+        // the directive that asked for exactly this traffic.
+        if (! $sampled && $this->forced) {
+            return;
+        }
+
         $this->sampledOverride = $sampled;
         $this->sampled = $sampled;
+    }
+
+    /**
+     * Keep the active trace whatever is decided after this — a directive
+     * matched it. Lasts until resetContext().
+     */
+    public function force(): void
+    {
+        $this->resample(true);
+        $this->forced = true;
     }
 
     /**
@@ -562,6 +581,7 @@ final class Tracer
         $this->traceId = null;
         $this->sampled = null;
         $this->sampledOverride = null;
+        $this->forced = false;
         $this->suppressed = false;
         $this->contextAttributes = [];
         $this->traceStats = [];

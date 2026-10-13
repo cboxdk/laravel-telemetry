@@ -107,7 +107,7 @@
   ],
   "panels": [
     {
-      "id": 166,
+      "id": 1,
       "type": "stat",
       "title": "Hit ratio",
       "datasource": {
@@ -122,7 +122,7 @@
       },
       "targets": [
         {
-          "refId": "Q167",
+          "refId": "Q1",
           "expr": "100 * sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"hit\"}[10m])) / sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=~\"hit|miss\"}[10m]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -168,7 +168,7 @@
       }
     },
     {
-      "id": 168,
+      "id": 2,
       "type": "stat",
       "title": "Ops / min",
       "datasource": {
@@ -183,7 +183,7 @@
       },
       "targets": [
         {
-          "refId": "Q169",
+          "refId": "Q1",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -221,7 +221,7 @@
       }
     },
     {
-      "id": 170,
+      "id": 3,
       "type": "stat",
       "title": "Writes / min",
       "datasource": {
@@ -236,7 +236,7 @@
       },
       "targets": [
         {
-          "refId": "Q171",
+          "refId": "Q1",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"write\"}[5m])) * 60",
           "legendFormat": "__auto",
           "datasource": {
@@ -274,7 +274,7 @@
       }
     },
     {
-      "id": 174,
+      "id": 4,
       "type": "timeseries",
       "title": "Hits vs misses",
       "datasource": {
@@ -289,7 +289,7 @@
       },
       "targets": [
         {
-          "refId": "Q172",
+          "refId": "Q1",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"hit\"}[$__rate_interval])) * 60",
           "legendFormat": "hits",
           "datasource": {
@@ -298,7 +298,7 @@
           }
         },
         {
-          "refId": "Q173",
+          "refId": "Q2",
           "expr": "sum(rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",operation=\"miss\"}[$__rate_interval])) * 60",
           "legendFormat": "misses",
           "datasource": {
@@ -475,7 +475,7 @@
       }
     },
     {
-      "id": 176,
+      "id": 5,
       "type": "timeseries",
       "title": "Operations by store",
       "datasource": {
@@ -490,7 +490,7 @@
       },
       "targets": [
         {
-          "refId": "Q175",
+          "refId": "Q1",
           "expr": "sum by (store, operation) (rate(cache_operations_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\"}[$__rate_interval])) * 60",
           "legendFormat": "{{store}} {{operation}}",
           "datasource": {
@@ -531,7 +531,7 @@
       }
     },
     {
-      "id": 177,
+      "id": 6,
       "type": "table",
       "title": "Slowest cache operations \u2014 key on the span",
       "datasource": {
@@ -571,7 +571,7 @@
       }
     },
     {
-      "id": 178,
+      "id": 7,
       "type": "text",
       "title": "Enable",
       "gridPos": {

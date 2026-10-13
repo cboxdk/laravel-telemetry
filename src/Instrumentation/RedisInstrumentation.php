@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cbox\Telemetry\Instrumentation;
 
 use Cbox\Telemetry\Support\FailSafe;
+use Cbox\Telemetry\Support\OwnWork;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
@@ -120,6 +121,10 @@ final class RedisInstrumentation
 
     private function executed(CommandExecuted $event): void
     {
+        if (OwnWork::active()) {
+            return;
+        }
+
         FailSafe::guard(function () use ($event) {
             if (in_array($event->connectionName, $this->ignoreConnections, true)) {
                 return;

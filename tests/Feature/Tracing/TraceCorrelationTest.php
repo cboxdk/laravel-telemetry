@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
-use Cbox\Telemetry\Http\BrowserSnippet;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Illuminate\Console\Events\CommandFinished;
@@ -147,17 +146,6 @@ it('sends no traceresponse on publicly cacheable responses', function () {
     Route::get('/cached', fn () => response('ok')->header('Cache-Control', 'public, max-age=60'));
 
     expect($this->get('/cached')->headers->has('traceresponse'))->toBeFalse();
-});
-
-it('tells the browser SDK about a renamed trace header', function () {
-    config()->set('telemetry.ingest.spans.enabled', true);
-    config()->set('telemetry.traces.response_header', 'X-Request-Trace');
-
-    expect(BrowserSnippet::render())->toContain('data-trace-header="X-Request-Trace"');
-
-    config()->set('telemetry.traces.response_header', 'X-Trace-Id');
-
-    expect(BrowserSnippet::render())->not->toContain('data-trace-header');
 });
 
 it('lets application code force-sample the active trace', function () {

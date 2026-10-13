@@ -127,7 +127,7 @@
   ],
   "panels": [
     {
-      "id": 108,
+      "id": 1,
       "type": "stat",
       "title": "Runs / h",
       "datasource": {
@@ -142,7 +142,7 @@
       },
       "targets": [
         {
-          "refId": "Q109",
+          "refId": "Q1",
           "expr": "sum(increase(commands_completed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) + sum(increase(commands_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -180,7 +180,7 @@
       }
     },
     {
-      "id": 110,
+      "id": 2,
       "type": "stat",
       "title": "Failed / h",
       "datasource": {
@@ -195,7 +195,7 @@
       },
       "targets": [
         {
-          "refId": "Q111",
+          "refId": "Q1",
           "expr": "(sum(increase(commands_failed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) or vector(0)",
           "legendFormat": "__auto",
           "datasource": {
@@ -237,7 +237,7 @@
       }
     },
     {
-      "id": 112,
+      "id": 3,
       "type": "stat",
       "title": "avg duration",
       "datasource": {
@@ -252,7 +252,7 @@
       },
       "targets": [
         {
-          "refId": "Q113",
+          "refId": "Q1",
           "expr": "sum(rate(command_duration_seconds_sum{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])) / sum(rate(command_duration_seconds_count{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -290,7 +290,7 @@
       }
     },
     {
-      "id": 114,
+      "id": 4,
       "type": "stat",
       "title": "p95 duration",
       "datasource": {
@@ -305,7 +305,7 @@
       },
       "targets": [
         {
-          "refId": "Q115",
+          "refId": "Q1",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(command_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h])))",
           "legendFormat": "__auto",
           "datasource": {
@@ -343,7 +343,7 @@
       }
     },
     {
-      "id": 116,
+      "id": 5,
       "type": "table",
       "title": "Runs by command (1h)",
       "datasource": {
@@ -358,7 +358,7 @@
       },
       "targets": [
         {
-          "refId": "Q117",
+          "refId": "Q1",
           "expr": "sum by (command) (increase(commands_completed_total{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))",
           "legendFormat": "__auto",
           "datasource": {
@@ -405,7 +405,7 @@
       }
     },
     {
-      "id": 118,
+      "id": 6,
       "type": "table",
       "title": "p95 by command",
       "datasource": {
@@ -420,7 +420,7 @@
       },
       "targets": [
         {
-          "refId": "Q119",
+          "refId": "Q1",
           "expr": "histogram_quantile(0.95, sum by (le, command) (rate(command_duration_seconds_bucket{service_name=~\"$service\",deployment_environment_name=~\"$environment\",host_name=~\"$host\",command=~\"$command\"}[1h]))) > 0",
           "legendFormat": "__auto",
           "datasource": {
@@ -511,7 +511,7 @@
       }
     },
     {
-      "id": 120,
+      "id": 7,
       "type": "table",
       "title": "Command traces",
       "datasource": {
@@ -551,7 +551,7 @@
       }
     },
     {
-      "id": 121,
+      "id": 8,
       "type": "text",
       "title": "Enable",
       "gridPos": {

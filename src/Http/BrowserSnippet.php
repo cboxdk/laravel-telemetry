@@ -38,13 +38,6 @@ final class BrowserSnippet
 
         $analytics = config('telemetry.analytics.enabled', false) ? ' data-analytics="1"' : '';
 
-        // The SDK reads the trace id of a soft navigation's response from
-        // this header — tell it when the app has renamed it.
-        $traceHeader = config('telemetry.traces.response_header', 'X-Trace-Id');
-        $traceHeader = is_string($traceHeader) && $traceHeader !== '' && $traceHeader !== 'X-Trace-Id'
-            ? ' data-trace-header="'.e($traceHeader).'"'
-            : '';
-
         return $meta.'<script src="'.e($asset).'" defer'
             .' data-endpoint="'.e($endpoint).'"'
             .' data-fetch="'.(($browser['fetch'] ?? true) ? '1' : '0').'"'
@@ -52,7 +45,6 @@ final class BrowserSnippet
             .' data-vitals="'.(($browser['vitals'] ?? true) ? '1' : '0').'"'
             .' data-sample="'.e(Cast::string($browser['sample'] ?? null, '1.0')).'"'
             .$analytics
-            .$traceHeader
             .self::sessionAttribute().'></script>';
     }
 

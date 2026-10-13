@@ -27,8 +27,14 @@ final class SourceLocator
 
     private static ?string $packageRoot = null;
 
+    /** Compiled views memoized, as many as a large app has. */
+    private const MAX_VIEWS = 512;
+
+    /** @var array<string, string|null> compiled view path → its .blade.php source */
+    private static array $views = [];
+
     /**
-     * @return array{'code.file.path': string, 'code.line.number': int, 'code.function.name'?: string}|null
+     * @return array{'code.file.path': string, 'code.line.number'?: int, 'code.function.name'?: string}|null
      */
     public static function locate(string $basePath = ''): ?array
     {
@@ -39,6 +45,13 @@ final class SourceLocator
 
             if (! is_string($file) || ! self::isAppFile($file)) {
                 continue;
+            }
+
+            // A compiled Blade view: name the template, not the cache file.
+            // Its line numbers are the compiled file's, which match nothing
+            // a developer can open, so none is given.
+            if (($source = self::viewSource($file)) !== null) {
+                return ['code.file.path' => self::relative($source, $basePath)];
             }
 
             $location = [
@@ -60,6 +73,31 @@ final class SourceLocator
         }
 
         return null;
+    }
+
+    /**
+     * The template a compiled view was compiled from, read from the
+     * `/**PATH … ENDPATH**​/` trailer Blade appends — once per compiled file.
+     */
+    private static function viewSource(string $file): ?string
+    {
+        if (! str_contains($file, DIRECTORY_SEPARATOR.'framework'.DIRECTORY_SEPARATOR.'views'.DIRECTORY_SEPARATOR)) {
+            return null;
+        }
+
+        if (array_key_exists($file, self::$views)) {
+            return self::$views[$file];
+        }
+
+        if (count(self::$views) >= self::MAX_VIEWS) {
+            self::$views = [];
+        }
+
+        $tail = @file_get_contents($file, false, null, max(0, (int) @filesize($file) - 1024));
+
+        return self::$views[$file] = is_string($tail) && preg_match('~/\*\*PATH (.+?) ENDPATH\*\*/~', $tail, $m) === 1
+            ? $m[1]
+            : null;
     }
 
     private static function isAppFile(string $file): bool
