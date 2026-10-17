@@ -43,6 +43,7 @@ use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\GenAiContent;
+use Cbox\Telemetry\Instrumentation\GenAiPricing;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientRepeatDetector;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
@@ -1360,7 +1361,9 @@ class TelemetryServiceProvider extends ServiceProvider
                 ? new GenAiContent(max(256, Cast::int($config->get('telemetry.instrument.ai_content_max_bytes', 2048), 2048)))
                 : null;
 
-            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation($app, $content));
+            $pricing = GenAiPricing::fromConfig(Cast::array($config->get('telemetry.instrument.ai_pricing', [])));
+
+            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation($app, $content, $pricing));
             $this->app->make(LaravelAiInstrumentation::class)->register($events);
         }
 

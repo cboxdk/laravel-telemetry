@@ -1045,6 +1045,23 @@ return [
         // default), which caps the whole attribute after redaction.
         'ai_content_max_bytes' => env('TELEMETRY_INSTRUMENT_AI_CONTENT_MAX_BYTES', 2048),
 
+        // Your model prices, per 1M tokens, so each model call carries
+        // gen_ai.usage.cost and adds to the gen_ai.client.cost counter
+        // (same labels as the token metric). No catalog ships with the
+        // package: an unpriced model gets no cost, never a guess. A key is
+        // a model, optionally prefixed by its provider (the laravel/ai
+        // driver or gen_ai.provider.name), and may use * for snapshots;
+        // an exact key wins over a pattern, a longer pattern over a
+        // shorter one. cache_read / cache_write fall back to input.
+        //   'models' => [
+        //       'anthropic/claude-sonnet-*' => ['input' => 3.00, 'output' => 15.00, 'cache_read' => 0.30, 'cache_write' => 3.75],
+        //       'openai/text-embedding-3-small' => ['input' => 0.02],
+        //   ],
+        'ai_pricing' => [
+            'currency' => env('TELEMETRY_AI_CURRENCY', 'USD'),
+            'models' => [],
+        ],
+
         // inertia.request span attribute (from the X-Inertia header) +
         // inertia.version_mismatches counter — a version mismatch means
         // Inertia is forcing a full page reload (X-Inertia-Location),

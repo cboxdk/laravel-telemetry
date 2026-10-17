@@ -66,6 +66,12 @@ use Throwable;
  * Prompt and completion content is NOT recorded unless
  * `instrument.ai_content` is on; see GenAiContent.
  *
+ * With prices configured (`instrument.ai_pricing`, see GenAiPricing) each
+ * priced model call also carries `gen_ai.usage.cost` and adds to the
+ * `gen_ai.client.cost` counter; an agent run carries the sum of its calls,
+ * but only when every call that used tokens was priced. Neither name is in
+ * the conventions yet — they have no cost attribute.
+ *
  * Every open span is held under laravel/ai's own invocation ids. A run that
  * never reports its end — a stream the caller stopped reading — leaves its
  * spans unexported, the same "a missing span beats a wrong one" choice the
@@ -99,7 +105,7 @@ final class LaravelAiInstrumentation
         'xai' => 'x_ai',
     ];
 
-    /** @var array<string, array{span: Span, stream: bool, finish: ?string}> invocation id → open agent run */
+    /** @var array<string, array{span: Span, stream: bool, finish: ?string, cost: float, unpriced: bool}> invocation id → open agent run */
     private array $agents = [];
 
     /** @var array<string, array{span: Span, invocation: string}> "{invocation}#{step}" → open model call */
@@ -114,6 +120,7 @@ final class LaravelAiInstrumentation
     public function __construct(
         private readonly Container $container,
         private readonly ?GenAiContent $content = null,
+        private readonly ?GenAiPricing $pricing = null,
     ) {}
 
     private function telemetry(): TelemetryManager
@@ -182,6 +189,8 @@ final class LaravelAiInstrumentation
                 'span' => $span,
                 'stream' => $event instanceof StreamingAgent,
                 'finish' => null,
+                'cost' => 0.0,
+                'unpriced' => false,
             ]);
         });
     }
@@ -209,6 +218,11 @@ final class LaravelAiInstrumentation
 
             if ($run['finish'] !== null) {
                 $span->setAttribute('gen_ai.response.finish_reasons', $this->finishReasons($run['finish']));
+            }
+
+            // A partial sum would read as the run's cost and undercount it.
+            if ($this->pricing !== null && ! $run['unpriced'] && $this->usedTokens($response->usage)) {
+                $span->setAttribute('gen_ai.usage.cost', $run['cost']);
             }
 
             if (($conversation = $this->conversationId($event->prompt->agent, $response)) !== null) {
@@ -319,14 +333,30 @@ final class LaravelAiInstrumentation
                 $span->setAttribute('gen_ai.output.messages', $this->content->output($response->text, $response->toolCalls, $finish));
             }
 
+            $cost = null;
+
+            if ($this->pricing !== null && $this->usedTokens($response->usage)) {
+                $cost = $this->pricing->textCost($this->providerNames($event->provider), $responseModel, $event->model, $response->usage);
+
+                if ($cost !== null) {
+                    $span->setAttribute('gen_ai.usage.cost', $cost);
+                }
+            }
+
             if (isset($this->agents[$event->invocationId])) {
                 $this->agents[$event->invocationId]['finish'] = $finish;
+
+                if ($cost !== null) {
+                    $this->agents[$event->invocationId]['cost'] += $cost;
+                } elseif ($this->usedTokens($response->usage)) {
+                    $this->agents[$event->invocationId]['unpriced'] = true;
+                }
             }
 
             $span->setStatus(SpanStatus::Ok);
             $span->end();
 
-            $this->recordOperation($span, 'chat', $event->provider, $event->model, $responseModel, null, $response);
+            $this->recordOperation($span, 'chat', $event->provider, $event->model, $responseModel, null, $response, cost: $cost);
         });
     }
 
@@ -466,10 +496,18 @@ final class LaravelAiInstrumentation
                 $span->setAttribute('gen_ai.response.model', $responseModel);
             }
 
+            $cost = $this->pricing !== null && $usage->inputTokens > 0
+                ? $this->pricing->embeddingsCost($this->providerNames($event->provider), $responseModel, $event->model, $usage->inputTokens)
+                : null;
+
+            if ($cost !== null) {
+                $span->setAttribute('gen_ai.usage.cost', $cost);
+            }
+
             $span->setStatus(SpanStatus::Ok);
             $span->end();
 
-            $this->recordOperation($span, 'embeddings', $event->provider, $event->model, $responseModel, null, null, $usage->inputTokens);
+            $this->recordOperation($span, 'embeddings', $event->provider, $event->model, $responseModel, null, null, $usage->inputTokens, $cost);
         });
     }
 
@@ -589,6 +627,7 @@ final class LaravelAiInstrumentation
         ?Throwable $error,
         ?StepResponse $response,
         int $embeddingTokens = 0,
+        ?float $cost = null,
     ): void {
         $labels = [
             'gen_ai.operation.name' => $operation,
@@ -628,6 +667,19 @@ final class LaravelAiInstrumentation
                 unit: '{token}',
             )->record($count, [...$labels, 'gen_ai.token.type' => $type]);
         }
+
+        if ($cost !== null && $this->pricing !== null) {
+            $telemetry->counter(
+                'gen_ai.client.cost',
+                description: 'Cost of GenAI operations, from the configured model prices',
+                unit: '{'.$this->pricing->currency.'}',
+            )->inc($cost, $labels);
+        }
+    }
+
+    private function usedTokens(TextUsage $usage): bool
+    {
+        return $usage->inputTokens > 0 || $usage->outputTokens > 0;
     }
 
     private function captureAgentInput(Span $span, AgentPrompt $prompt): void
@@ -676,6 +728,17 @@ final class LaravelAiInstrumentation
         $driver = strtolower($provider->driver());
 
         return self::PROVIDERS[$driver] ?? $driver;
+    }
+
+    /**
+     * Both names a price key may use for the provider: the laravel/ai
+     * driver (`gemini`) and the conventions' name (`gcp.gemini`).
+     *
+     * @return list<string>
+     */
+    private function providerNames(Provider $provider): array
+    {
+        return array_values(array_unique([strtolower($provider->driver()), $this->providerName($provider)]));
     }
 
     /**

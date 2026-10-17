@@ -68,6 +68,7 @@ recorded as zero.
 |--------|------------|--------|
 | `gen_ai.client.operation.duration` (histogram, s) | `gen_ai_client_operation_duration_seconds` | `gen_ai.operation.name` (`chat` / `embeddings`), `gen_ai.provider.name`, `gen_ai.request.model`, `error.type` on failure |
 | `gen_ai.client.token.usage` (histogram, `{token}`) | `gen_ai_client_token_usage` | the same, plus `gen_ai.token.type` (`input` / `output`) |
+| `gen_ai.client.cost` (counter, `{USD}`) — only with [prices](#costs) | `gen_ai_client_cost_total` | the same as the duration, without `error.type` |
 
 Both use the bucket boundaries the conventions specify, and both are
 recorded per model call — never per agent run, which would count the same
@@ -97,6 +98,68 @@ Slow agent runs in Tempo:
 
 ```traceql
 { span.gen_ai.operation.name = "invoke_agent" && duration > 10s }
+```
+
+## Costs
+
+Give the package your model prices and every priced model call carries
+`gen_ai.usage.cost` and adds to the `gen_ai.client.cost` counter. No price
+list ships with the package: prices change, differ per contract and region,
+and a stale catalog is a wrong number that looks right. A model you have
+not priced gets no cost at all, never a guess.
+
+```php
+// config/telemetry.php
+'instrument' => [
+    'ai_pricing' => [
+        'currency' => env('TELEMETRY_AI_CURRENCY', 'USD'),
+        // Per 1M tokens.
+        'models' => [
+            'anthropic/claude-sonnet-*' => ['input' => 3.00, 'output' => 15.00, 'cache_read' => 0.30, 'cache_write' => 3.75],
+            'openai/gpt-4o-mini' => ['input' => 0.15, 'output' => 0.60, 'cache_read' => 0.075],
+            'openai/text-embedding-3-small' => ['input' => 0.02],
+        ],
+    ],
+],
+```
+
+- **Keys** name a model, optionally prefixed by its provider: the laravel/ai
+  driver (`gemini/…`) or the `gen_ai.provider.name` value (`gcp.gemini/…`).
+  `*` matches dated snapshots. An exact key wins over a pattern, and a
+  longer pattern over a shorter one. Matching ignores case.
+- **The served model is priced first.** The model the provider reports
+  (`gen_ai.response.model`, often a dated snapshot) is looked up before the
+  one you asked for.
+- **Each token is billed once.** Input tokens include cache reads and
+  writes, so the uncached part is billed at `input`, cache reads at
+  `cache_read` and cache writes at `cache_write`. Both fall back to `input`.
+  Reasoning tokens are part of the output and billed at `output`.
+  Embeddings are billed at `input`.
+- **An agent run** (`invoke_agent`) carries the sum of its model calls,
+  but only when every call that used tokens was priced. A partial sum
+  would undercount the run.
+- **The counter** has the same labels as the token metric. Its unit is the
+  currency (`{EUR}` with `TELEMETRY_AI_CURRENCY=EUR`). One app reports in one
+  currency.
+
+The conventions define no cost attribute yet, so `gen_ai.usage.cost` and
+`gen_ai.client.cost` are this package's names.
+
+Spend per model over the last day, and the models that used tokens but have
+no price:
+
+```promql
+sum by (gen_ai_request_model) (increase(gen_ai_client_cost_total[1d]))
+
+sum by (gen_ai_provider_name, gen_ai_request_model) (increase(gen_ai_client_token_usage_count[1d]))
+  unless on (gen_ai_provider_name, gen_ai_request_model)
+sum by (gen_ai_provider_name, gen_ai_request_model) (increase(gen_ai_client_cost_total[1d]))
+```
+
+The most expensive runs in Tempo:
+
+```traceql
+{ span.gen_ai.operation.name = "invoke_agent" && span.gen_ai.usage.cost > 0.5 }
 ```
 
 ## Prompts and completions (opt-in)

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Costs for laravel/ai calls, from your own prices.** Set model prices
+  per 1M tokens in the new `instrument.ai_pricing.models` config (keys like
+  `anthropic/claude-sonnet-*`; `input`, `output`, `cache_read`,
+  `cache_write`). Each priced model call and embeddings call then carries
+  `gen_ai.usage.cost` and adds to a new `gen_ai.client.cost` counter, with
+  the same labels as the token metric and the currency
+  (`TELEMETRY_AI_CURRENCY`, default `USD`) as its unit. An agent run carries
+  the sum of its calls when every call was priced. Cache reads and writes
+  are billed at their own prices. No price list ships with the package, and
+  an unpriced model gets no cost. Nothing changes until you add prices.
+
 ## [3.6.1] - 2026-10-13
 
 ### Fixed

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\Instrumentation\GenAiContent;
+use Cbox\Telemetry\Instrumentation\GenAiPricing;
 use Cbox\Telemetry\Instrumentation\LaravelAiInstrumentation;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\Span;
@@ -141,7 +142,7 @@ function aiSpan(Collection $spans, string $name, int $nth = 0): Span
  * Swap the boot-time instrumentation for one built the way the provider
  * builds it with instrument.ai_content on.
  */
-function rearmAi(?GenAiContent $content): void
+function rearmAi(?GenAiContent $content, ?GenAiPricing $pricing = null): void
 {
     $events = app(Dispatcher::class);
 
@@ -155,7 +156,7 @@ function rearmAi(?GenAiContent $content): void
         $events->forget($event);
     }
 
-    (new LaravelAiInstrumentation(app(), $content))->register($events);
+    (new LaravelAiInstrumentation(app(), $content, $pricing))->register($events);
 }
 
 function fakeWeatherRun(): void
@@ -566,4 +567,58 @@ it('works with Telemetry::fake() the way the docs show', function () {
     $telemetry->assertSpanRecorded('invoke_agent AiTestAssistant');
     $telemetry->assertSpanRecorded('chat gpt-test');
     $telemetry->assertHistogramRecorded('gen_ai.client.operation.duration');
+});
+
+it('costs each priced model call and sums the run, billing cache reads at their own price', function () {
+    rearmAi(null, new GenAiPricing([
+        // Matched by the snapshot the provider served, not the model asked for.
+        'openai/gpt-test-*' => ['input' => 2.00, 'output' => 10.00, 'cache_read' => 0.50],
+    ]));
+
+    $fake = Telemetry::fake();
+    fakeWeatherRun();
+
+    (new AiTestAssistant)->prompt('Weather?', provider: 'openai', model: 'gpt-test');
+
+    // 20 uncached × 2 + 100 cache reads × 0.5 + 14 output × 10, per 1M tokens.
+    $expected = (20 * 2.00 + 100 * 0.50 + 14 * 10.00) / 1_000_000;
+
+    $agent = $fake->recordedSpans('invoke_agent AiTestAssistant')[0];
+    $calls = $fake->recordedSpans('chat gpt-test');
+
+    expect($calls[0]->attributes())->not->toHaveKey('gen_ai.usage.cost') // the tool-call step used no tokens
+        ->and($calls[1]->attributes()['gen_ai.usage.cost'])->toEqualWithDelta($expected, 1e-12)
+        ->and($agent->attributes()['gen_ai.usage.cost'])->toEqualWithDelta($expected, 1e-12)
+        ->and($fake->counterValue('gen_ai.client.cost', [
+            'gen_ai.operation.name' => 'chat', 'gen_ai.provider.name' => 'openai', 'gen_ai.request.model' => 'gpt-test',
+        ]))->toEqualWithDelta($expected, 1e-12);
+});
+
+it('records no cost for a model nobody priced, on the call or the run', function () {
+    rearmAi(null, new GenAiPricing(['anthropic/*' => ['input' => 3.00, 'output' => 15.00]]));
+
+    $fake = Telemetry::fake();
+    fakeWeatherRun();
+
+    (new AiTestAssistant)->prompt('Weather?', provider: 'openai', model: 'gpt-test');
+
+    $attributes = collect($fake->recordedSpans())->flatMap(fn (Span $span) => array_keys($span->attributes()));
+
+    expect($attributes)->not->toContain('gen_ai.usage.cost');
+    $fake->assertCounterNotIncremented('gen_ai.client.cost');
+});
+
+it('costs an embeddings call from its input tokens', function () {
+    rearmAi(null, new GenAiPricing(['text-embedding-test' => ['input' => 0.02]], 'EUR'));
+
+    $fake = Telemetry::fake();
+
+    Embeddings::fake(fn ($prompt) => new EmbeddingsResponse([[0.1, 0.2]], new Usage(inputTokens: 1_000_000), new Meta('openai', 'text-embedding-test')));
+
+    Embeddings::for(['hello'])->generate('openai', 'text-embedding-test');
+
+    $labels = ['gen_ai.operation.name' => 'embeddings', 'gen_ai.provider.name' => 'openai', 'gen_ai.request.model' => 'text-embedding-test'];
+
+    expect($fake->recordedSpans('embeddings text-embedding-test')[0]->attributes()['gen_ai.usage.cost'])->toEqualWithDelta(0.02, 1e-12)
+        ->and($fake->counterValue('gen_ai.client.cost', $labels))->toEqualWithDelta(0.02, 1e-12);
 });
