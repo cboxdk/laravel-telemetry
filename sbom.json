@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:1ff87f61-9c17-0768-055d-9919d3a5e869",
+    "serialNumber": "urn:uuid:2d78afc0-d738-e48f-0f80-cd76a913f6c2",
     "version": 1,
     "metadata": {
         "component": {
@@ -216,10 +216,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/laravel/framework@v13.36.0",
+            "bom-ref": "pkg:composer/laravel/framework@v13.37.0",
             "name": "laravel/framework",
-            "version": "v13.36.0",
-            "purl": "pkg:composer/laravel/framework@v13.36.0",
+            "version": "v13.37.0",
+            "purl": "pkg:composer/laravel/framework@v13.37.0",
             "licenses": [
                 {
                     "license": {
@@ -336,10 +336,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/uri-interfaces@7.8.1",
+            "bom-ref": "pkg:composer/league/uri-interfaces@7.9.0",
             "name": "league/uri-interfaces",
-            "version": "7.8.1",
-            "purl": "pkg:composer/league/uri-interfaces@7.8.1",
+            "version": "7.9.0",
+            "purl": "pkg:composer/league/uri-interfaces@7.9.0",
             "licenses": [
                 {
                     "license": {
@@ -351,10 +351,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/uri@7.8.1",
+            "bom-ref": "pkg:composer/league/uri@7.9.0",
             "name": "league/uri",
-            "version": "7.8.1",
-            "purl": "pkg:composer/league/uri@7.8.1",
+            "version": "7.9.0",
+            "purl": "pkg:composer/league/uri@7.9.0",
             "licenses": [
                 {
                     "license": {
@@ -641,10 +641,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/clock@v7.4.8",
+            "bom-ref": "pkg:composer/symfony/clock@v7.4.21",
             "name": "symfony/clock",
-            "version": "v7.4.8",
-            "purl": "pkg:composer/symfony/clock@v7.4.8",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/clock@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -656,10 +656,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/console@v7.4.20",
+            "bom-ref": "pkg:composer/symfony/console@v7.4.21",
             "name": "symfony/console",
-            "version": "v7.4.20",
-            "purl": "pkg:composer/symfony/console@v7.4.20",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/console@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -761,10 +761,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-foundation@v7.4.20",
+            "bom-ref": "pkg:composer/symfony/http-foundation@v7.4.21",
             "name": "symfony/http-foundation",
-            "version": "v7.4.20",
-            "purl": "pkg:composer/symfony/http-foundation@v7.4.20",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/http-foundation@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -776,10 +776,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-kernel@v7.4.20",
+            "bom-ref": "pkg:composer/symfony/http-kernel@v7.4.21",
             "name": "symfony/http-kernel",
-            "version": "v7.4.20",
-            "purl": "pkg:composer/symfony/http-kernel@v7.4.20",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/http-kernel@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -986,10 +986,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/process@v7.4.19",
+            "bom-ref": "pkg:composer/symfony/process@v7.4.21",
             "name": "symfony/process",
-            "version": "v7.4.19",
-            "purl": "pkg:composer/symfony/process@v7.4.19",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/process@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -1001,10 +1001,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/routing@v7.4.20",
+            "bom-ref": "pkg:composer/symfony/routing@v7.4.21",
             "name": "symfony/routing",
-            "version": "v7.4.20",
-            "purl": "pkg:composer/symfony/routing@v7.4.20",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/routing@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -1031,10 +1031,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/string@v7.4.19",
+            "bom-ref": "pkg:composer/symfony/string@v7.4.21",
             "name": "symfony/string",
-            "version": "v7.4.19",
-            "purl": "pkg:composer/symfony/string@v7.4.19",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/string@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -1076,10 +1076,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/uid@v7.4.20",
+            "bom-ref": "pkg:composer/symfony/uid@v7.4.21",
             "name": "symfony/uid",
-            "version": "v7.4.20",
-            "purl": "pkg:composer/symfony/uid@v7.4.20",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/uid@v7.4.21",
             "licenses": [
                 {
                     "license": {
@@ -1091,10 +1091,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/var-dumper@v7.4.18",
+            "bom-ref": "pkg:composer/symfony/var-dumper@v7.4.21",
             "name": "symfony/var-dumper",
-            "version": "v7.4.18",
-            "purl": "pkg:composer/symfony/var-dumper@v7.4.18",
+            "version": "v7.4.21",
+            "purl": "pkg:composer/symfony/var-dumper@v7.4.21",
             "licenses": [
                 {
                     "license": {
