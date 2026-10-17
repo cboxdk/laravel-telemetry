@@ -27,6 +27,7 @@ use Cbox\Telemetry\Support\TelemetryBatch;
 use Cbox\Telemetry\Support\TraceParent;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanRules;
 use Cbox\Telemetry\Tracing\SpanStatus;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
@@ -103,6 +104,8 @@ class TelemetryManager
         private readonly float $slowSpanMs = 100.0,
         private readonly ?RedactsTelemetry $redactor = null,
         private readonly bool $selfMetrics = true,
+        private readonly ?SpanRules $keepTracesWhen = null,
+        private readonly ?SpanRules $keepDetailSpans = null,
     ) {
         // A buffer-cap flush means the trace is pathological — keep every
         // detail for it.
@@ -1474,6 +1477,10 @@ class TelemetryManager
      * the trace that shows the loop is the one worth keeping, even when
      * every call in it was fast.
      *
+     * The app adds its own reasons: any span matching
+     * `traces.details.keep_when` keeps its trace's detail, and a detail span
+     * matching `traces.details.keep_spans` is kept in every trace.
+     *
      * @param  list<Span>  $spans
      * @return list<Span>
      */
@@ -1495,6 +1502,7 @@ class TelemetryManager
                 || isset($span->attributes()['laravel.http.client.repeat'])
                 // Recorded on purpose — a directive asked for this slice.
                 || isset($span->attributes()['telemetry.directive'])
+                || ($this->keepTracesWhen?->matches($span) ?? false)
             ) {
                 $interesting[$span->traceId] = true;
             }
@@ -1502,7 +1510,9 @@ class TelemetryManager
 
         return array_values(array_filter(
             $spans,
-            fn (Span $span): bool => ! $span->isDetail() || ($interesting[$span->traceId] ?? false),
+            fn (Span $span): bool => ! $span->isDetail()
+                || ($interesting[$span->traceId] ?? false)
+                || ($this->keepDetailSpans?->matches($span) ?? false),
         ));
     }
 

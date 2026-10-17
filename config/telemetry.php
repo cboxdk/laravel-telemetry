@@ -353,6 +353,18 @@ return [
             'mode' => env('TELEMETRY_TRACES_DETAILS', 'always'), // always | tail
             'slow_request_ms' => env('TELEMETRY_TRACES_SLOW_REQUEST_MS', 1000),
             'slow_span_ms' => env('TELEMETRY_TRACES_SLOW_SPAN_MS', 100),
+
+            // Your own reasons to keep detail in tail mode. Each rule is a
+            // map of attribute => pattern(s) that must all match ('name'
+            // is the span name, * and ? allowed); any matching rule wins.
+            // keep_when: a matching span keeps its whole trace's detail.
+            //   ['http.route' => ['checkout*', 'api/orders*']],
+            //   ['gen_ai.operation.name' => 'invoke_agent'],
+            //   ['tenant.id' => '7'],
+            'keep_when' => [],
+            // keep_spans: a matching detail span is kept in every trace.
+            //   ['db.query.text' => ['insert *', 'update *', 'delete *']],
+            'keep_spans' => [],
         ],
 
         // Also trust the caller's SAMPLING decision. Disable on public
@@ -1061,6 +1073,21 @@ return [
             'currency' => env('TELEMETRY_AI_CURRENCY', 'USD'),
             'models' => [],
         ],
+
+        // Telemetry::context() keys added as labels on the gen_ai.client.*
+        // metrics, for exact totals per plan, region or tier. BOUNDED
+        // values only: never a user, team or tenant id — every value is a
+        // series per model. Per-id totals belong in ai_usage_events.
+        //   'ai_metric_labels' => ['plan'],
+        'ai_metric_labels' => [],
+
+        // One gen_ai.client.inference.operation.details log record per
+        // model call: the call's gen_ai.* attributes (tokens, cost, models,
+        // finish reason — never content), user.id, your Telemetry::context()
+        // dimensions and error.type. Log records are never sampled, so
+        // spend per user, team or tenant summed in the log backend is
+        // exact. Off by default: one record per call.
+        'ai_usage_events' => env('TELEMETRY_INSTRUMENT_AI_USAGE_EVENTS', false),
 
         // inertia.request span attribute (from the X-Inertia header) +
         // inertia.version_mismatches counter — a version mismatch means

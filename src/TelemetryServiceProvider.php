@@ -88,6 +88,7 @@ use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\Support\ServiceInstance;
 use Cbox\Telemetry\Support\Symbolicator;
+use Cbox\Telemetry\Tracing\SpanRules;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Auth\Access\Response;
@@ -281,6 +282,8 @@ class TelemetryServiceProvider extends ServiceProvider
             slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
             redactor: $app->make(RedactsTelemetry::class),
             selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
+            keepTracesWhen: SpanRules::fromConfig($app->make('config')->get('telemetry.traces.details.keep_when', [])),
+            keepDetailSpans: SpanRules::fromConfig($app->make('config')->get('telemetry.traces.details.keep_spans', [])),
         );
 
         foreach ($this->buildExporters($app) as $exporter) {
@@ -1363,7 +1366,14 @@ class TelemetryServiceProvider extends ServiceProvider
 
             $pricing = GenAiPricing::fromConfig(Cast::array($config->get('telemetry.instrument.ai_pricing', [])));
 
-            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation($app, $content, $pricing));
+            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation(
+                $app,
+                $content,
+                $pricing,
+                metricLabels: Cast::stringList($config->get('telemetry.instrument.ai_metric_labels', [])),
+                usageEvents: Cast::flag($config->get('telemetry.instrument.ai_usage_events', false)),
+                userId: Cast::flag($config->get('telemetry.instrument.user', true), true),
+            ));
             $this->app->make(LaravelAiInstrumentation::class)->register($events);
         }
 

@@ -28,7 +28,9 @@ MCP tools (`trace_summary`, `compare_traces`) do the reading for you; see the
 ## 2. Read the root span first
 
 The request's root span carries tallies that are kept even when detail
-spans are trimmed:
+spans are trimmed (tail mode). If a route, agent or tenant you keep
+debugging is always trimmed, add a `traces.details.keep_when` rule rather
+than switching tail mode off:
 
 | Attribute | Tells you |
 |---|---|

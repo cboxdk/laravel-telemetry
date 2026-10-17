@@ -162,6 +162,61 @@ The most expensive runs in Tempo:
 { span.gen_ai.operation.name = "invoke_agent" && span.gen_ai.usage.cost > 0.5 }
 ```
 
+## Per user, team and tenant
+
+Every AI span carries what you need to break usage down by who caused it:
+
+- **The signed-in user** (`user.id`), when the request has already
+  resolved one. The instrumentation never resolves it itself, so it adds
+  no auth query. Off with `instrument.user`.
+- **Your dimensions** from `Telemetry::context()` (team, tenant, plan, …),
+  set once in middleware. Queued jobs inherit them.
+- **The agent** (`gen_ai.agent.name`), on the agent run and on each of its
+  model calls.
+
+```traceql
+{ span.tenant.id = "7" && span.gen_ai.operation.name = "chat" }
+```
+
+Metric labels stay bounded, so ids never become labels. Two opt-ins cover
+the totals:
+
+**Bounded dimensions as labels.** `instrument.ai_metric_labels` adds
+`Telemetry::context()` keys with few values to all three `gen_ai.client.*`
+metrics, for exact totals in Prometheus:
+
+```php
+'ai_metric_labels' => ['plan'],   // pro / team / free — never an id
+```
+
+```promql
+sum by (plan) (increase(gen_ai_client_cost_total[30d]))
+```
+
+**One record per call, for exact per-id totals.** `instrument.ai_usage_events`
+(`TELEMETRY_INSTRUMENT_AI_USAGE_EVENTS=true`) records a
+`gen_ai.client.inference.operation.details` log record for every model
+call, linked to its span. It carries the call's `gen_ai.*` attributes
+(models, tokens with cache and reasoning, finish reason, cost), `user.id`,
+your context dimensions and `error.type`. It never carries prompt or
+completion content, even with `instrument.ai_content` on. Log records are
+never sampled, so sums over them are exact whatever the trace sample rate:
+
+```logql
+# Spend per tenant, last 30 days
+sum by (tenant_id) (
+  sum_over_time({service_name="my-app"} |= "gen_ai.client.inference.operation.details" | unwrap gen_ai_usage_cost [30d])
+)
+
+# Top users by tokens today
+topk(10, sum by (user_id) (
+  sum_over_time({service_name="my-app"} |= "gen_ai.client.inference.operation.details" | unwrap gen_ai_usage_input_tokens [1d])
+))
+```
+
+These are operational numbers. If you invoice on them, reconcile against
+the provider's own usage export.
+
 ## Prompts and completions (opt-in)
 
 By default **no content is recorded** — not the prompt, not the answer,

@@ -191,6 +191,8 @@ pass `-H 'Accept: application/openmetrics-text'`.
 | `traces.details.mode` | `TELEMETRY_TRACES_DETAILS` | `always` — `tail` keeps cache/query detail spans only for failing or slow traces |
 | `traces.details.slow_request_ms` | `TELEMETRY_TRACES_SLOW_REQUEST_MS` | `1000` |
 | `traces.details.slow_span_ms` | `TELEMETRY_TRACES_SLOW_SPAN_MS` | `100` |
+| `traces.details.keep_when` | — | `[]` — in tail mode, rules (attribute => pattern(s), `name` = span name) whose matching span keeps its whole trace's detail. See [Your own keep rules](../core-concepts/traces.md#your-own-keep-rules) |
+| `traces.details.keep_spans` | — | `[]` — in tail mode, rules whose matching detail span is kept in every trace |
 
 ## Redaction engine
 
@@ -344,6 +346,8 @@ Only valid v3 source maps within the size limit are stored. See
 | `instrument.ai_content` | `TELEMETRY_INSTRUMENT_AI_CONTENT` | `false` — also record prompts, completions, system instructions and tool arguments/results (`gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.system_instructions`, `gen_ai.tool.call.arguments`/`.result`). User data: opt-in, and still redacted at flush |
 | `instrument.ai_pricing.currency` | `TELEMETRY_AI_CURRENCY` | `USD` — the currency of the prices below; the unit of `gen_ai.client.cost` |
 | `instrument.ai_pricing.models` | — | `[]` — your model prices per 1M tokens (`input`, `output`, `cache_read`, `cache_write`), keyed by model or `provider/model`, `*` allowed. Priced calls get `gen_ai.usage.cost` and the `gen_ai.client.cost` counter. See [Laravel AI SDK → Costs](../cookbook/laravel-ai.md#costs) |
+| `instrument.ai_metric_labels` | — | `[]` — `Telemetry::context()` keys added as labels on the `gen_ai.client.*` metrics. Bounded values only (plan, region), never ids |
+| `instrument.ai_usage_events` | `TELEMETRY_INSTRUMENT_AI_USAGE_EVENTS` | `false` — one `gen_ai.client.inference.operation.details` log record per model call (tokens, cost, models, `user.id`, context dimensions; never content) for exact per-user/tenant totals in the log backend |
 | `instrument.ai_content_max_bytes` | `TELEMETRY_INSTRUMENT_AI_CONTENT_MAX_BYTES` | `2048` — byte budget per captured content attribute, shared across the messages it carries and cut on UTF-8 boundaries so the JSON stays valid (minimum 256). Keep it under `redaction.max_value_length` |
 | `instrument.inertia` | `TELEMETRY_INSTRUMENT_INERTIA` | `true` — `inertia.request` span attribute from the `X-Inertia` header, plus `inertia.version_mismatches` counter + `inertia.version_mismatch` span attribute when the response carries `X-Inertia-Location` (Inertia forcing a full reload after an asset-version bump). Pure response inspection — no `inertiajs/inertia-laravel` dependency needed |
 | `instrument.rate_limiting` | `TELEMETRY_INSTRUMENT_RATE_LIMITING` | `true` — `rate_limit.exceeded{limiter}` counter from a 429 response, the driver-agnostic signal (Laravel's `RateLimiter` fires no event). Labeled by the `throttle:<name>` route middleware's limiter name when present, `default` for an inline `throttle:60,1` spec, `unknown` with no throttle middleware at all |
