@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-10-17
+
 ### Added
 
 - **Costs for laravel/ai calls, from your own prices.** Set model prices
