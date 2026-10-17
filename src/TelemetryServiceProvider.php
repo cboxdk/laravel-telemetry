@@ -43,6 +43,7 @@ use Cbox\Telemetry\Instrumentation\CacheInstrumentation;
 use Cbox\Telemetry\Instrumentation\CommandInstrumentation;
 use Cbox\Telemetry\Instrumentation\FilesystemInstrumentation;
 use Cbox\Telemetry\Instrumentation\GenAiContent;
+use Cbox\Telemetry\Instrumentation\GenAiPricing;
 use Cbox\Telemetry\Instrumentation\HorizonInstrumentation;
 use Cbox\Telemetry\Instrumentation\HttpClientRepeatDetector;
 use Cbox\Telemetry\Instrumentation\HttpClientSpanMiddleware;
@@ -87,6 +88,7 @@ use Cbox\Telemetry\Support\Redactor;
 use Cbox\Telemetry\Support\ResourceDetector;
 use Cbox\Telemetry\Support\ServiceInstance;
 use Cbox\Telemetry\Support\Symbolicator;
+use Cbox\Telemetry\Tracing\SpanRules;
 use Cbox\Telemetry\Tracing\Tracer;
 use Closure;
 use Illuminate\Auth\Access\Response;
@@ -280,6 +282,8 @@ class TelemetryServiceProvider extends ServiceProvider
             slowSpanMs: Cast::float($app->make('config')->get('telemetry.traces.details.slow_span_ms'), 100),
             redactor: $app->make(RedactsTelemetry::class),
             selfMetrics: (bool) $app->make('config')->get('telemetry.self_metrics', true),
+            keepTracesWhen: SpanRules::fromConfig($app->make('config')->get('telemetry.traces.details.keep_when', [])),
+            keepDetailSpans: SpanRules::fromConfig($app->make('config')->get('telemetry.traces.details.keep_spans', [])),
         );
 
         foreach ($this->buildExporters($app) as $exporter) {
@@ -1360,7 +1364,16 @@ class TelemetryServiceProvider extends ServiceProvider
                 ? new GenAiContent(max(256, Cast::int($config->get('telemetry.instrument.ai_content_max_bytes', 2048), 2048)))
                 : null;
 
-            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation($app, $content));
+            $pricing = GenAiPricing::fromConfig(Cast::array($config->get('telemetry.instrument.ai_pricing', [])));
+
+            $this->app->singleton(LaravelAiInstrumentation::class, fn (Application $app) => new LaravelAiInstrumentation(
+                $app,
+                $content,
+                $pricing,
+                metricLabels: Cast::stringList($config->get('telemetry.instrument.ai_metric_labels', [])),
+                usageEvents: Cast::flag($config->get('telemetry.instrument.ai_usage_events', false)),
+                userId: Cast::flag($config->get('telemetry.instrument.user', true), true),
+            ));
             $this->app->make(LaravelAiInstrumentation::class)->register($events);
         }
 

@@ -22,6 +22,14 @@ exceptions, Livewire, Horizon, Reverb, Pennant and `laravel/ai` agents
 (`gen_ai.*` spans and token metrics) are instrumented automatically. Do not add spans or counters for those. Instrument the
 business meaning instead: "order placed", "invoice overdue", "import rows".
 
+For AI spend, don't multiply token counts yourself: put the app's prices
+(per 1M tokens) in `instrument.ai_pricing.models`, keyed by model or
+`provider/model` with `*` for snapshots. Priced calls then carry
+`gen_ai.usage.cost` and feed the `gen_ai.client.cost` counter. For spend
+per user or tenant, turn on `instrument.ai_usage_events` rather than
+logging usage by hand; bounded splits like plan go in
+`instrument.ai_metric_labels`.
+
 A queued job is a child span of the request that dispatched it. For a job
 delayed by hours or fanned out by the thousand, implement
 `Cbox\Telemetry\Contracts\StartsLinkedTrace` (or list the class in

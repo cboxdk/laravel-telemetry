@@ -7,6 +7,7 @@ use Cbox\Telemetry\Metrics\Stores\ArrayMetricStore;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanKind;
+use Cbox\Telemetry\Tracing\SpanRules;
 use Cbox\Telemetry\Tracing\Tracer;
 
 function tailManager(float $slowRequestMs = 1000, float $slowSpanMs = 100): array
@@ -149,4 +150,53 @@ it('keeps details on buffer-cap force flushes — pathological traces are intere
 
     expect(collect($collector->batches())->flatMap(fn ($b) => $b->spans)->where('name', 'cache.hit')->count())
         ->toBeGreaterThanOrEqual(3);
+});
+
+it('keeps a trace\'s detail when one of its spans matches keep_when', function () {
+    $manager = new TelemetryManager(
+        enabled: true,
+        registry: new Registry(new ArrayMetricStore, []),
+        tracer: new Tracer,
+        tailDetails: true,
+        keepTracesWhen: SpanRules::fromConfig([['http.route' => 'checkout*']]),
+    );
+    $collector = new CollectingExporter;
+    $manager->addExporter($collector);
+
+    $manager->span('POST /checkout', function () use ($manager) {
+        $manager->tracer()->recordSpan('db.query', 2.0, [], SpanKind::Client, detail: true);
+    }, ['http.route' => 'checkout/{cart}']);
+
+    $manager->resetContext();
+
+    $manager->span('GET /shop', function () use ($manager) {
+        $manager->tracer()->recordSpan('cache.hit', 0.5, [], SpanKind::Client, detail: true);
+    }, ['http.route' => 'shop']);
+
+    $manager->flush();
+
+    expect(flushedSpanNames($collector))->toContain('db.query')
+        ->not->toContain('cache.hit');
+});
+
+it('keeps a detail span matching keep_spans in an otherwise lean trace', function () {
+    $manager = new TelemetryManager(
+        enabled: true,
+        registry: new Registry(new ArrayMetricStore, []),
+        tracer: new Tracer,
+        tailDetails: true,
+        keepDetailSpans: SpanRules::fromConfig([['db.query.text' => ['insert *', 'update *']]]),
+    );
+    $collector = new CollectingExporter;
+    $manager->addExporter($collector);
+
+    $manager->span('POST /orders', function () use ($manager) {
+        $manager->tracer()->recordSpan('db.write', 2.0, ['db.query.text' => 'INSERT INTO orders VALUES (?)'], SpanKind::Client, detail: true);
+        $manager->tracer()->recordSpan('db.read', 2.0, ['db.query.text' => 'select * from users'], SpanKind::Client, detail: true);
+    });
+
+    $manager->flush();
+
+    expect(flushedSpanNames($collector))->toContain('POST /orders', 'db.write')
+        ->not->toContain('db.read');
 });

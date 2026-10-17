@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Cbox\Telemetry\Instrumentation;
 
+use Cbox\Telemetry\Events\TelemetryEvent;
+use Cbox\Telemetry\Support\Cast;
 use Cbox\Telemetry\Support\FailSafe;
 use Cbox\Telemetry\TelemetryManager;
 use Cbox\Telemetry\Tracing\Span;
 use Cbox\Telemetry\Tracing\SpanKind;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laravel\Ai\AnonymousAgent;
@@ -66,6 +69,20 @@ use Throwable;
  * Prompt and completion content is NOT recorded unless
  * `instrument.ai_content` is on; see GenAiContent.
  *
+ * With prices configured (`instrument.ai_pricing`, see GenAiPricing) each
+ * priced model call also carries `gen_ai.usage.cost` and adds to the
+ * `gen_ai.client.cost` counter; an agent run carries the sum of its calls,
+ * but only when every call that used tokens was priced. Neither name is in
+ * the conventions yet — they have no cost attribute.
+ *
+ * Each span carries the signed-in user (`user.id`) when the request has
+ * already resolved one. `instrument.ai_metric_labels` adds bounded
+ * `Telemetry::context()` keys (plan, region) as labels on the metrics, and
+ * `instrument.ai_usage_events` records one
+ * `gen_ai.client.inference.operation.details` log record per model call —
+ * never sampled, so per-user or per-tenant totals in the log backend are
+ * exact.
+ *
  * Every open span is held under laravel/ai's own invocation ids. A run that
  * never reports its end — a stream the caller stopped reading — leaves its
  * spans unexported, the same "a missing span beats a wrong one" choice the
@@ -78,6 +95,12 @@ final class LaravelAiInstrumentation
     private const DURATION_BUCKETS = [0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92];
 
     private const TOKEN_BUCKETS = [1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864];
+
+    /** Captured content: user data, never copied onto a usage record. */
+    private const CONTENT_ATTRIBUTES = [
+        'gen_ai.input.messages', 'gen_ai.output.messages', 'gen_ai.system_instructions',
+        'gen_ai.tool.call.arguments', 'gen_ai.tool.call.result',
+    ];
 
     /** Most runs (and steps, tools, embeddings calls) tracked at once. */
     private const MAX_OPEN = 128;
@@ -99,7 +122,7 @@ final class LaravelAiInstrumentation
         'xai' => 'x_ai',
     ];
 
-    /** @var array<string, array{span: Span, stream: bool, finish: ?string}> invocation id → open agent run */
+    /** @var array<string, array{span: Span, stream: bool, finish: ?string, cost: float, unpriced: bool}> invocation id → open agent run */
     private array $agents = [];
 
     /** @var array<string, array{span: Span, invocation: string}> "{invocation}#{step}" → open model call */
@@ -114,6 +137,11 @@ final class LaravelAiInstrumentation
     public function __construct(
         private readonly Container $container,
         private readonly ?GenAiContent $content = null,
+        private readonly ?GenAiPricing $pricing = null,
+        /** @var list<string> */
+        private readonly array $metricLabels = [],
+        private readonly bool $usageEvents = false,
+        private readonly bool $userId = true,
     ) {}
 
     private function telemetry(): TelemetryManager
@@ -158,6 +186,7 @@ final class LaravelAiInstrumentation
                 'gen_ai.provider.name' => $this->providerName($prompt->provider),
                 'gen_ai.agent.name' => $name,
                 'gen_ai.request.model' => $prompt->model,
+                ...$this->user(),
             ];
 
             if ($prompt->agent instanceof CanActAsTool) {
@@ -182,6 +211,8 @@ final class LaravelAiInstrumentation
                 'span' => $span,
                 'stream' => $event instanceof StreamingAgent,
                 'finish' => null,
+                'cost' => 0.0,
+                'unpriced' => false,
             ]);
         });
     }
@@ -209,6 +240,11 @@ final class LaravelAiInstrumentation
 
             if ($run['finish'] !== null) {
                 $span->setAttribute('gen_ai.response.finish_reasons', $this->finishReasons($run['finish']));
+            }
+
+            // A partial sum would read as the run's cost and undercount it.
+            if ($this->pricing !== null && ! $run['unpriced'] && $this->usedTokens($response->usage)) {
+                $span->setAttribute('gen_ai.usage.cost', $run['cost']);
             }
 
             if (($conversation = $this->conversationId($event->prompt->agent, $response)) !== null) {
@@ -267,6 +303,8 @@ final class LaravelAiInstrumentation
                 'gen_ai.request.max_tokens' => $event->options?->maxTokens,
                 'gen_ai.request.temperature' => $event->options?->temperature,
                 'gen_ai.request.top_p' => $event->options?->topP,
+                'gen_ai.agent.name' => $this->agentName($event->agent),
+                ...$this->user(),
             ];
 
             if ($this->agents[$event->invocationId]['stream'] ?? false) {
@@ -319,14 +357,30 @@ final class LaravelAiInstrumentation
                 $span->setAttribute('gen_ai.output.messages', $this->content->output($response->text, $response->toolCalls, $finish));
             }
 
+            $cost = null;
+
+            if ($this->pricing !== null && $this->usedTokens($response->usage)) {
+                $cost = $this->pricing->textCost($this->providerNames($event->provider), $responseModel, $event->model, $response->usage);
+
+                if ($cost !== null) {
+                    $span->setAttribute('gen_ai.usage.cost', $cost);
+                }
+            }
+
             if (isset($this->agents[$event->invocationId])) {
                 $this->agents[$event->invocationId]['finish'] = $finish;
+
+                if ($cost !== null) {
+                    $this->agents[$event->invocationId]['cost'] += $cost;
+                } elseif ($this->usedTokens($response->usage)) {
+                    $this->agents[$event->invocationId]['unpriced'] = true;
+                }
             }
 
             $span->setStatus(SpanStatus::Ok);
             $span->end();
 
-            $this->recordOperation($span, 'chat', $event->provider, $event->model, $responseModel, null, $response);
+            $this->recordOperation($span, 'chat', $event->provider, $event->model, $responseModel, null, $response, cost: $cost);
         });
     }
 
@@ -432,6 +486,7 @@ final class LaravelAiInstrumentation
                 'gen_ai.provider.name' => $provider,
                 'gen_ai.request.model' => $event->model,
                 'gen_ai.embeddings.dimension.count' => $event->prompt->dimensions > 0 ? $event->prompt->dimensions : null,
+                ...$this->user(),
             ]);
 
             $this->hold($this->embeddings, $event->invocationId, [
@@ -466,10 +521,18 @@ final class LaravelAiInstrumentation
                 $span->setAttribute('gen_ai.response.model', $responseModel);
             }
 
+            $cost = $this->pricing !== null && $usage->inputTokens > 0
+                ? $this->pricing->embeddingsCost($this->providerNames($event->provider), $responseModel, $event->model, $usage->inputTokens)
+                : null;
+
+            if ($cost !== null) {
+                $span->setAttribute('gen_ai.usage.cost', $cost);
+            }
+
             $span->setStatus(SpanStatus::Ok);
             $span->end();
 
-            $this->recordOperation($span, 'embeddings', $event->provider, $event->model, $responseModel, null, null, $usage->inputTokens);
+            $this->recordOperation($span, 'embeddings', $event->provider, $event->model, $responseModel, null, null, $usage->inputTokens, $cost);
         });
     }
 
@@ -589,6 +652,7 @@ final class LaravelAiInstrumentation
         ?Throwable $error,
         ?StepResponse $response,
         int $embeddingTokens = 0,
+        ?float $cost = null,
     ): void {
         $labels = [
             'gen_ai.operation.name' => $operation,
@@ -597,6 +661,20 @@ final class LaravelAiInstrumentation
         ];
 
         $telemetry = $this->telemetry();
+
+        if ($this->usageEvents) {
+            $this->recordUsageEvent($telemetry, $span, $error);
+        }
+
+        if ($this->metricLabels !== []) {
+            $context = $telemetry->contextAttributes();
+
+            foreach ($this->metricLabels as $key) {
+                if (isset($context[$key]) && ! isset($labels[$key])) {
+                    $labels[$key] = $context[$key];
+                }
+            }
+        }
 
         $telemetry->histogram(
             'gen_ai.client.operation.duration',
@@ -628,6 +706,79 @@ final class LaravelAiInstrumentation
                 unit: '{token}',
             )->record($count, [...$labels, 'gen_ai.token.type' => $type]);
         }
+
+        if ($cost !== null && $this->pricing !== null) {
+            $telemetry->counter(
+                'gen_ai.client.cost',
+                description: 'Cost of GenAI operations, from the configured model prices',
+                unit: '{'.$this->pricing->currency.'}',
+            )->inc($cost, $labels);
+        }
+    }
+
+    /**
+     * One log record per model call, linked to its span: the call's
+     * `gen_ai.*` attributes (never content), the user, the context
+     * dimensions and the error class.
+     */
+    private function recordUsageEvent(TelemetryManager $telemetry, Span $span, ?Throwable $error): void
+    {
+        $attributes = [];
+
+        foreach ($span->attributes() as $key => $value) {
+            if ($value === null || in_array($key, self::CONTENT_ATTRIBUTES, true)) {
+                continue;
+            }
+
+            if (str_starts_with($key, 'gen_ai.') || $key === 'user.id') {
+                $attributes[$key] = $value;
+            }
+        }
+
+        if ($error !== null) {
+            $attributes['error.type'] = $error::class;
+        }
+
+        $telemetry->recordEvent(new TelemetryEvent(
+            name: 'gen_ai.client.inference.operation.details',
+            timeUnixNano: $span->endUnixNano(),
+            attributes: [...$telemetry->contextAttributes(), ...$attributes],
+            traceId: $span->traceId,
+            spanId: $span->spanId,
+        ));
+    }
+
+    /**
+     * The signed-in user, when the request has already resolved one —
+     * never resolved here, which would run the guard (and its query) on
+     * the app's behalf.
+     *
+     * @return array<string, string>
+     */
+    private function user(): array
+    {
+        if (! $this->userId || ! $this->container->bound('auth')) {
+            return [];
+        }
+
+        $auth = $this->container->make('auth');
+
+        if (! $auth instanceof AuthFactory) {
+            return [];
+        }
+
+        $guard = $auth->guard();
+
+        if (! $guard->hasUser() || ($id = $guard->id()) === null) {
+            return [];
+        }
+
+        return ['user.id' => Cast::string($id)];
+    }
+
+    private function usedTokens(TextUsage $usage): bool
+    {
+        return $usage->inputTokens > 0 || $usage->outputTokens > 0;
     }
 
     private function captureAgentInput(Span $span, AgentPrompt $prompt): void
@@ -676,6 +827,17 @@ final class LaravelAiInstrumentation
         $driver = strtolower($provider->driver());
 
         return self::PROVIDERS[$driver] ?? $driver;
+    }
+
+    /**
+     * Both names a price key may use for the provider: the laravel/ai
+     * driver (`gemini`) and the conventions' name (`gcp.gemini`).
+     *
+     * @return list<string>
+     */
+    private function providerNames(Provider $provider): array
+    {
+        return array_values(array_unique([strtolower($provider->driver()), $this->providerName($provider)]));
     }
 
     /**

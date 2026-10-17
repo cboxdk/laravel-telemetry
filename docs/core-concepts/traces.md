@@ -708,6 +708,36 @@ fast traces ship the skeleton — root span with all its tallies
 (`db.query.count`, `cache.event.count`, resources) — while counters and
 histograms flow unconditionally.
 
+Only detail spans are trimmed: queries, cache and Redis operations, views,
+request phases, Livewire hooks, storage and broadcast calls. Every other
+span stays in every trace: the request, jobs, outgoing HTTP, mail, and the
+`laravel/ai` agent, model and tool spans.
+
+### Your own keep rules
+
+Add the traces and spans that matter to you. A rule is a map of attribute
+to pattern, all of which must match (`name` is the span name; `*` and `?`
+work, a list of patterns matches any one, case is ignored). Any matching
+rule wins.
+
+```php
+// config/telemetry.php → traces.details
+'keep_when' => [
+    // A matching span keeps its whole trace's detail.
+    ['http.route' => ['checkout*', 'api/orders*']],
+    ['gen_ai.operation.name' => 'invoke_agent'],   // every agent run, with its queries
+    ['tenant.id' => '7'],                          // one tenant, from Telemetry::context()
+],
+'keep_spans' => [
+    // A matching detail span is kept in every trace, healthy or not.
+    ['db.query.text' => ['insert *', 'update *', 'delete *']],
+],
+```
+
+An attribute a span does not carry never matches, not even `*`. For a
+temporary, time-boxed version of `keep_when` — one user, one route, for an
+hour — use a [directive](#directives-record-more-of-one-slice-for-a-while) instead.
+
 The decision happens at flush, when the entire trace is in memory —
 tail-based detail retention without a collector. Buffer-cap force
 flushes always keep details: a 5000-span request IS interesting.

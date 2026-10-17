@@ -45,8 +45,8 @@ spec-stable HTTP JSON.
   feature-flag check counters, no extra config
 - ✅ OpenTelemetry GenAI traces and token metrics for the
   [Laravel AI SDK](https://github.com/laravel/ai) when installed — agent
-  runs, model calls, tool calls and embeddings; prompts recorded only if
-  you opt in
+  runs, model calls, tool calls and embeddings, plus cost from your own
+  model prices; prompts recorded only if you opt in
 - ✅ `Telemetry::fake()` with assertions for counters, gauges, histograms,
   spans and events
 - ✅ Provider contract so packages publish telemetry without coupling

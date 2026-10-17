@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Costs for laravel/ai calls, from your own prices.** Set model prices
+  per 1M tokens in the new `instrument.ai_pricing.models` config (keys like
+  `anthropic/claude-sonnet-*`; `input`, `output`, `cache_read`,
+  `cache_write`). Each priced model call and embeddings call then carries
+  `gen_ai.usage.cost` and adds to a new `gen_ai.client.cost` counter, with
+  the same labels as the token metric and the currency
+  (`TELEMETRY_AI_CURRENCY`, default `USD`) as its unit. An agent run carries
+  the sum of its calls when every call was priced. Cache reads and writes
+  are billed at their own prices. No price list ships with the package, and
+  an unpriced model gets no cost. Nothing changes until you add prices.
+- **AI usage per user, team and tenant.** laravel/ai spans now carry the
+  signed-in user (`user.id`, only when the request already resolved one),
+  and model-call spans carry their agent's `gen_ai.agent.name`. New
+  `instrument.ai_metric_labels` adds bounded `Telemetry::context()` keys
+  (plan, region) as labels on the `gen_ai.client.*` metrics. New
+  `instrument.ai_usage_events` (off by default) records one
+  `gen_ai.client.inference.operation.details` log record per model call
+  with tokens, cost, user and context dimensions, never content. Log
+  records are not sampled, so per-user and per-tenant sums are exact.
+- **Your own keep rules in tail mode.** `traces.details.keep_when` keeps a
+  trace's detail spans when any span matches a rule (an attribute or span
+  name pattern, e.g. `['http.route' => 'checkout*']` or
+  `['gen_ai.operation.name' => 'invoke_agent']`), and
+  `traces.details.keep_spans` keeps matching detail spans in every trace
+  (e.g. writes: `['db.query.text' => ['insert *', 'update *']]`). Nothing
+  changes until you add rules.
+
 ## [3.6.1] - 2026-10-13
 
 ### Fixed
