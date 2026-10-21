@@ -16,6 +16,7 @@ use Illuminate\Notifications\Events\NotificationFailed;
 use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Notifications\Events\NotificationSkipped;
+use Throwable;
 
 /**
  * Notification instrumentation: a client span per delivery and a
@@ -79,11 +80,17 @@ final class NotificationInstrumentation implements ManagesRequestState
      * parent, and everything the request did afterwards became a child of
      * the delivery that had already failed. The shape of the trace was
      * rewritten by an exception somewhere else entirely.
+     *
+     * Laravel hands the exception over in `$data['exception']` (a channel
+     * reporting its own failure may not); it goes on the span, so the
+     * failed delivery says why rather than only that it failed.
      */
     private function failed(NotificationFailed $event): void
     {
         FailSafe::guard(function () use ($event) {
-            $this->close($event->notification, $event->channel, SpanStatus::Error);
+            $exception = $event->data['exception'] ?? null;
+
+            $this->close($event->notification, $event->channel, SpanStatus::Error, $exception instanceof Throwable ? $exception : null);
 
             $this->telemetry()
                 ->counter('notifications.failed', 'Notifications that failed to send')
@@ -122,14 +129,21 @@ final class NotificationInstrumentation implements ManagesRequestState
         });
     }
 
-    private function close(object $notification, string $channel, SpanStatus $status): void
+    private function close(object $notification, string $channel, SpanStatus $status, ?Throwable $exception = null): void
     {
         $key = $this->key($notification, $channel);
         $span = $this->sending[$key] ?? null;
         unset($this->sending[$key]);
 
         if ($span instanceof Span) {
-            $span->setStatus($status);
+            // An exception sets the error status itself, with its message as
+            // the description; a bare status would wipe that message again.
+            if ($exception !== null) {
+                $span->recordException($exception);
+            } else {
+                $span->setStatus($status);
+            }
+
             $span->end();
         }
     }

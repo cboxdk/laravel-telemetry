@@ -14,10 +14,18 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Mail\Mailer;
+use Illuminate\Mail\MailManager;
+use Illuminate\Mail\Transport\ArrayTransport;
+use Illuminate\Mail\Transport\LogTransport;
+use Symfony\Component\Mime\RawMessage;
+use Throwable;
 
 /**
  * Mail instrumentation: a client span per sent message (transport time
- * is often the slowest part of a request) plus a mail.sent counter.
+ * is often the slowest part of a request) plus mail.sent and mail.failed
+ * counters. A send the transport refused ends its span as an error with the
+ * exception on it (see {@see ObservedTransport}).
  */
 final class MailInstrumentation implements ManagesRequestState
 {
@@ -48,6 +56,63 @@ final class MailInstrumentation implements ManagesRequestState
                     'mail.recipients' => count($event->message->getTo()),
                 ],
             );
+
+            $this->observe($event->data['mailer'] ?? null);
+        });
+    }
+
+    /**
+     * Put the sending mailer's transport behind an {@see ObservedTransport},
+     * once, so a send it refuses is seen. MessageSending fires just before
+     * the transport is called, on the mailer Laravel caches by name, so the
+     * wrap takes effect for this very send.
+     *
+     * The array and log transports cannot fail and are left as they are:
+     * tests read sent mail off them by their own class.
+     */
+    private function observe(mixed $mailer): void
+    {
+        if (! is_string($mailer) || ! $this->container->bound('mail.manager')) {
+            return;
+        }
+
+        $manager = $this->container->make('mail.manager');
+
+        // Mail::fake() swaps the manager: nothing reaches a transport then.
+        if (! $manager instanceof MailManager) {
+            return;
+        }
+
+        $instance = $manager->mailer($mailer);
+
+        if (! $instance instanceof Mailer) {
+            return;
+        }
+
+        $transport = $instance->getSymfonyTransport();
+
+        if ($transport instanceof ObservedTransport || $transport instanceof ArrayTransport || $transport instanceof LogTransport) {
+            return;
+        }
+
+        $instance->setSymfonyTransport(new ObservedTransport($transport, $this->failed(...)));
+    }
+
+    private function failed(RawMessage $message, Throwable $exception): void
+    {
+        FailSafe::guard(function () use ($message, $exception) {
+            // The transport is handed the message MessageSending carried, so
+            // identity finds its span (the clone happens inside the transport).
+            $span = $this->pullSpanFor($message);
+
+            if ($span !== null) {
+                $span->recordException($exception);
+                $span->end();
+            }
+
+            $this->telemetry()
+                ->counter('mail.failed', 'Mail messages the transport refused')
+                ->inc();
         });
     }
 

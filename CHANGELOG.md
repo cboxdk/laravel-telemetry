@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A mail the transport refused is a failed send you can see.** Laravel
+  fires no event when the transport throws (an SMTP refusal, a provider
+  outage), so the `mail.send` span was left open and discarded at the end
+  of the request: failed sends were the ones nobody saw. The sending
+  mailer's transport is now wrapped, once, in `ObservedTransport`, which
+  passes everything through and ends the span as an error with the
+  exception on it, and counts `mail.failed`. The array and log transports
+  are left alone, so tests that read sent mail off them keep working; any
+  other method called on a wrapped transport reaches the transport itself.
+- **A check against an undefined Pennant feature is an event.**
+  `feature.unknown` (with `feature_flag.key`) says which typo or stale flag
+  was asked for, and by which request or job — once per feature per trace,
+  since the same one is usually asked on every request.
+
+### Changed
+
+- **A failed notification says why.** Its `notification.send` span now
+  carries the exception Laravel passes in `NotificationFailed` (error type,
+  message, stack), not only the error status.
+
+### Fixed
+
+- A Retry-After test failed when the suite was slow: its HTTP date was
+  taken when the file loaded, not when the test ran.
+
 ## [3.7.0] - 2026-10-17
 
 ### Added

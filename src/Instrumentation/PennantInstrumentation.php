@@ -21,9 +21,20 @@ use Laravel\Pennant\Events\UnknownFeatureResolved;
  * cache hit or fresh resolve, so `feature.checks` is a true call-count.
  * The scope (typically a user/tenant model) is NEVER used as a label —
  * only the feature name and a bounded result.
+ *
+ * A check against a feature nobody defined — a typo, a flag removed but
+ * still asked for — is also a `feature.unknown` event, so it can be found:
+ * which feature, and the request or job that asked. Once per feature per
+ * trace, since the same typo is usually asked on every request.
  */
 final class PennantInstrumentation
 {
+    /** Trace whose unknown features {@see $reported} lists. */
+    private ?string $trace = null;
+
+    /** @var array<string, true> */
+    private array $reported = [];
+
     public function __construct(private readonly Container $container) {}
 
     private function telemetry(): TelemetryManager
@@ -55,6 +66,20 @@ final class PennantInstrumentation
             $this->telemetry()
                 ->counter('feature.unknown', 'Checks against a feature with no registered definition — likely a typo or a stale flag')
                 ->inc(1, ['feature' => Cast::string($event->feature)]);
+
+            $trace = $this->telemetry()->tracer()->traceId();
+
+            if ($trace !== $this->trace) {
+                $this->trace = $trace;
+                $this->reported = [];
+            }
+
+            $feature = Cast::string($event->feature);
+
+            if (! isset($this->reported[$feature])) {
+                $this->reported[$feature] = true;
+                $this->telemetry()->event('feature.unknown', ['feature_flag.key' => $feature]);
+            }
         });
     }
 

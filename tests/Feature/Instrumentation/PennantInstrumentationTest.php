@@ -57,3 +57,23 @@ it('never leaks the scope into a label', function () {
     expect($labels)->toHaveKeys(['feature', 'result'])
         ->and($labels)->not->toHaveKey('scope');
 });
+
+it('records a check against an undefined feature as an event, once per trace', function () {
+    $fake = Telemetry::fake();
+
+    $first = Telemetry::tracer()->startSpan('GET /dashboard');
+    app('events')->dispatch(new UnknownFeatureResolved('new-dashbaord', 1));
+    app('events')->dispatch(new UnknownFeatureResolved('new-dashbaord', 2));
+    app('events')->dispatch(new UnknownFeatureResolved('legacy-export', 1));
+    $first->end();
+
+    // The next request: a trace of its own.
+    Telemetry::resetContext();
+    $second = Telemetry::tracer()->startSpan('GET /dashboard');
+    app('events')->dispatch(new UnknownFeatureResolved('new-dashbaord', 1));
+    $second->end();
+
+    $keys = array_map(fn ($event) => $event->attributes['feature_flag.key'], $fake->recordedEvents('feature.unknown'));
+
+    expect($keys)->toBe(['new-dashbaord', 'legacy-export', 'new-dashbaord']);
+});
