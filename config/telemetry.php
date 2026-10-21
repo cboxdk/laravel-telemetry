@@ -962,8 +962,16 @@ return [
         // see Telemetry::classifyCacheKeysUsing().
         'cache_ignore_stores' => [],
 
-        // mail.send spans + mail.sent counter.
+        // mail.send spans + mail.sent / mail.failed counters.
         'mail' => env('TELEMETRY_INSTRUMENT_MAIL', true),
+
+        // Record who each message went to on its mail.send span — mail.to,
+        // mail.cc and mail.bcc, comma-separated — so a send can be found
+        // by recipient ("every request that mailed x@example.com"). OFF by
+        // default: addresses are personal data, kept as long as your
+        // traces are. redaction.pii's email detector redacts them again at
+        // flush, so turn that detector off (or this on) — not both.
+        'mail_recipients' => env('TELEMETRY_INSTRUMENT_MAIL_RECIPIENTS', false),
 
         // notification.send spans + notifications.sent{channel,notification}.
         'notifications' => env('TELEMETRY_INSTRUMENT_NOTIFICATIONS', true),

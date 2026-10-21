@@ -1232,7 +1232,10 @@ class TelemetryServiceProvider extends ServiceProvider
         }
 
         if ($config->get('telemetry.instrument.mail', true)) {
-            $this->app->singleton(MailInstrumentation::class);
+            $this->app->singleton(MailInstrumentation::class, fn (Application $app) => new MailInstrumentation(
+                $app,
+                recipients: Cast::flag($config->get('telemetry.instrument.mail_recipients', false)),
+            ));
             $this->app->make(MailInstrumentation::class)->register($events);
         }
 

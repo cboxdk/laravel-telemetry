@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exception on it, and counts `mail.failed`. The array and log transports
   are left alone, so tests that read sent mail off them keep working; any
   other method called on a wrapped transport reaches the transport itself.
+- **Find a mail by who it went to (opt-in).** With
+  `instrument.mail_recipients` (`TELEMETRY_INSTRUMENT_MAIL_RECIPIENTS=true`)
+  each `mail.send` span carries `mail.to`, `mail.cc` and `mail.bcc`, the
+  addresses comma-separated, so a trace search finds every send to one
+  address. Off by default: addresses are personal data. `redaction.pii`'s
+  email detector redacts them again, so use one or the other.
 - **A check against an undefined Pennant feature is an event.**
   `feature.unknown` (with `feature_flag.key`) says which typo or stale flag
   was asked for, and by which request or job — once per feature per trace,

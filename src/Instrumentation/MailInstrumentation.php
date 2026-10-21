@@ -18,6 +18,8 @@ use Illuminate\Mail\Mailer;
 use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Mail\Transport\LogTransport;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\RawMessage;
 use Throwable;
 
@@ -32,7 +34,14 @@ final class MailInstrumentation implements ManagesRequestState
     /** @var array<int, Span> keyed by message object id */
     private array $sending = [];
 
-    public function __construct(private readonly Container $container) {}
+    /** Most addresses kept per field: a mail to a thousand is still found by its first fifty. */
+    private const MAX_RECIPIENTS = 50;
+
+    /**
+     * @param  bool  $recipients  record the addresses (mail.to/cc/bcc) —
+     *                            personal data, so off unless asked for
+     */
+    public function __construct(private readonly Container $container, private readonly bool $recipients = false) {}
 
     private function telemetry(): TelemetryManager
     {
@@ -54,11 +63,33 @@ final class MailInstrumentation implements ManagesRequestState
                 [
                     'mail.subject' => (string) $event->message->getSubject(),
                     'mail.recipients' => count($event->message->getTo()),
+                    ...($this->recipients ? $this->addresses($event->message) : []),
                 ],
             );
 
             $this->observe($event->data['mailer'] ?? null);
         });
+    }
+
+    /**
+     * Who the message went to, field by field, for a search by recipient.
+     * Empty fields are left out.
+     *
+     * @return array<string, string>
+     */
+    private function addresses(Email $message): array
+    {
+        $fields = [];
+
+        foreach (['mail.to' => $message->getTo(), 'mail.cc' => $message->getCc(), 'mail.bcc' => $message->getBcc()] as $field => $addresses) {
+            $list = array_map(static fn (Address $address): string => $address->getAddress(), array_slice($addresses, 0, self::MAX_RECIPIENTS));
+
+            if ($list !== []) {
+                $fields[$field] = implode(', ', $list);
+            }
+        }
+
+        return $fields;
     }
 
     /**
