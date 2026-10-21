@@ -112,7 +112,10 @@ it('puts the exception on a released attempt from the release event alone', func
     expect(attemptExceptionEvents($span))->toHaveCount(1)
         ->and($span->attributes()['error.type'] ?? null)->toBe(RuntimeException::class)
         ->and($span->statusDescription())->toBe('card declined');
-});
+})->skip(
+    fn () => ! property_exists(JobReleasedAfterException::class, 'exception'),
+    'JobReleasedAfterException carries the exception from Laravel 13.31',
+);
 
 it('records exactly one exception per attempt for a job released and then failed', function () {
     $events = app('events');
