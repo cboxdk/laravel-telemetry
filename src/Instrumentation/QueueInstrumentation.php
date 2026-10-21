@@ -26,6 +26,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobDebounced;
+use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobInterrupted;
 use Illuminate\Queue\Events\JobProcessed;
@@ -58,8 +59,9 @@ use Throwable;
  * Worker side: each job runs in its own consumer span. All three outcomes
  * are covered — processed, released-for-retry (JobReleasedAfterException)
  * and terminally failed (JobFailed) — so retried attempts are never
- * invisible. Spans are kept on a stack so nested sync dispatches can't
- * clobber the outer job's span.
+ * invisible, and an attempt that threw carries its exception
+ * (JobExceptionOccurred), released or not. Spans are kept on a stack so
+ * nested sync dispatches can't clobber the outer job's span.
  */
 final class QueueInstrumentation implements ManagesRequestState
 {
@@ -241,6 +243,7 @@ final class QueueInstrumentation implements ManagesRequestState
         if ($instrument) {
             $events->listen(JobProcessing::class, $this->jobProcessing(...));
             $events->listen(JobProcessed::class, $this->jobProcessed(...));
+            $events->listen(JobExceptionOccurred::class, $this->jobExceptionOccurred(...));
             $events->listen(JobReleasedAfterException::class, $this->jobReleased(...));
             $events->listen(JobFailed::class, $this->jobFailed(...));
 
@@ -618,7 +621,24 @@ final class QueueInstrumentation implements ManagesRequestState
     {
         FailSafe::guard(function () use ($event) {
             $span = $this->currentJobSpan();
-            $span?->setStatus(SpanStatus::Error, 'released for retry');
+
+            // `exception` exists on this event from Laravel v13.31.0 only;
+            // see the note on `$releasedBy` below. JobExceptionOccurred has
+            // usually noted the same throwable already, and noteException()
+            // dedupes by identity, so this adds no second event.
+            $thrown = $event->exception ?? null;
+
+            if ($span !== null && $thrown instanceof Throwable) {
+                $span->noteException($thrown, fail: true);
+            }
+
+            // Only when nothing said why. An Error already on the span is
+            // the exception's own message, and "released for retry" in its
+            // place is what left every retried attempt red with nothing to
+            // read.
+            if ($span !== null && $span->status() !== SpanStatus::Error) {
+                $span->setStatus(SpanStatus::Error, 'released for retry');
+            }
 
             if ($span !== null && config('telemetry.instrument.queue_retry_links', true)) {
                 $uuid = $event->job->uuid();
@@ -655,6 +675,26 @@ final class QueueInstrumentation implements ManagesRequestState
         }
 
         $this->closeAttempt($event->job, $event->connectionName, 'released');
+    }
+
+    /**
+     * The attempt threw. Attach the exception to THAT attempt's span, so a
+     * released attempt carries `error.type`, an `exception` event and the
+     * message as its status, not only JobFailed's terminal one.
+     *
+     * Laravel raises this on every supported version, after any decision to
+     * fail the job and before the release. On the failing path JobFailed has
+     * already closed the attempt, so there is no open span for it and this
+     * does nothing; the exception is on the span from recordException(), and
+     * identity dedupe would keep it to one event either way.
+     *
+     * The attempt's own span, never the top of the stack: once JobFailed has
+     * closed an inner sync job, the top of the stack is the OUTER job, and
+     * the inner job's exception does not belong on it.
+     */
+    private function jobExceptionOccurred(JobExceptionOccurred $event): void
+    {
+        FailSafe::guard(fn () => $this->openSpanFor($event->job)?->noteException($event->exception, fail: true));
     }
 
     private function jobFailed(JobFailed $event): void
@@ -1009,6 +1049,27 @@ final class QueueInstrumentation implements ManagesRequestState
             $this->jobSpans = array_values($remaining);
 
             return $open;
+        }
+
+        return null;
+    }
+
+    /**
+     * The span this attempt owns, left where it is. spanFor() takes it off
+     * the stack; this only looks. Null once the attempt has been closed.
+     */
+    private function openSpanFor(object $attempt): ?Span
+    {
+        $wanted = $this->attemptSpans[self::attemptKey($attempt)] ?? null;
+
+        if ($wanted === null) {
+            return null;
+        }
+
+        foreach ($this->jobSpans as $open) {
+            if (spl_object_id($open) === $wanted) {
+                return $open;
+            }
         }
 
         return null;

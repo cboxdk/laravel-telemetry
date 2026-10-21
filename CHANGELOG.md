@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A job released for retry says why.** An attempt that threw and was
+  released ended as an error saying only `released for retry`, with no
+  exception on it: only a terminal `JobFailed` attached one, so a job retried
+  many times showed a red span per attempt and nothing to read. The attempt's
+  span now gets the exception from `JobExceptionOccurred` (every supported
+  Laravel version) and from `JobReleasedAfterException` where it carries one
+  (Laravel 13.31+): an `exception` event, `error.type`, and the exception's
+  message as its status. A terminal failure still records one exception
+  event per attempt, not two. `released for retry` stays for a release with
+  no exception.
+
 ## [3.8.0] - 2026-10-21
 
 ### Added
