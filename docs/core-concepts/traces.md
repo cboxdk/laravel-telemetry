@@ -387,6 +387,12 @@ UUID — a retry can land on a different worker process, so this can't be
 in-memory state. A `null`/`array` cache driver just means retries go
 unlinked, same graceful degradation as everything else here.
 
+Every attempt that threw carries its own exception, released or not: an
+`exception` event, `error.type` and the exception's message as the error
+status. Following the links from the last attempt walks back through what
+went wrong on each one. An attempt released with no exception (Laravel
+raised none) says `released for retry` instead.
+
 ## Jobs that start their own trace
 
 A job's span is a child of the span that dispatched it, and for most jobs
