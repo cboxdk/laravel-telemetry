@@ -222,7 +222,8 @@ final class QueryInstrumentation
 
             $telemetry->tracer()->recordSpan(
                 'db.query',
-                $event->time,
+                // Laravel 13 types it nullable; a query with no timing took no measured time.
+                (float) $event->time,
                 $attributes,
                 SpanKind::Client,
                 detail: true,

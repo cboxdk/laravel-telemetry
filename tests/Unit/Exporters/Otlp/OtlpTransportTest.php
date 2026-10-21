@@ -189,8 +189,10 @@ it('reads Retry-After in both forms RFC 9110 allows', function (string $header, 
     'seconds' => ['120', 120, 120],
     // HTTP-date: what a proxy in front of one sends. Ignoring it fell
     // back to the default cooldown, which is wrong in both directions.
-    'http date' => [gmdate('D, d M Y H:i:s \G\M\T', time() + 300), 295, 300],
-    'http date in the past' => [gmdate('D, d M Y H:i:s \G\M\T', time() - 300), 0, 0],
+    // Closures, so the date is taken when the test runs: taken when the file
+    // loaded, a slow suite had already eaten into the five minutes.
+    'http date' => [fn (): string => gmdate('D, d M Y H:i:s \G\M\T', time() + 300), 295, 300],
+    'http date in the past' => [fn (): string => gmdate('D, d M Y H:i:s \G\M\T', time() - 300), 0, 0],
 ]);
 
 it('ignores a Retry-After it cannot make sense of', function () {
