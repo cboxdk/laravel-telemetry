@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.1] - 2026-10-23
+
 ### Fixed
 
 - **A job released for retry says why.** An attempt that threw and was
