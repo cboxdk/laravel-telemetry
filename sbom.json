@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:2d78afc0-d738-e48f-0f80-cd76a913f6c2",
+    "serialNumber": "urn:uuid:332f1855-c6cc-d823-aa76-5ce3c1c4d65a",
     "version": 1,
     "metadata": {
         "component": {
@@ -96,10 +96,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/dragonmantank/cron-expression@v3.6.0",
+            "bom-ref": "pkg:composer/dragonmantank/cron-expression@v3.6.1",
             "name": "dragonmantank/cron-expression",
-            "version": "v3.6.0",
-            "purl": "pkg:composer/dragonmantank/cron-expression@v3.6.0",
+            "version": "v3.6.1",
+            "purl": "pkg:composer/dragonmantank/cron-expression@v3.6.1",
             "licenses": [
                 {
                     "license": {
@@ -156,10 +156,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/guzzlehttp/guzzle@7.15.5",
+            "bom-ref": "pkg:composer/guzzlehttp/guzzle@7.16.0",
             "name": "guzzlehttp/guzzle",
-            "version": "7.15.5",
-            "purl": "pkg:composer/guzzlehttp/guzzle@7.15.5",
+            "version": "7.16.0",
+            "purl": "pkg:composer/guzzlehttp/guzzle@7.16.0",
             "licenses": [
                 {
                     "license": {
@@ -171,10 +171,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/guzzlehttp/promises@2.5.3",
+            "bom-ref": "pkg:composer/guzzlehttp/promises@2.6.0",
             "name": "guzzlehttp/promises",
-            "version": "2.5.3",
-            "purl": "pkg:composer/guzzlehttp/promises@2.5.3",
+            "version": "2.6.0",
+            "purl": "pkg:composer/guzzlehttp/promises@2.6.0",
             "licenses": [
                 {
                     "license": {
@@ -186,10 +186,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/guzzlehttp/psr7@2.13.1",
+            "bom-ref": "pkg:composer/guzzlehttp/psr7@2.13.2",
             "name": "guzzlehttp/psr7",
-            "version": "2.13.1",
-            "purl": "pkg:composer/guzzlehttp/psr7@2.13.1",
+            "version": "2.13.2",
+            "purl": "pkg:composer/guzzlehttp/psr7@2.13.2",
             "licenses": [
                 {
                     "license": {
@@ -216,10 +216,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/laravel/framework@v13.37.0",
+            "bom-ref": "pkg:composer/laravel/framework@v13.38.0",
             "name": "laravel/framework",
-            "version": "v13.37.0",
-            "purl": "pkg:composer/laravel/framework@v13.37.0",
+            "version": "v13.38.0",
+            "purl": "pkg:composer/laravel/framework@v13.38.0",
             "licenses": [
                 {
                     "license": {
@@ -261,10 +261,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/league/commonmark@2.10.3",
+            "bom-ref": "pkg:composer/league/commonmark@2.10.4",
             "name": "league/commonmark",
-            "version": "2.10.3",
-            "purl": "pkg:composer/league/commonmark@2.10.3",
+            "version": "2.10.4",
+            "purl": "pkg:composer/league/commonmark@2.10.4",
             "licenses": [
                 {
                     "license": {
@@ -381,10 +381,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/nesbot/carbon@3.14.2",
+            "bom-ref": "pkg:composer/nesbot/carbon@3.15.0",
             "name": "nesbot/carbon",
-            "version": "3.14.2",
-            "purl": "pkg:composer/nesbot/carbon@3.14.2",
+            "version": "3.15.0",
+            "purl": "pkg:composer/nesbot/carbon@3.15.0",
             "licenses": [
                 {
                     "license": {
@@ -396,10 +396,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/nette/schema@v1.3.6",
+            "bom-ref": "pkg:composer/nette/schema@v1.3.7",
             "name": "nette/schema",
-            "version": "v1.3.6",
-            "purl": "pkg:composer/nette/schema@v1.3.6",
+            "version": "v1.3.7",
+            "purl": "pkg:composer/nette/schema@v1.3.7",
             "licenses": [
                 {
                     "license": {
@@ -421,10 +421,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/nette/utils@v4.1.5",
+            "bom-ref": "pkg:composer/nette/utils@v4.1.6",
             "name": "nette/utils",
-            "version": "v4.1.5",
-            "purl": "pkg:composer/nette/utils@v4.1.5",
+            "version": "v4.1.6",
+            "purl": "pkg:composer/nette/utils@v4.1.6",
             "licenses": [
                 {
                     "license": {
@@ -968,6 +968,21 @@
                 }
             ],
             "description": "Symfony polyfill backporting some PHP 8.6+ features to lower PHP versions"
+        },
+        {
+            "type": "library",
+            "bom-ref": "pkg:composer/symfony/polyfill-time@v1.42.0",
+            "name": "symfony/polyfill-time",
+            "version": "v1.42.0",
+            "purl": "pkg:composer/symfony/polyfill-time@v1.42.0",
+            "licenses": [
+                {
+                    "license": {
+                        "id": "MIT"
+                    }
+                }
+            ],
+            "description": "Symfony polyfill for the Time API added to PHP 8.6"
         },
         {
             "type": "library",
