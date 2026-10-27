@@ -1,0 +1,350 @@
+version: 1
+
+areas:
+  - id: host-app-safety
+    title: Never breaking the host application
+    level: critical
+    why: >
+      The package runs inside every request, job and command of the app that
+      installs it. The manager, service provider and fail-safe guard decide
+      whether a telemetry fault stays contained or crashes the customer's app,
+      and whether a disabled install really costs nothing.
+    paths:
+      - src/TelemetryManager.php
+      - src/TelemetryServiceProvider.php
+      - src/InlineProvider.php
+      - src/Support/FailSafe.php
+      - src/Support/FrameworkBoot.php
+      - src/Support/OwnWork.php
+    symbols:
+      - Cbox\Telemetry\Support\FailSafe::guard
+      - Cbox\Telemetry\TelemetryManager
+      - Cbox\Telemetry\TelemetryServiceProvider
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariants 1 and 6: telemetry never throws into the app; zero cost when disabled."
+      - "FailSafe::guard is used in 59 files under src/."
+      - "TelemetryServiceProvider.php (1698 lines) and TelemetryManager.php (1657 lines) are the two largest files; 65 and 36 changes in 12 months."
+      - "A dedicated suite, tests/FailSafety/ (11 files: NeverThrows, DeadBackend, DeadStore, HostileNative, ...), plus tests/Feature/DisabledModeTest.php and BootHygieneTest.php."
+
+  - id: metric-stores
+    title: Shared metric storage (Redis, APCu, SQLite)
+    level: critical
+    why: >
+      Metric values from every process are kept here. A bug loses or corrupts
+      counts across the whole fleet, and a keyspace scan on Redis can stall
+      the customer's production Redis.
+    paths:
+      - src/Metrics/Stores/**
+      - src/Contracts/MetricStore.php
+      - src/Contracts/BatchesWrites.php
+      - src/Support/SharedState.php
+      - src/Support/SharedMemory.php
+      - src/Support/ApcuMemory.php
+      - src/Support/SqliteConnection.php
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariants 2 and 3: no KEYS/SCAN or full APCu scans; state shared by every writing process. This is called the package's reason to exist."
+      - "docs/decisions/0001-metric-state-on-single-process-runtimes.md records a design decision on this area."
+      - "Separate test groups (redis, apcu) that need real backends, plus tests/FailSafety/DeadStoreTest.php and CrossRequestStateTest.php."
+
+  - id: public-endpoints
+    title: Public HTTP endpoints (metrics scrape, browser span ingest, source maps)
+    level: critical
+    why: >
+      These routes are mounted in the customer's app and reachable from the
+      network. The metrics scrape endpoint is on by default and guarded by an
+      IP allowlist or bearer token; browser span ingest accepts untrusted
+      client input.
+    paths:
+      - src/Http/Controllers/**
+      - src/Http/Middleware/AllowIps.php
+      - src/Http/Middleware/FlushBrowserIngest.php
+      - src/Http/BrowserSdk.php
+      - src/Http/BrowserSnippet.php
+    symbols:
+      - Cbox\Telemetry\Http\Middleware\AllowIps
+      - Cbox\Telemetry\Http\Controllers\SpanIngestController
+      - Cbox\Telemetry\Http\Controllers\PrometheusController
+    owner: Sylvester Damgaard
+    evidence:
+      - "config/telemetry.php: prometheus.enabled defaults to true; access via AllowIps middleware or TELEMETRY_PROMETHEUS_TOKEN (hash_equals)."
+      - "Span ingest is opt-in (TELEMETRY_INGEST_SPANS, throttle:300,1); source maps opt-in with a token."
+      - "SpanIngestController.php is the most-changed controller (7 changes in 12 months)."
+      - "Tests in tests/Feature/Http/Controllers and tests/Feature/Http/RequestBodySizeTest.php."
+
+  - id: privacy-redaction
+    title: Personal data, redaction and analytics identity
+    level: critical
+    why: >
+      Decides what leaves the customer's app for third-party backends: URL and
+      SQL redaction, IP and geo handling, user identity for analytics, and
+      GenAI prompt content. A slip sends personal data off-site.
+    paths:
+      - src/Support/Redactor.php
+      - src/Support/PersonalData.php
+      - src/Support/AnalyticsIdentity.php
+      - src/Support/ClientGeo.php
+      - src/Support/GeoResolver.php
+      - src/Support/CloudflareHeaders.php
+      - src/Support/CampaignAttribution.php
+      - src/Support/UserAgentParser.php
+      - src/Support/SqlShape.php
+      - src/Contracts/RedactsTelemetry.php
+      - src/Instrumentation/GenAiContent.php
+    owner: Sylvester Damgaard
+    evidence:
+      - "config/telemetry.php: redaction on by default (TELEMETRY_REDACTION); analytics and geo opt-in."
+      - "Leak-focused tests: tests/FailSafety/OutgoingUrlRedactionTest.php, TruncationLeakTest.php, tests/Feature/RedactionConfigTest.php, tests/Unit/Support/RedactorTest.php."
+      - "SECURITY.md exists at the root."
+
+  - id: trace-propagation
+    title: Distributed tracing and trace context propagation
+    level: high
+    why: >
+      Builds spans and carries W3C traceparent and baggage across HTTP and
+      queues. Mistakes break traces into detached roots or leak baggage
+      headers to outside services.
+    paths:
+      - src/Tracing/**
+      - src/Support/TraceParent.php
+      - src/Support/Baggage.php
+      - src/Support/Ids.php
+      - src/Http/Middleware/TraceRequest.php
+      - src/Http/Middleware/Sample.php
+      - src/Http/RequestPhases.php
+      - src/Contracts/StartsLinkedTrace.php
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariant 5: full W3C propagation, with two documented opt-in exceptions."
+      - "51 changes to src/Tracing in 12 months."
+      - "Open PR #91 (fix/baggage-allowlist) touches baggage handling."
+      - "Tests: tests/Unit/Tracing, tests/Feature/Tracing, tests/Unit/Support/TraceParentTest.php, BaggageTest.php."
+
+  - id: instrumentation
+    title: Automatic instrumentation of Laravel (DB, Redis, queues, HTTP client, mail, AI, ...)
+    level: high
+    why: >
+      The largest and most-changed area. Several classes replace or decorate
+      core Laravel services (database connection factory, Redis manager,
+      filesystem, broadcaster, controller dispatcher, process factory), so a
+      bug changes how the customer's app behaves, not just what is measured.
+    paths:
+      - src/Instrumentation/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "44 files, about 8,700 lines: the largest directory in src/."
+      - "190 file changes in 12 months, the most of any source directory."
+      - "Instrumented* and Timed* classes wrap framework services (InstrumentedConnectionFactory, InstrumentedRedisManager, InstrumentedControllerDispatcher, TimedPredisConnector)."
+      - "Tests in tests/Unit/Instrumentation, tests/Feature/Instrumentation, tests/FailSafety/QueueTeardownTest.php and LaravelAiNeverThrowsTest.php."
+
+  - id: exporters
+    title: Exporting data (OTLP, Prometheus format, disk/Redis spool, logs)
+    level: high
+    why: >
+      Turns recorded data into wire formats that backends accept. Format
+      errors silently drop data at the customer's backend; the spool holds
+      unsent data across failures.
+    paths:
+      - src/Exporters/**
+      - src/Logging/**
+      - src/Contracts/Exporter.php
+      - src/Contracts/ClaimsMetricExport.php
+      - src/Support/Export*.php
+      - src/Support/TelemetryBatch.php
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariant 9: OTLP JSON encoding rules and histogram bucket semantics."
+      - "67 changes to src/Exporters in 12 months."
+      - "OTLP transport is raw curl (OtlpTransport.php); tests/FailSafety/DeadBackendTest.php covers an unreachable backend."
+
+  - id: metrics-api
+    title: Metrics API (counters, gauges, histograms, registry)
+    level: high
+    why: >
+      The public instrument API customers call directly. Naming and the
+      push/pull split are documented contracts; breaking them breaks
+      customers' code and dashboards.
+    paths:
+      - src/Metrics/*.php
+      - src/Metrics/Instruments/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariants 4 and 7: push and pull instruments stay distinct; one OTel naming vocabulary."
+      - "71 changes to src/Metrics in 12 months."
+      - "Tests in tests/Unit/Metrics and tests/Feature/Metrics."
+
+  - id: native-extension
+    title: Native runtime extension and profiling
+    level: high
+    why: >
+      Talks to the optional cbox_telemetry C extension and excimer. Nesting a
+      unit of work makes the extension abandon the outer one; crash records
+      are read back after a process dies.
+    paths:
+      - src/Native/**
+      - src/Contracts/NativeRuntime.php
+      - src/Support/CpuProfiler.php
+      - src/Testing/FakeNativeRuntime.php
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md invariant 8 and docs/decisions/0002-native-unit-of-work-ownership.md."
+      - "Only 9 changes in 12 months: little recent review history."
+      - "Tests in tests/Unit/Native, tests/Feature/Native and tests/FailSafety/HostileNativeTest.php."
+
+  - id: build-and-supply-chain
+    title: CI, dependencies, licenses and SBOM
+    level: high
+    why: >
+      CI workflows run with repository credentials, and the license gate and
+      SBOM back the package's license claims to customers.
+    paths:
+      - .github/**
+      - composer.json
+      - composer.lock
+      - sbom.json
+      - bin/check-licenses.php
+      - bin/generate-sbom.php
+      - phpstan.neon.dist
+      - phpunit.xml.dist
+      - pint.json
+    owner: Sylvester Damgaard
+    evidence:
+      - "5 workflows, including security.yml and dependabot-sbom.yml."
+      - "dependabot[bot] authored 8 of 226 commits in 12 months; open PRs #99 and #100 bump dev dependencies."
+      - "Runtime requires only php and illuminate/contracts + illuminate/support; everything else is dev or suggest."
+
+  - id: configuration
+    title: Package configuration and defaults
+    level: medium
+    why: >
+      Defaults decide what is on for every install that doesn't override them,
+      such as whether the metrics endpoint is exposed or native profiling runs.
+    paths:
+      - config/**
+      - stubs/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "config/telemetry.php is 1335 lines with 67 changes in 12 months."
+      - "Defaults on: telemetry, prometheus endpoint, directives, redaction, native, system metrics."
+
+  - id: public-surface
+    title: Public contracts, facade, test fake and helpers
+    level: medium
+    why: >
+      Interfaces and the Telemetry::fake() double that customers code and test
+      against; changes here are breaking API changes. Also holds shared helper
+      code not claimed by a more specific area.
+    paths:
+      - src/Contracts/**
+      - src/Facades/**
+      - src/Testing/**
+      - src/Exceptions/**
+      - src/Events/**
+      - src/Providers/**
+      - src/Support/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "AGENTS.md: public API changes ship with docs, CHANGELOG and Boost guidelines."
+      - "src/Support has 41 files (92 changes in 12 months); many are covered by more specific areas above."
+      - "Tests in tests/Unit/Testing, tests/Feature/Testing, tests/Unit/Support."
+
+  - id: console-commands
+    title: Artisan commands (doctor, deploy marker, flush, monitor, crashes)
+    level: medium
+    why: Operator tools; run by hand or from deploy pipelines, not on the request path.
+    paths:
+      - src/Console/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "7 commands, about 1,900 lines; 33 changes in 12 months."
+      - "Tests in tests/Feature/Console, MonitorCommandTest.php, DeployAndGateTest.php."
+
+  - id: browser-sdk
+    title: Bundled browser SDK and Blade directives
+    level: medium
+    why: >
+      JavaScript served to end users' browsers from the customer's site. The
+      updater script pulls it from npm and GitHub.
+    paths:
+      - resources/js/**
+      - bin/update-browser-sdk.php
+      - src/Directives/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "bin/update-browser-sdk.php fetches from registry.npmjs.org and raw.githubusercontent.com/cboxdk/telemetry-browser."
+      - "7 changes to resources/js in 12 months; tests/Feature/DirectivesTest.php and BrowserSnippetTest.php."
+
+  - id: dashboards
+    title: Bundled Grafana dashboards and alerts
+    level: low
+    why: Shipped JSON dashboards; a mistake shows a wrong panel, not wrong data.
+    paths:
+      - resources/grafana/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "15 files, about 10,000 lines of JSON; 147 changes in 12 months."
+      - "tests/alerts/ holds an alert rules test."
+
+  - id: docs-and-guidelines
+    title: Documentation and AI guidelines shipped to users
+    level: low
+    why: Docs, changelog and Laravel Boost guidelines/skills; no runtime effect.
+    paths:
+      - docs/**
+      - README.md
+      - CHANGELOG.md
+      - UPGRADE.md
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - llms.txt
+      - resources/boost/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "CHANGELOG.md changed 148 times in 12 months, docs/ several hundred times."
+      - "tests/Feature/BoostResourcesTest.php checks the Boost resources."
+
+  - id: tests-and-loadtest
+    title: Test suite and load test harness
+    level: low
+    why: Not shipped; weakening a test hides regressions elsewhere, so reviewers should watch deleted assertions.
+    paths:
+      - tests/**
+      - loadtest/**
+    owner: Sylvester Damgaard
+    evidence:
+      - "About 150 test files across tests/Feature, tests/Unit and tests/FailSafety."
+      - "loadtest/ (10 files) has its own workbench."
+
+always_held:
+  - .cbox/**
+  - CODEOWNERS
+  - .github/CODEOWNERS
+  - CLAUDE.md
+  - AGENTS.md
+  - .github/workflows/**
+  - src/Support/FailSafe.php
+  - src/Http/Middleware/AllowIps.php
+  - src/Support/Redactor.php
+
+questions:
+  - area: host-app-safety
+    question: >
+      There is no CODEOWNERS file and one person wrote 218 of 226 commits in
+      12 months. Who else can review critical areas, or should every change be
+      held for the owner?
+  - area: public-endpoints
+    question: >
+      The metrics endpoint is enabled by default. With TELEMETRY_ALLOWED_IPS
+      unset and no token, does AllowIps refuse every request, or allow some
+      (for example local addresses)? I did not read the middleware.
+  - area: metric-stores
+    question: >
+      Are the SQLite store and spool (aimed at NativePHP) used in production,
+      or still experimental? That would change their level.
+  - area: native-extension
+    question: >
+      The native area changed only 9 times in 12 months. Is it actively used
+      and tested against the current cbox_telemetry extension release?
+  - area: tests-and-loadtest
+    question: Is loadtest/ still maintained, or left over from an earlier benchmark?
