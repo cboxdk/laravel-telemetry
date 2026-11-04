@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `MetricFamily::timeUnixNano` preserves external observation timestamps
+  in OTLP instead of assigning the export time. Existing callers still use export
+  time. Applies to all scalar and histogram metric types; no buffering or store
+  semantics change.
+
 ## [3.8.1] - 2026-10-23
 
 ### Fixed

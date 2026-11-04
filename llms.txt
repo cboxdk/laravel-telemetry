@@ -61,3 +61,6 @@ profiles, connection timing and crash records without owning any semantic.
 - [Native runtime](docs/production/native-runtime.md): the optional cbox_telemetry extension (cboxdk/telemetry-native) — native units of work per request/job/command/task, CPU profiles with a confidence figure, pdo.connect/curl.exec timing, GC counters, crash records correlated to the trace the process died in; units never nest and workers/schedulers open none
 - [Performance](docs/production/performance.md): per-operation cost, tuning, measured overhead benchmark (methodology + first-party numbers)
 - [Security](docs/production/security.md): endpoint protection, data leakage
+
+External metric batches: `MetricFamily::timeUnixNano` preserves source observation
+time in OTLP (null retains export time); see docs/getting-started/api-reference.md.

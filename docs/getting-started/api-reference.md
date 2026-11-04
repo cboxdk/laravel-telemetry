@@ -178,3 +178,29 @@ php artisan telemetry:deploy [--id=] [--notes=] # emit a deployment marker event
 php artisan telemetry:dashboards [--export=]   # install the Grafana dashboards
 php artisan about                              # shows the Telemetry section
 ```
+
+
+### Source timestamps for external metric batches
+
+When an integration constructs `MetricFamily` objects for an exporter, pass the
+optional trailing `timeUnixNano` argument to preserve the source observation time:
+
+```php
+$family = new MetricFamily(
+    definition: new MetricDefinition('runtime.cpu.time', MetricType::Counter, unit: 's'),
+    samples: [new Sample(['pod.uid' => $podUid], $cumulativeSeconds)],
+    startUnixNano: $sourceEpoch,
+    timeUnixNano: $sourceObservation,
+);
+```
+
+Both timestamps are Unix nanoseconds. Supply valid source times and an epoch no
+later than the observation. OTLP preserves the observation timestamp as an int64
+string for counters, up/down counters, gauges and histograms. With `null` (the
+default), existing export-time behavior is unchanged. All series in one family
+share this timestamp; use separate families for observations taken at different
+times. Serializing or retrying the same family does not restamp its source time.
+
+This low-level export metadata does not change instrument/store sampling APIs,
+add buffering, deduplicate backend rows, or turn the exporter into a billing
+ledger. The Prometheus renderer retains normal scrape-time behavior.

@@ -13,11 +13,13 @@ final readonly class MetricFamily
      * @param  list<Sample>|list<HistogramSample>  $samples
      * @param  int|null  $startUnixNano  First-ever write time — OTLP
      *                                   cumulative start timestamp.
+     * @param  int|null  $timeUnixNano  Source observation time; null uses export time.
      */
     public function __construct(
         public MetricDefinition $definition,
         public array $samples,
         public ?int $startUnixNano = null,
+        public ?int $timeUnixNano = null,
     ) {}
 
     public function name(): string

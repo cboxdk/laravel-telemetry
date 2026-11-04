@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:2d78afc0-d738-e48f-0f80-cd76a913f6c2",
+    "serialNumber": "urn:uuid:ba3a8ddc-ab2b-3ad7-43d3-3d54b68cb530",
     "version": 1,
     "metadata": {
         "component": {
@@ -806,10 +806,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/mime@v7.4.19",
+            "bom-ref": "pkg:composer/symfony/mime@v7.4.22",
             "name": "symfony/mime",
-            "version": "v7.4.19",
-            "purl": "pkg:composer/symfony/mime@v7.4.19",
+            "version": "v7.4.22",
+            "purl": "pkg:composer/symfony/mime@v7.4.22",
             "licenses": [
                 {
                     "license": {

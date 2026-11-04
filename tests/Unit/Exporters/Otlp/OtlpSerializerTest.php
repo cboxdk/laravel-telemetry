@@ -157,3 +157,33 @@ it('serializes an up-down counter as a non-monotonic sum', function () {
         ->and($metric['sum']['isMonotonic'])->toBeFalse()
         ->and($metric['sum']['aggregationTemporality'])->toBe(2);
 });
+
+it('preserves source observation time through repeated OTLP serialization for every metric shape', function (MetricType $type, string $shape) {
+    $start = 1700000000000000000;
+    $observed = 1700000010123456789;
+    $sample = $type === MetricType::Histogram
+        ? new HistogramSample(['pod' => 'pod-a'], [1.0], [1, 0], 0.5, 1)
+        : new Sample(['pod' => 'pod-a'], 123.0);
+    $family = new MetricFamily(new MetricDefinition('runtime.sample', $type), [$sample], $start, $observed);
+    foreach ([serializer(), serializer()] as $exporter) {
+        $payload = $exporter->metrics([$family]);
+        $point = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'][0][$shape]['dataPoints'][0];
+        expect($point['timeUnixNano'])->toBe('1700000010123456789')
+            ->and($point['startTimeUnixNano'])->toBe('1700000000000000000');
+    }
+})->with([
+    [MetricType::Counter, 'sum'],
+    [MetricType::UpDownCounter, 'sum'],
+    [MetricType::Gauge, 'gauge'],
+    [MetricType::Histogram, 'histogram'],
+]);
+
+it('retains export-time behavior when no observation time is supplied', function () {
+    $before = (int) (microtime(true) * 1_000_000_000);
+    $family = new MetricFamily(new MetricDefinition('current.level', MetricType::Gauge), [new Sample([], 1.0)]);
+    $payload = serializer()->metrics([$family]);
+    $after = (int) (microtime(true) * 1_000_000_000);
+    $time = $payload['resourceMetrics'][0]['scopeMetrics'][0]['metrics'][0]['gauge']['dataPoints'][0]['timeUnixNano'];
+    expect($time)->toBeString()
+        ->and((int) $time)->toBeGreaterThanOrEqual($before)->toBeLessThanOrEqual($after);
+});

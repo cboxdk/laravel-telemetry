@@ -113,3 +113,8 @@ Every new instrument gets a test with `Telemetry::fake()` (see the
 
 Reference: `vendor/cboxdk/laravel-telemetry/docs/getting-started/api-reference.md`
 and `docs/core-concepts/naming.md`.
+
+For externally collected OTLP metric batches, `MetricFamily` accepts trailing
+`timeUnixNano` (source observation in Unix nanoseconds). Null keeps export-time
+behavior; `startUnixNano` remains the cumulative epoch. One family has one source
+time. This does not add buffering or change the registry/store APIs.

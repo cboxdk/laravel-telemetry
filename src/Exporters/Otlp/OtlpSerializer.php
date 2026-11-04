@@ -193,7 +193,7 @@ final readonly class OtlpSerializer
 
             $point = [
                 'attributes' => $this->attributes($sample->labels),
-                'timeUnixNano' => $now,
+                'timeUnixNano' => $family->timeUnixNano === null ? $now : (string) $family->timeUnixNano,
                 'asDouble' => $this->finite($sample->value),
             ];
 
@@ -223,7 +223,7 @@ final readonly class OtlpSerializer
 
             $point = [
                 'attributes' => $this->attributes($sample->labels),
-                'timeUnixNano' => $now,
+                'timeUnixNano' => $family->timeUnixNano === null ? $now : (string) $family->timeUnixNano,
                 'count' => (string) $sample->count,
                 'sum' => $this->finite($sample->sum),
                 'bucketCounts' => array_map(static fn (int $count): string => (string) $count, $sample->bucketCounts),
