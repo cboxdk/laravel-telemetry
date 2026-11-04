@@ -118,6 +118,25 @@ sub-minute metrics.
 
 ### Delivery semantics
 
+Metrics use direct HTTP export by default, even when the spool is enabled.
+To buffer each exported metric snapshot as well, set both
+`TELEMETRY_OTLP_SPOOL=true` and `TELEMETRY_OTLP_SPOOL_METRICS=true`.
+The latter maps to `telemetry.otlp.spool.metrics` and defaults to false.
+Snapshots are serialized before buffering: their timestamps, cumulative start
+times, values and attributes survive collector retries unchanged. External
+samples can supply `MetricFamily::timeUnixNano` for the observation time.
+Without it, the timestamp is the time the snapshot was serialized.
+
+All signals share the same capacity limit. Metric buffering increases spool
+volume and may evict older logs/traces; size and monitor it accordingly.
+Export success means accepted into the buffer, **not received by the collector**.
+Run `telemetry:flush` to ship the snapshots and inspect its delivery failures.
+The loss conditions below also apply to metrics. Retrying an ambiguous network
+failure can duplicate observations at the receiver; the spool does not deduplicate
+them and is not a financial ledger or an acknowledged durable queue.
+Upgrade every process that drains the spool before enabling metric buffering;
+older shippers do not recognize metric entries.
+
 Stated precisely, because the useful thing to know about a buffer is
 what it does **not** promise.
 

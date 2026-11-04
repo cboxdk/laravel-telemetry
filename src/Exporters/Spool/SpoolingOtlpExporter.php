@@ -22,9 +22,10 @@ use Throwable;
  * `telemetry:flush` command (cron or --daemon) ships them in merged
  * batches.
  *
- * Metrics pass straight through to the wrapped exporter: their state
+ * By default metrics pass straight through to the wrapped exporter: their state
  * already lives in the shared store, and flushMetrics() only ever runs
- * from the flush command's own process.
+ * from the flush command's own process. Opt-in metric buffering preserves
+ * serialized observations through retryable collector outages.
  */
 final class SpoolingOtlpExporter implements Exporter
 {
@@ -49,6 +50,7 @@ final class SpoolingOtlpExporter implements Exporter
         private readonly OtlpExporter $inner,
         private readonly OtlpSerializer $serializer,
         private readonly Spool $spool,
+        private readonly bool $bufferMetrics = false,
     ) {}
 
     public function name(): string
@@ -79,7 +81,7 @@ final class SpoolingOtlpExporter implements Exporter
     {
         $skipped = false;
 
-        if ($batch->spans !== [] || $batch->events !== []) {
+        if ($batch->spans !== [] || $batch->events !== [] || ($this->bufferMetrics && $batch->metrics !== [])) {
             if (self::circuitOpen()) {
                 // Dropped, not held: telemetry is lossy by design, and a
                 // request that buffered what it could not push would grow
@@ -90,7 +92,7 @@ final class SpoolingOtlpExporter implements Exporter
             }
         }
 
-        if ($batch->metrics !== []) {
+        if (! $this->bufferMetrics && $batch->metrics !== []) {
             $result = $this->inner->export(new TelemetryBatch(resource: $batch->resource, metrics: $batch->metrics));
 
             if (! $result->success || ! $skipped) {
@@ -113,6 +115,10 @@ final class SpoolingOtlpExporter implements Exporter
 
         if ($batch->events !== []) {
             $entries[] = ['signal' => 'logs', 'payload' => $this->serializer->logs($batch->events)];
+        }
+
+        if ($this->bufferMetrics && $batch->metrics !== []) {
+            $entries[] = ['signal' => 'metrics', 'payload' => $this->serializer->metrics($batch->metrics)];
         }
 
         // One call, so a request carrying both signals pays one round

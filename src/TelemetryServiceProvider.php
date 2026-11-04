@@ -784,7 +784,12 @@ class TelemetryServiceProvider extends ServiceProvider
             return $direct;
         }
 
-        return new SpoolingOtlpExporter($direct, $serializer, $app->make(Spool::class));
+        return new SpoolingOtlpExporter(
+            $direct,
+            $serializer,
+            $app->make(Spool::class),
+            bufferMetrics: (bool) $config->get('telemetry.otlp.spool.metrics', false),
+        );
     }
 
     /**

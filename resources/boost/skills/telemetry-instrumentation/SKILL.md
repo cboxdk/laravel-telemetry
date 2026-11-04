@@ -118,3 +118,8 @@ For externally collected OTLP metric batches, `MetricFamily` accepts trailing
 `timeUnixNano` (source observation in Unix nanoseconds). Null keeps export-time
 behavior; `startUnixNano` remains the cumulative epoch. One family has one source
 time. This does not add buffering or change the registry/store APIs.
+
+Metric snapshot buffering is opt-in: enable `TELEMETRY_OTLP_SPOOL` and
+`TELEMETRY_OTLP_SPOOL_METRICS`. Upgrade all spool drainers first. Buffered success
+is not collector delivery; shared capacity, loss and duplicate risks still apply.
+See `docs/production/otlp.md` for delivery semantics.

@@ -29,9 +29,9 @@ use Closure;
  */
 final class SpoolShipper
 {
-    private const PATHS = ['traces' => '/v1/traces', 'logs' => '/v1/logs'];
+    private const PATHS = ['traces' => '/v1/traces', 'logs' => '/v1/logs', 'metrics' => '/v1/metrics'];
 
-    private const ROOTS = ['traces' => 'resourceSpans', 'logs' => 'resourceLogs'];
+    private const ROOTS = ['traces' => 'resourceSpans', 'logs' => 'resourceLogs', 'metrics' => 'resourceMetrics'];
 
     /** Where a Retry-After the backend asked for is remembered. */
     private const COOLDOWN_KEY = 'spool:cooldown';

@@ -182,6 +182,10 @@ return [
         'spool' => [
             'enabled' => env('TELEMETRY_OTLP_SPOOL', false),
 
+            // Also buffer metric snapshots. Success means buffered, not delivered.
+            // Shares the capped spool and its lossy delivery semantics.
+            'metrics' => env('TELEMETRY_OTLP_SPOOL_METRICS', false),
+
             // "redis" (a capped list) or "sqlite" (a file). Use sqlite
             // where there is no Redis and the network comes and goes —
             // NativePHP mobile and desktop — because it is the one that

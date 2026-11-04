@@ -6,8 +6,10 @@ use Cbox\Telemetry\Events\TelemetryEvent;
 use Cbox\Telemetry\Exporters\Otlp\OtlpExporter;
 use Cbox\Telemetry\Exporters\Otlp\OtlpSerializer;
 use Cbox\Telemetry\Exporters\Otlp\OtlpTransport;
+use Cbox\Telemetry\Exporters\Spool\ArraySpool;
 use Cbox\Telemetry\Exporters\Spool\Spool;
 use Cbox\Telemetry\Exporters\Spool\SpoolingOtlpExporter;
+use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
 use Cbox\Telemetry\Metrics\MetricDefinition;
 use Cbox\Telemetry\Metrics\MetricFamily;
 use Cbox\Telemetry\Metrics\MetricType;
@@ -185,4 +187,54 @@ it('keeps exporting metrics while the spool circuit is open', function () {
         ->and($spool->pushes)->toBe(1)
         ->and($result->retryable)->toBeTrue()
         ->and($result->reason)->toContain('spool circuit open');
+});
+
+it('buffers metric observations and preserves their payload through a collector outage', function () {
+    $spool = new ArraySpool;
+    $transport = new BreakerTransport;
+    $serializer = new OtlpSerializer(['service.name' => 'external-reader']);
+    $exporter = new SpoolingOtlpExporter(new OtlpExporter($transport, $serializer), $serializer, $spool, bufferMetrics: true);
+    $family = new MetricFamily(
+        new MetricDefinition('runtime.cpu', MetricType::Counter),
+        [new Sample(['pod' => 'pod-a'], 12.5)],
+        startUnixNano: 1700000000000000000,
+        timeUnixNano: 1700000010123456789,
+    );
+    $batch = new TelemetryBatch(metrics: [$family]);
+    expect($exporter->export($batch)->success)->toBeTrue()
+        ->and($transport->paths)->toBe([])
+        ->and($spool->size())->toBe(1);
+
+    $posts = [];
+    $shipper = new SpoolShipper($spool, function (string $path, array $payload) use (&$posts) {
+        $posts[] = [$path, $payload];
+
+        return count($posts) === 1 ? ExportResult::retryable('collector unavailable') : ExportResult::ok();
+    });
+    expect($shipper->ship()->requeued)->toBe(1)
+        ->and($spool->size())->toBe(1)
+        ->and($shipper->ship()->shipped)->toBe(1)
+        ->and($spool->size())->toBe(0)
+        ->and($posts[1])->toBe($posts[0])
+        ->and($posts[1][0])->toBe('/v1/metrics');
+    $point = $posts[1][1]['resourceMetrics'][0]['scopeMetrics'][0]['metrics'][0]['sum']['dataPoints'][0];
+    expect($point['timeUnixNano'])->toBe('1700000010123456789')
+        ->and($point['startTimeUnixNano'])->toBe('1700000000000000000')
+        ->and($point['asDouble'])->toBe(12.5)
+        ->and($point['attributes'])->toBe([['key' => 'pod', 'value' => ['stringValue' => 'pod-a']]]);
+});
+
+it('reports metric buffer failure and does not bypass an open spool circuit', function () {
+    $spool = new BreakerSpool;
+    $spool->failing = true;
+    $transport = new BreakerTransport;
+    $serializer = new OtlpSerializer([]);
+    $exporter = new SpoolingOtlpExporter(new OtlpExporter($transport, $serializer), $serializer, $spool, bufferMetrics: true);
+    $batch = new TelemetryBatch(metrics: spoolBreakerBatch(withMetrics: true)->metrics);
+    expect(fn () => $exporter->export($batch))->toThrow(RuntimeException::class);
+    $result = $exporter->export($batch);
+    expect($result->retryable)->toBeTrue()
+        ->and($result->success)->toBeFalse()
+        ->and($spool->pushes)->toBe(1)
+        ->and($transport->paths)->toBe([]);
 });

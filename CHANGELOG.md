@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in `TELEMETRY_OTLP_SPOOL_METRICS` buffers serialized metric snapshots in
+  the existing spool and ships them through `/v1/metrics`, preserving timestamps
+  during collector retries. Off by default; existing spool loss limits apply.
+
 - Optional `MetricFamily::timeUnixNano` preserves external observation timestamps
   in OTLP instead of assigning the export time. Existing callers still use export
   time. Applies to all scalar and histogram metric types; no buffering or store

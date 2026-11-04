@@ -58,3 +58,22 @@ it('drains the spool from the flush command', function () {
 
     expect($spool->size())->toBe(1);
 });
+
+it('wires opt-in metric buffering through the configured exporter', function () {
+    $this->refreshApplication();
+    config()->set('telemetry.otlp.spool.enabled', true);
+    config()->set('telemetry.otlp.spool.metrics', true);
+    config()->set('telemetry.exporters', ['otlp']);
+    $this->app->instance(Spool::class, $spool = new ArraySpool);
+
+    Telemetry::gauge('runtime.memory')->set(512.0);
+    Telemetry::flushMetrics();
+
+    $entries = $spool->pop(10);
+    expect($entries)->not->toBeEmpty()
+        ->and($entries[0]['signal'])->toBe('metrics');
+    $metrics = $entries[0]['payload']['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
+    $memory = array_values(array_filter($metrics, fn (array $metric): bool => $metric['name'] === 'runtime.memory'));
+    expect($memory)->toHaveCount(1)
+        ->and($memory[0]['gauge']['dataPoints'][0]['asDouble'])->toBe(512.0);
+});

@@ -7,6 +7,29 @@ use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
 use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\ExportStatus;
 
+it('merges metric resources and reports permanent rejection without resending accepted logs', function () {
+    $spool = new ArraySpool;
+    $spool->push(['signal' => 'logs', 'payload' => ['resourceLogs' => [['log' => 1]]]]);
+    $spool->push(['signal' => 'metrics', 'payload' => ['resourceMetrics' => [['sample' => 1]]]]);
+    $spool->push(['signal' => 'metrics', 'payload' => ['resourceMetrics' => [['sample' => 2]]]]);
+    $posts = [];
+    $shipper = new SpoolShipper($spool, function (string $path, array $payload) use (&$posts) {
+        $posts[] = [$path, $payload];
+
+        return $path === '/v1/metrics' ? ExportResult::failed('invalid metric') : ExportResult::ok();
+    });
+    $result = $shipper->ship();
+    expect($result->shipped)->toBe(1)
+        ->and($result->dropped)->toBe(2)
+        ->and($result->requeued)->toBe(0)
+        ->and($result->successful())->toBeFalse()
+        ->and($spool->size())->toBe(0)
+        ->and($posts)->toBe([
+            ['/v1/logs', ['resourceLogs' => [['log' => 1]]]],
+            ['/v1/metrics', ['resourceMetrics' => [['sample' => 1], ['sample' => 2]]]],
+        ]);
+});
+
 it('merges spooled payloads per signal into single posts', function () {
     $spool = new ArraySpool;
     $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['a' => 1]]]]);
