@@ -1537,7 +1537,13 @@ class TelemetryServiceProvider extends ServiceProvider
      */
     private function registerFatalErrorFlush(): void
     {
-        register_shutdown_function($this->flushOnShutdown(...));
+        // PHP retains shutdown callbacks until the process exits. A bound
+        // provider method would retain every application booted in this process,
+        // including applications already discarded by a test or worker host.
+        $provider = \WeakReference::create($this);
+        register_shutdown_function(static function () use ($provider): void {
+            $provider->get()?->flushOnShutdown();
+        });
     }
 
     /**

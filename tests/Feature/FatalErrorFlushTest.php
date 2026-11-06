@@ -6,6 +6,22 @@ use Cbox\Telemetry\Facades\Telemetry;
 use Cbox\Telemetry\TelemetryServiceProvider;
 use Cbox\Telemetry\Testing\CollectingExporter;
 use Cbox\Telemetry\Tracing\SpanStatus;
+use Illuminate\Container\Container;
+use Illuminate\Foundation\Application;
+
+it('does not keep a discarded application alive until process shutdown', function () {
+    $current = Container::getInstance();
+    $application = new Application;
+    $provider = new TelemetryServiceProvider($application);
+    $reference = WeakReference::create($application);
+
+    (new ReflectionMethod($provider, 'registerFatalErrorFlush'))->invoke($provider);
+    Container::setInstance($current);
+    unset($provider, $application);
+    gc_collect_cycles();
+
+    expect($reference->get())->toBeNull();
+});
 
 /**
  * A fatal error — max_execution_time, an allocation over memory_limit, an
