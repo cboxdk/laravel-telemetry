@@ -1,7 +1,7 @@
 {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",
-    "serialNumber": "urn:uuid:ba3a8ddc-ab2b-3ad7-43d3-3d54b68cb530",
+    "serialNumber": "urn:uuid:f6651a16-e570-aba6-2fdb-acc00b15a3eb",
     "version": 1,
     "metadata": {
         "component": {
@@ -761,10 +761,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-foundation@v7.4.21",
+            "bom-ref": "pkg:composer/symfony/http-foundation@v8.1.11",
             "name": "symfony/http-foundation",
-            "version": "v7.4.21",
-            "purl": "pkg:composer/symfony/http-foundation@v7.4.21",
+            "version": "v8.1.11",
+            "purl": "pkg:composer/symfony/http-foundation@v8.1.11",
             "licenses": [
                 {
                     "license": {
@@ -776,10 +776,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/http-kernel@v7.4.21",
+            "bom-ref": "pkg:composer/symfony/http-kernel@v8.1.11",
             "name": "symfony/http-kernel",
-            "version": "v7.4.21",
-            "purl": "pkg:composer/symfony/http-kernel@v7.4.21",
+            "version": "v8.1.11",
+            "purl": "pkg:composer/symfony/http-kernel@v8.1.11",
             "licenses": [
                 {
                     "license": {
@@ -1001,10 +1001,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/routing@v7.4.21",
+            "bom-ref": "pkg:composer/symfony/routing@v8.1.11",
             "name": "symfony/routing",
-            "version": "v7.4.21",
-            "purl": "pkg:composer/symfony/routing@v7.4.21",
+            "version": "v8.1.11",
+            "purl": "pkg:composer/symfony/routing@v8.1.11",
             "licenses": [
                 {
                     "license": {
@@ -1091,10 +1091,10 @@
         },
         {
             "type": "library",
-            "bom-ref": "pkg:composer/symfony/var-dumper@v7.4.21",
+            "bom-ref": "pkg:composer/symfony/var-dumper@v8.1.10",
             "name": "symfony/var-dumper",
-            "version": "v7.4.21",
-            "purl": "pkg:composer/symfony/var-dumper@v7.4.21",
+            "version": "v8.1.10",
+            "purl": "pkg:composer/symfony/var-dumper@v8.1.10",
             "licenses": [
                 {
                     "license": {

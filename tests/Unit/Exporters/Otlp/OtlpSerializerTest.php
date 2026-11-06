@@ -187,3 +187,16 @@ it('retains export-time behavior when no observation time is supplied', function
     expect($time)->toBeString()
         ->and((int) $time)->toBeGreaterThanOrEqual($before)->toBeLessThanOrEqual($after);
 });
+
+it('preserves special metric doubles without turning them into measured zeros', function (float $input, string $wire) {
+    $serializer = new OtlpSerializer([]);
+    $payload = $serializer->metrics([
+        new MetricFamily(new MetricDefinition('unknown.gauge', MetricType::Gauge), [new Sample([], $input)]),
+        new MetricFamily(new MetricDefinition('unknown.histogram', MetricType::Histogram), [new HistogramSample([], [1.0], [1, 0], $input, 1)]),
+    ]);
+    $decoded = json_decode(json_encode($payload, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+    $metrics = $decoded['resourceMetrics'][0]['scopeMetrics'][0]['metrics'];
+    expect($metrics[0]['gauge']['dataPoints'][0]['asDouble'])->toBe($wire)
+        ->and($metrics[1]['histogram']['dataPoints'][0]['sum'])->toBe($wire)
+        ->and($metrics[1]['histogram']['dataPoints'][0]['bucketCounts'])->toBe(['1', '0']);
+})->with([[NAN, 'NaN'], [INF, 'Infinity'], [-INF, '-Infinity']]);

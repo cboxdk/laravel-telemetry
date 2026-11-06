@@ -100,3 +100,6 @@ Metric snapshot buffering is opt-in: enable `TELEMETRY_OTLP_SPOOL` and
 `TELEMETRY_OTLP_SPOOL_METRICS`. Upgrade all spool drainers first. Buffered success
 is not collector delivery; shared capacity, loss and duplicate risks still apply.
 See `docs/production/otlp.md` for delivery semantics.
+
+OTLP metric `NaN`/infinities stay special double strings; never interpret them as
+zero or use them as finite evidence for anomaly baselines.

@@ -207,3 +207,11 @@ collector or Grafana Alloy works too — supported, just never required.
 The whole point: a bare Laravel app + Redis exports production-grade
 telemetry with zero extra infrastructure. Add infrastructure only when you
 need buffering, tail sampling or fan-out.
+
+
+### Non-finite metric values
+
+OTLP JSON preserves `NaN`, `Infinity` and `-Infinity` as special double strings.
+An undefined gauge or overflowed histogram sum is never a measured zero.
+Collectors must retain that distinction; counts and bucket contents are unchanged.
+See the [ProtoJSON numeric mapping](https://protobuf.dev/programming-guides/json/).
