@@ -194,7 +194,7 @@ final readonly class OtlpSerializer
             $point = [
                 'attributes' => $this->attributes($sample->labels),
                 'timeUnixNano' => $family->timeUnixNano === null ? $now : (string) $family->timeUnixNano,
-                'asDouble' => $this->finite($sample->value),
+                'asDouble' => $this->jsonDouble($sample->value),
             ];
 
             if ($family->startUnixNano !== null) {
@@ -225,7 +225,7 @@ final readonly class OtlpSerializer
                 'attributes' => $this->attributes($sample->labels),
                 'timeUnixNano' => $family->timeUnixNano === null ? $now : (string) $family->timeUnixNano,
                 'count' => (string) $sample->count,
-                'sum' => $this->finite($sample->sum),
+                'sum' => $this->jsonDouble($sample->sum),
                 'bucketCounts' => array_map(static fn (int $count): string => (string) $count, $sample->bucketCounts),
                 'explicitBounds' => $sample->bounds,
             ];
@@ -240,13 +240,15 @@ final readonly class OtlpSerializer
         return $points;
     }
 
-    /**
-     * NAN/INF are not JSON-encodable — one poisoned value must never
-     * drop an entire batch.
-     */
-    private function finite(float $value): float
+    /** OTLP follows ProtoJSON for special doubles; missing is never a measured zero. */
+    private function jsonDouble(float $value): float|string
     {
-        return is_finite($value) ? $value : 0.0;
+        return match (true) {
+            is_nan($value) => 'NaN',
+            $value === INF => 'Infinity',
+            $value === -INF => '-Infinity',
+            default => $value,
+        };
     }
 
     /**
