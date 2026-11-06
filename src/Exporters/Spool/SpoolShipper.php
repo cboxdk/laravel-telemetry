@@ -13,7 +13,8 @@ use Closure;
  * Drains the spool and ships merged OTLP payloads.
  *
  * Entries are popped oldest-first in chunks of $maxBatch and grouped BY
- * SIGNAL, then each signal's payloads are merged (OTLP top-level
+ * SIGNAL. Metric entries stay separate so bounded snapshots stay bounded.
+ * Traces/logs are merged (OTLP top-level
  * resourceSpans/resourceLogs are lists — they concatenate) and posted
  * separately. Per-signal handling matters: if traces deliver but logs
  * fail, only the log entries requeue — the delivered traces are never
@@ -97,9 +98,10 @@ final class SpoolShipper
             }
 
             $stop = false;
+            $retained = [];
             $handled += count($entries);
 
-            foreach ($this->groupBySignal($entries) as $signal => $signalEntries) {
+            foreach ($this->requestGroups($entries) as [$signal, $signalEntries]) {
                 // Checked before each POST, not only between batches. A
                 // batch carries two signals and a POST can take the
                 // whole HTTP timeout, so a budget consulted once per
@@ -111,7 +113,7 @@ final class SpoolShipper
                 // count budget's job is to decide whether to take
                 // MORE, which the check above the pop does.
                 if ($stop || $this->spent($deadline, 0, PHP_INT_MAX, $shouldStop)) {
-                    $this->spool->requeue($signalEntries);
+                    $retained = [...$retained, ...$signalEntries];
                     $requeued += count($signalEntries);
                     $drained = false;
                     $stop = true;
@@ -145,7 +147,7 @@ final class SpoolShipper
                     // Collector down — only THIS signal's entries go back,
                     // oldest first; delivered signals stay delivered. Stop
                     // draining this tick, retry next.
-                    $this->spool->requeue($signalEntries);
+                    $retained = [...$retained, ...$signalEntries];
                     $requeued += count($signalEntries);
                     $stop = true;
 
@@ -162,6 +164,10 @@ final class SpoolShipper
 
                 // Permanent rejection — drop, don't loop forever.
                 $dropped += count($signalEntries);
+            }
+
+            if ($retained !== []) {
+                $this->spool->requeue($retained);
             }
 
             if ($stop) {
@@ -192,9 +198,9 @@ final class SpoolShipper
 
     /**
      * @param  list<array{signal: string, payload: array<string, mixed>}>  $entries
-     * @return array<string, list<array{signal: string, payload: array<string, mixed>}>>
+     * @return list<array{string, list<array{signal: string, payload: array<string, mixed>}>}>
      */
-    private function groupBySignal(array $entries): array
+    private function requestGroups(array $entries): array
     {
         $grouped = [];
 
@@ -204,7 +210,21 @@ final class SpoolShipper
             }
         }
 
-        return $grouped;
+        $requests = [];
+        foreach ($grouped as $signal => $items) {
+            // Metric snapshots have already been bounded by the serializer.
+            // Rejoining them would recreate the oversized request; independent
+            // entries also let retries keep only the parts still unaccepted.
+            if ($signal === 'metrics') {
+                foreach ($items as $item) {
+                    $requests[] = [$signal, [$item]];
+                }
+            } else {
+                $requests[] = [$signal, $items];
+            }
+        }
+
+        return $requests;
     }
 
     /**

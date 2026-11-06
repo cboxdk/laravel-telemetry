@@ -100,7 +100,9 @@ final class OtlpExporter implements Exporter
         }
 
         if ($batch->metrics !== []) {
-            $requests[] = ['/v1/metrics', $this->serializer->metrics($batch->metrics)];
+            foreach ($this->serializer->metricBatches($batch->metrics) as $payload) {
+                $requests[] = ['/v1/metrics', $payload];
+            }
         }
 
         if ($batch->events !== []) {

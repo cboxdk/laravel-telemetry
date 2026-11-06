@@ -66,6 +66,66 @@ final readonly class OtlpSerializer
     }
 
     /**
+     * Bound transport requests without splitting a histogram or changing its
+     * observation time. Expanded histogram labels can dwarf the JSON body.
+     * One indivisible oversized point remains visible to the receiver's limit.
+     *
+     * @param  list<MetricFamily>  $families
+     * @return list<array<string, mixed>>
+     */
+    public function metricBatches(array $families): array
+    {
+        $now = (string) ((int) (microtime(true) * 1e9));
+        $resource = ['attributes' => $this->attributes($this->resource)];
+        $resourceBytes = strlen(json_encode($resource, JSON_THROW_ON_ERROR));
+        $batches = $metrics = [];
+        $points = $bytes = 0;
+        $wrap = static fn (array $items): array => ['resourceMetrics' => [[
+            'resource' => $resource,
+            'scopeMetrics' => [['scope' => self::SCOPE, 'metrics' => $items]],
+        ]]];
+
+        foreach ($families as $family) {
+            $metric = $this->metricMetadata($family);
+            $kind = match ($family->type()) {
+                MetricType::Counter, MetricType::UpDownCounter => 'sum',
+                MetricType::Gauge => 'gauge',
+                MetricType::Histogram => 'histogram',
+            };
+            $data = $this->metricData($family, $now);
+            $samples = $data['dataPoints'];
+            $data['dataPoints'] = [];
+            $index = null;
+
+            foreach ($samples as $sample) {
+                $buckets = $sample['bucketCounts'] ?? null;
+                $expanded = is_array($buckets) ? count($buckets) + 2 : 1;
+                $cost = (strlen(json_encode($sample, JSON_THROW_ON_ERROR)) + $resourceBytes + 1024) * $expanded;
+                if ($points > 0 && ($points >= 256 || $bytes + $cost > 8 * 1024 * 1024)) {
+                    $batches[] = $wrap($metrics);
+                    $metrics = [];
+                    $points = $bytes = 0;
+                    $index = null;
+                }
+                if ($index === null) {
+                    $index = count($metrics);
+                    $data['dataPoints'] = [];
+                    $metrics[] = $metric;
+                }
+                $data['dataPoints'][] = $sample;
+                $metrics[$index] = $metric + [$kind => $data];
+                $points++;
+                $bytes += $cost;
+            }
+        }
+        if ($metrics !== []) {
+            $batches[] = $wrap($metrics);
+        }
+
+        return $batches;
+    }
+
+    /**
      * @param  list<TelemetryEvent>  $events
      * @return array<string, mixed>
      */
@@ -147,35 +207,40 @@ final readonly class OtlpSerializer
      */
     private function metric(MetricFamily $family, string $now): array
     {
-        $definition = $family->definition;
+        $kind = match ($family->type()) {
+            MetricType::Counter, MetricType::UpDownCounter => 'sum',
+            MetricType::Gauge => 'gauge',
+            MetricType::Histogram => 'histogram',
+        };
 
-        $metric = [
-            'name' => $definition->name,
-            'description' => $definition->description,
-            'unit' => $definition->unit,
+        return $this->metricMetadata($family) + [$kind => $this->metricData($family, $now)];
+    }
+
+    /** @return array{name: string, description: string, unit: string} */
+    private function metricMetadata(MetricFamily $family): array
+    {
+        return [
+            'name' => $family->definition->name,
+            'description' => $family->definition->description,
+            'unit' => $family->definition->unit,
         ];
+    }
 
+    /** @return array{dataPoints: list<array<string, mixed>>, aggregationTemporality?: int, isMonotonic?: bool} */
+    private function metricData(MetricFamily $family, string $now): array
+    {
         return match ($family->type()) {
-            MetricType::Counter => $metric + ['sum' => [
+            MetricType::Counter, MetricType::UpDownCounter => [
                 'aggregationTemporality' => 2, // cumulative — exported from shared storage
-                'isMonotonic' => true,
+                // UpDownCounter may decrease: aggregate across hosts, never rate().
+                'isMonotonic' => $family->type() === MetricType::Counter,
                 'dataPoints' => $this->numberDataPoints($family, $now),
-            ]],
-            // A sum that may go down. `isMonotonic: false` is the whole
-            // difference, and it is the flag that tells a backend these
-            // series may be added across hosts but never rate()'d.
-            MetricType::UpDownCounter => $metric + ['sum' => [
-                'aggregationTemporality' => 2,
-                'isMonotonic' => false,
-                'dataPoints' => $this->numberDataPoints($family, $now),
-            ]],
-            MetricType::Gauge => $metric + ['gauge' => [
-                'dataPoints' => $this->numberDataPoints($family, $now),
-            ]],
-            MetricType::Histogram => $metric + ['histogram' => [
+            ],
+            MetricType::Gauge => ['dataPoints' => $this->numberDataPoints($family, $now)],
+            MetricType::Histogram => [
                 'aggregationTemporality' => 2,
                 'dataPoints' => $this->histogramDataPoints($family, $now),
-            ]],
+            ],
         };
     }
 

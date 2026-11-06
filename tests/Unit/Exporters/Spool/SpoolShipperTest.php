@@ -7,7 +7,7 @@ use Cbox\Telemetry\Exporters\Spool\SpoolShipper;
 use Cbox\Telemetry\Support\ExportResult;
 use Cbox\Telemetry\Support\ExportStatus;
 
-it('merges metric resources and reports permanent rejection without resending accepted logs', function () {
+it('keeps metric requests separate and reports permanent rejection without resending accepted logs', function () {
     $spool = new ArraySpool;
     $spool->push(['signal' => 'logs', 'payload' => ['resourceLogs' => [['log' => 1]]]]);
     $spool->push(['signal' => 'metrics', 'payload' => ['resourceMetrics' => [['sample' => 1]]]]);
@@ -26,7 +26,8 @@ it('merges metric resources and reports permanent rejection without resending ac
         ->and($spool->size())->toBe(0)
         ->and($posts)->toBe([
             ['/v1/logs', ['resourceLogs' => [['log' => 1]]]],
-            ['/v1/metrics', ['resourceMetrics' => [['sample' => 1], ['sample' => 2]]]],
+            ['/v1/metrics', ['resourceMetrics' => [['sample' => 1]]]],
+            ['/v1/metrics', ['resourceMetrics' => [['sample' => 2]]]],
         ]);
 });
 
