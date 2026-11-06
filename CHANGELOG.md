@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.2] - 2026-11-06
+
+### Fixed
+
+- Release discarded Laravel applications before process shutdown. The fatal
+  error handler now holds a weak reference to its provider, so repeated
+  application boots do not retain every prior container. Live applications
+  still flush fatal errors and late shutdown work.
+
 ## [3.9.1] - 2026-11-06
 
 ### Fixed
