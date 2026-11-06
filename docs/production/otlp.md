@@ -112,9 +112,27 @@ them to a capped Redis list — two commands (one `RPUSH` for everything
 the request carries, and the `LTRIM` that caps the list), microseconds,
 no HTTP in the request lifecycle. The daemon (one process, under
 supervisor) drains the list every `--interval` seconds, merges up to
-`--max-batch` entries into a single OTLP request, and flushes metrics
+`--max-batch` entries into one OTLP request per signal for traces/logs, and flushes metrics
 every `--metrics-interval` seconds — sub-second span delivery,
 sub-minute metrics.
+
+### Metric request sizes
+
+From 3.9.3, direct and buffered metric exports split snapshots into requests
+with at most 256 data points. A conservative 8 MiB estimated expansion budget
+also accounts for histogram buckets and repeated resource/point attributes.
+This prevents thousands of histogram series from becoming one oversized
+collector request. It is an estimate, not a guarantee against every receiver's
+limits. Histograms remain whole; one oversized point is sent alone and can
+still be rejected explicitly. Values, cumulative starts and observation times
+are unchanged across batches.
+
+The spool preserves these metric requests separately; it never merges them
+back together. When a retryable failure stops shipping, only unaccepted and
+unsent requests requeue, in order. Already accepted requests stay delivered.
+Upgrade all spool drainers, too: older versions can merge the batches again.
+Snapshots already queued by an older version are not repartitioned and may
+still be rejected. No receiver limit is changed by this package.
 
 ### Delivery semantics
 

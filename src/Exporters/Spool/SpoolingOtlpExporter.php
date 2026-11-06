@@ -118,7 +118,9 @@ final class SpoolingOtlpExporter implements Exporter
         }
 
         if ($this->bufferMetrics && $batch->metrics !== []) {
-            $entries[] = ['signal' => 'metrics', 'payload' => $this->serializer->metrics($batch->metrics)];
+            foreach ($this->serializer->metricBatches($batch->metrics) as $payload) {
+                $entries[] = ['signal' => 'metrics', 'payload' => $payload];
+            }
         }
 
         // One call, so a request carrying both signals pays one round

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.3] - 2026-11-06
+
+### Fixed
+
+- Split large OTLP metric snapshots into requests with at most 256 points and
+  an estimated histogram expansion budget. Preserve observation times, counter
+  starts and complete histograms. The spool keeps these requests separate so
+  a retry does not resend an already accepted part. Individual oversized points
+  still receive the collector's explicit rejection; no sample is truncated.
+
 ## [3.9.2] - 2026-11-06
 
 ### Fixed

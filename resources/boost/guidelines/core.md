@@ -103,3 +103,9 @@ See `docs/production/otlp.md` for delivery semantics.
 
 OTLP metric `NaN`/infinities stay special double strings; never interpret them as
 zero or use them as finite evidence for anomaly baselines.
+
+Metric exports (3.9.3+) use at most 256 points per request and an estimated
+8 MiB histogram-expansion budget. Histograms are indivisible; one oversized
+point can still be rejected. Metric spool entries stay separate, and retries
+retain only unaccepted/unsent entries in order. Upgrade every drainer too;
+old queued snapshots are not repartitioned. See `docs/production/otlp.md`.

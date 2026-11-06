@@ -238,3 +238,32 @@ it('reports metric buffer failure and does not bypass an open spool circuit', fu
         ->and($spool->pushes)->toBe(1)
         ->and($transport->paths)->toBe([]);
 });
+
+it('keeps large metric snapshots bounded through direct and buffered delivery', function () {
+    $family = new MetricFamily(
+        new MetricDefinition('requests', MetricType::Counter),
+        array_map(fn ($i) => new Sample(['route' => (string) $i], $i), range(1, 513)),
+        startUnixNano: 1793990000000000000,
+        timeUnixNano: 1793990100000000000,
+    );
+    $batch = new TelemetryBatch(resource: ['service.name' => 'batch-test'], metrics: [$family]);
+    $serializer = new OtlpSerializer($batch->resource);
+    $transport = new BreakerTransport;
+    $direct = new OtlpExporter($transport, $serializer);
+    expect($direct->export($batch)->success)->toBeTrue()
+        ->and($transport->paths)->toBe(array_fill(0, 3, '/v1/metrics'));
+
+    $spool = new ArraySpool;
+    $buffered = new SpoolingOtlpExporter($direct, $serializer, $spool, bufferMetrics: true);
+    expect($buffered->export($batch)->success)->toBeTrue()->and($spool->size())->toBe(3);
+    $received = [];
+    $shipper = new SpoolShipper($spool, function ($path, $payload) use (&$received) {
+        expect($path)->toBe('/v1/metrics');
+        $received[] = $payload;
+
+        return ExportResult::ok();
+    });
+    expect($shipper->ship()->shipped)->toBe(3)
+        ->and($received)->toBe($serializer->metricBatches([$family]))
+        ->and($spool->size())->toBe(0);
+});
