@@ -143,7 +143,7 @@ final class RedisMetricStore implements BatchesWrites, ClaimsMetricExport, Metri
         // one by one exactly as they would without a batch — the
         // fallback path is per command and cannot be pipelined as one.
         if ($this->batched !== null || $this->scriptingIsRefused()) {
-            $writes();
+            $this->writePerCommand($writes);
 
             return;
         }
@@ -157,7 +157,7 @@ final class RedisMetricStore implements BatchesWrites, ClaimsMetricExport, Metri
         if (! ($redis instanceof \Redis || $redis instanceof Client)
             || $connection instanceof PhpRedisClusterConnection
             || $connection instanceof PredisClusterConnection) {
-            $writes();
+            $this->writePerCommand($writes);
 
             return;
         }
@@ -207,6 +207,24 @@ final class RedisMetricStore implements BatchesWrites, ClaimsMetricExport, Metri
         // probe the unbatched path uses.
         if ($evalRefused && $this->scriptingIsRefusedByProbe($connection, $commands[0][1])) {
             SharedState::remember($this->scriptingKey(), time() + self::RETRY_SCRIPTING_AFTER_SECONDS);
+        }
+    }
+
+    /**
+     * The per-command fallback cannot promise "nothing was applied" on a
+     * throw: a failure partway leaves the earlier writes landed. Report
+     * and drop like the pipelined path above — the caller keeps its buffer
+     * when batch() throws, so throwing here would replay what landed and
+     * count it twice. One lost observation is cheaper than a wrong one.
+     */
+    private function writePerCommand(Closure $writes): void
+    {
+        try {
+            $writes();
+        } catch (Throwable $e) {
+            FailSafe::guard(static function () use ($e): never {
+                throw $e;
+            });
         }
     }
 
