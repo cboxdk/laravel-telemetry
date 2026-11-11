@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Bound merged OTLP traces/logs requests by bytes (the same 8 MiB budget as
+  metric snapshots). An unbounded merge let one oversized entry push the whole
+  POST past the collector's limit; the 413 that came back dropped every merged
+  entry, healthy ones included. An entry over the budget now ships alone, so
+  only it is rejected.
+
 ## [3.9.3] - 2026-11-06
 
 ### Fixed
