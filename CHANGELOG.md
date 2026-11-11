@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the batch contract on the Redis store's per-command fallback path
+  (cluster connections, refused scripting, nested batches). A failure partway
+  through the flush is reported and the batch dropped rather than thrown, so
+  the write buffer no longer replays writes that already landed and inflates
+  counters on the next flush.
+
 ## [3.9.3] - 2026-11-06
 
 ### Fixed
