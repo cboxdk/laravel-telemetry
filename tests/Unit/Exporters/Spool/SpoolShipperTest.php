@@ -150,3 +150,42 @@ it('drops permanently rejected entries instead of looping forever', function () 
         ->and($result->failures[0]->status)->toBe(ExportStatus::Failed)
         ->and($result->failures[0]->reason)->toBe('400 malformed');
 });
+
+it('splits merged traces into byte-bounded requests', function () {
+    $spool = new ArraySpool;
+    // Two entries that together exceed the merge budget must not share a POST.
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['data' => str_repeat('a', 5 * 1024 * 1024)]]]]);
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['data' => str_repeat('b', 5 * 1024 * 1024)]]]]);
+
+    $posts = [];
+    $shipper = new SpoolShipper($spool, function (string $path, array $payload) use (&$posts) {
+        $posts[] = $payload;
+
+        return ExportResult::ok();
+    });
+
+    $result = $shipper->ship(maxBatch: 10);
+
+    expect($result->shipped)->toBe(2)
+        ->and($result->dropped)->toBe(0)
+        ->and($posts)->toHaveCount(2)
+        ->and(strlen((string) json_encode($posts[0])))->toBeLessThan(8 * 1024 * 1024)
+        ->and(strlen((string) json_encode($posts[1])))->toBeLessThan(8 * 1024 * 1024);
+});
+
+it('rejects an oversized entry alone, not with its healthy neighbours', function () {
+    $spool = new ArraySpool;
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['ok' => 1]]]]);
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['data' => str_repeat('a', 9 * 1024 * 1024)]]]]);
+    $spool->push(['signal' => 'traces', 'payload' => ['resourceSpans' => [['ok' => 2]]]]);
+
+    $shipper = new SpoolShipper($spool, fn (string $path, array $payload) => strlen((string) json_encode($payload)) > 8 * 1024 * 1024
+        ? ExportResult::failed('413 payload too large')
+        : ExportResult::ok());
+
+    $result = $shipper->ship(maxBatch: 10);
+
+    expect($result->shipped)->toBe(2)
+        ->and($result->dropped)->toBe(1)
+        ->and($spool->size())->toBe(0);
+});

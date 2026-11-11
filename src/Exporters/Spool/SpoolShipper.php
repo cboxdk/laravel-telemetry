@@ -34,6 +34,9 @@ final class SpoolShipper
 
     private const ROOTS = ['traces' => 'resourceSpans', 'logs' => 'resourceLogs', 'metrics' => 'resourceMetrics'];
 
+    /** Byte budget for one merged traces/logs request — the metric snapshot budget. */
+    private const MAX_MERGE_BYTES = 8 * 1024 * 1024;
+
     /** Where a Retry-After the backend asked for is remembered. */
     private const COOLDOWN_KEY = 'spool:cooldown';
 
@@ -220,7 +223,27 @@ final class SpoolShipper
                     $requests[] = [$signal, [$item]];
                 }
             } else {
-                $requests[] = [$signal, $items];
+                // Bound the merge by bytes, like the metric snapshots: one
+                // oversized entry must not push the whole POST past the
+                // collector's limit, where the 413 drops every merged entry,
+                // healthy ones included. An entry over the budget ships alone.
+                $chunk = [];
+                $bytes = 0;
+
+                foreach ($items as $item) {
+                    $size = strlen((string) json_encode($item['payload'], JSON_INVALID_UTF8_SUBSTITUTE));
+
+                    if ($chunk !== [] && $bytes + $size > self::MAX_MERGE_BYTES) {
+                        $requests[] = [$signal, $chunk];
+                        $chunk = [];
+                        $bytes = 0;
+                    }
+
+                    $chunk[] = $item;
+                    $bytes += $size;
+                }
+
+                $requests[] = [$signal, $chunk];
             }
         }
 
